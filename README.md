@@ -169,4 +169,4 @@ This project is licensed under the **GNU Lesser General Public License v3.0 (LGP
 You are free to use, modify, and distribute this software under the terms of the LGPL-3 license.  
 See the [LICENSE](https://www.gnu.org/licenses/lgpl-3.0.html) file for full details.
 
-© 2025 [Your Name Here]
+© 2025 Dr. Kevin Moore
