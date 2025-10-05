@@ -160,6 +160,9 @@ python3 "Darkelf Cocoa.py"
 
 ## Bugs Known
 - Java Flicker Toggling
+- Hotkey=NewTab/Close Tab not hooked up - Fix coming!
+- You can still close tabs - Left of each tab
+
 
 ---
 
