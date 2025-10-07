@@ -2,7 +2,7 @@
 
 **Darkelf Cocoa** is a **privacy-hardened web browser** built using **Python**, **PyObjC**, and **Apple’s Cocoa + WebKit frameworks** — designed for users who want the speed and elegance of native macOS with the security of Tor and hardened privacy defaults.
 
-![Darkelf Cocoa Home](https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/blob/main/Darkelf%20images/Darkelf%20Cocoa%20Home1.png)
+![Darkelf Cocoa Home](https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/blob/main/Darkelf%20images/Darkelf%20Cocoa%20Home%201.png)
 
 x25519MLKEM768 already integrated - MacOS 
 
