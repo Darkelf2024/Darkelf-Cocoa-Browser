@@ -159,7 +159,9 @@ python3 "Darkelf Cocoa.py"
 - Invidious Works!
 
 ## Bugs Known
-- No x on Tabs but You can still close tabs - Press Left of each tab
+- No x on Tabs but You can still close tabs - Press Left of each tab - Finding a workaround
+- Youtube Works
+- Tracker Counting is getting fixed
 
 ---
 
