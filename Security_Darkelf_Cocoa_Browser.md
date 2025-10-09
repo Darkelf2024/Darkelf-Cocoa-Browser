@@ -1,6 +1,6 @@
 # Darkelf Cocoa Browser — Security & Privacy Features
 
-Darkelf Cocoa is built from the ground up as a privacy-first, ephemeral browser. It’s designed to leave zero trace on disk and actively defend against tracking, fingerprinting, and media-persistence attacks. This document outlines the full set of security and privacy enhancements currently integrated (including your recent patches).
+Darkelf Cocoa is built from the ground up as a privacy-first, ephemeral browser. It’s designed to leave zero trace on disk and actively defend against tracking, fingerprinting, and media-persistence attacks. This document outlines the full set of security and privacy enhancements currently integrated (including recent patches).
 
 ---
 
