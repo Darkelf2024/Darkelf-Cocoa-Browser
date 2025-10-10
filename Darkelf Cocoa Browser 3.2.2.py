@@ -89,7 +89,7 @@ DARKELF_DISABLE_JS_HANDLERS    = False    # set True to disable all JS message h
 DARKELF_DISABLE_RESIZE_HANDLER = False    # set True to ignore onResize notifications
 
 # ---- Local CSP (off by default) ----
-ENABLE_LOCAL_CSP = True  # set False to disable quickly
+ENABLE_LOCAL_CSP = False  # set False to disable quickly
 # A conservative, non-breaking CSP that satisfies the BrowserAudit items.
 LOCAL_CSP_VALUE = "worker-src 'self' blob:; manifest-src 'self'; form-action 'self' https:;"
 # ---- Local HSTS (off by default) ----
