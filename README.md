@@ -34,6 +34,7 @@ x25519MLKEM768 already integrated - MacOS
 - Designed for **privacy research, testing, and high-risk browsing**
 
 📂 Browser Variants (Source Files)
+
 🟢 General Use Browser
 - [Darkelf General Cocoa Browser](https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/blob/main/Darkelf%20Cocoa%20Browser%20General.py)
   
