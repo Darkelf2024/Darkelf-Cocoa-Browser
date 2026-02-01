@@ -36,6 +36,7 @@ x25519MLKEM768 already integrated - MacOS
 📂 Browser Variants (Source Files)
 🟢 General Use Browser
 - [Darkelf General Cocoa Browser](https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/blob/main/Darkelf%20Cocoa%20Browser%20General.py)
+  
 🔒 Darkelf Hardened Browser
 - [Darkelf Hardened Cocoa Browser](https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/blob/main/Darkelf%20Cocoa%20Hardened%20Browser%20.py)
 
