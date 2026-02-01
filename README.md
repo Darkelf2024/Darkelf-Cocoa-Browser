@@ -17,7 +17,7 @@ x25519MLKEM768 already integrated - MacOS
 - Safari-style **declarative ad blocking**  
 - Privacy-hardened defaults  
 - Non-persistent browsing data  
-- JavaScript toggle  
+- JavaScript, Cookie & CSP toggle  
 - No Tor, no SOCKS, no proxy dependencies  
 - Designed for **daily, general browsing**
 
