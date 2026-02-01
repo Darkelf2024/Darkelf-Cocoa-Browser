@@ -10,6 +10,37 @@ x25519MLKEM768 already integrated - MacOS
 
 ---
 
+### 🟢 **Darkelf Cocoa — General Use**
+📄 `Darkelf Cocoa Browser General.py`
+
+- Direct (non-proxied) networking  
+- Safari-style **declarative ad blocking**  
+- Privacy-hardened defaults  
+- Non-persistent browsing data  
+- JavaScript toggle  
+- No Tor, no SOCKS, no proxy dependencies  
+- Designed for **daily, general browsing**
+
+---
+
+### 🔒 **Darkelf Cocoa — Hardened**
+📄 `Darkelf Cocoa Hardened Browser.py`
+
+- Maximum privacy defaults  
+- Aggressive fingerprint-reduction techniques  
+- Non-persistent sessions enforced  
+- Optional Tor / research-only features *(when enabled)*  
+- Hardened WebKit configuration  
+- Designed for **privacy research, testing, and high-risk browsing**
+
+📂 Browser Variants (Source Files)
+🟢 General Use Browser
+    [Darkelf General Cocoa Browser](https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/blob/main/Darkelf%20Cocoa%20Browser%20General.py)
+🔒 Darkelf Hardened Browser
+[Darkelf Hardened Cocoa Browser](https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/blob/main/Darkelf%20Cocoa%20Hardened%20Browser%20.py)
+
+---
+
 ## 🚀 Features
 
 ### 🖥️ Native macOS Interface
