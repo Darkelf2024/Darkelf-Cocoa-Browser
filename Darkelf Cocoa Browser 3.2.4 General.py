@@ -1,4 +1,4 @@
-# Darkelf Cocoa Browser v3.2.4 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa Browser v3.2.0 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -1271,15 +1271,6 @@ class Browser(NSObject):
         # JS row
         js_row, self._sw_js = make_row("bolt", "JavaScript", True, "onToggleJS:")
         
-        # Cookies row
-        cookies_enabled = bool(getattr(self, "cookies_enabled", True))
-        cookies_row, self._sw_cookies = make_row(
-            "cookie",
-            "Cookies",
-            cookies_enabled,
-            "onToggleCookies:"
-        )
-
         # CSP row
         csp_enabled = bool(getattr(self, "csp_enabled", True))
         csp_row, self._sw_csp = make_row(
@@ -1289,7 +1280,7 @@ class Browser(NSObject):
             "onToggleCSP:"
         )
 
-        for rv in (js_row, cookies_row, csp_row):
+        for rv in (js_row, csp_row):
             stack.addArrangedSubview_(rv)
 
         vc = NSViewController.alloc().init()
@@ -1297,24 +1288,7 @@ class Browser(NSObject):
         pop.setContentViewController_(vc)
         pop.showRelativeToRect_ofView_preferredEdge_(anchor_view.bounds(), anchor_view, 1)
         self._quick_controls_popover = pop
-        
-    def onToggleCookies_(self, sender):
-        try:
-            self.cookies_enabled = bool(sender.state())
-            print(f"[Privacy] Cookies {'ENABLED' if self.cookies_enabled else 'DISABLED'}")
-
-            # Apply immediately to future WebViews
-            if not self.cookies_enabled:
-                try:
-                    WKWebsiteDataStore.defaultDataStore().removeDataOfTypes_modifiedSince_completionHandler_(
-                        {"WKWebsiteDataTypeCookies"}, NSDate.distantPast(), None
-                    )
-                except Exception:
-                    pass
-
-        except Exception as e:
-            print("Cookies toggle error:", e)
-            
+                    
     def onToggleCSP_(self, sender):
         try:
             self.csp_enabled = bool(sender.state())
@@ -2059,6 +2033,18 @@ class Browser(NSObject):
             
     def _new_wk(self) -> WKWebView:
         cfg = WKWebViewConfiguration.alloc().init()
+        try:
+            # Must be FALSE to allow native fullscreen takeover
+            cfg.setAllowsInlineMediaPlayback_(False)
+        except Exception:
+            pass
+
+        try:
+            # Allow media playback after user interaction
+            cfg.setMediaTypesRequiringUserActionForPlayback_(0)
+        except Exception:
+            pass
+        
         try:
             cfg.setWebsiteDataStore_(WKWebsiteDataStore.nonPersistentDataStore())
         except Exception:
