@@ -3000,15 +3000,17 @@ class Browser(NSObject):
     # ========== Storage Cleanup ==========
     def _storage_cleanup(self):
         try:
-            store = WebKit.WKWebsiteDataStore.defaultDataStore()
+            store = WebKit.WKWebsiteDataStore.nonPersistentDataStore()
             types = WebKit.WKWebsiteDataStore.allWebsiteDataTypes()
+
             def handler():
-                print("[Darkelf] Storage cleanup complete.")
+                print("[Darkelf] Non-persistent storage cleanup complete.")
+
             store.removeDataOfTypes_modifiedSince_completionHandler_(
                 types, 0, handler
             )
         except Exception as e:
-            print("[Darkelf] Storage cleanup failed:", e)
+            print("[Darkelf] Storage cleanup skipped:", e)
 
     # ----- Helpers -----
     def _load_url_in_active(self, url):
@@ -3161,3 +3163,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
