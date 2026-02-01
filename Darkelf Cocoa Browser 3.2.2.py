@@ -1,4 +1,4 @@
-# Darkelf Cocoa Browser v3.2.0 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa Browser v3.2.3 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -82,6 +82,78 @@ from WebKit import (
 from Foundation import NSURL, NSURLRequest, NSMakeRect, NSNotificationCenter, NSDate, NSTimer, NSObject, NSUserDefaults, NSRegistrationDomain
 
 from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttributedString, NSAlert, NSAlertStyleCritical, NSColor, NSAppearance
+
+from WebKit import WKContentRuleListStore
+
+class ContentRuleManager:
+    _rule_list = None
+    _loaded = False
+
+    @classmethod
+    def load_rules(cls):
+        if cls._loaded:
+            return
+
+        cls._loaded = True
+        store = WKContentRuleListStore.defaultStore()
+
+        identifier = "darkelf_builtin_rules"
+
+        def _lookup(rule_list, error):
+            if rule_list:
+                cls._rule_list = rule_list
+                print("[Rules] Loaded cached content rule list")
+                return
+
+            json_rules = cls._load_json()
+
+            def _compiled(rule_list, error):
+                if error:
+                    print("[Rules] Compile error:", error)
+                    return
+                cls._rule_list = rule_list
+                print("[Rules] Content rules compiled & ready")
+
+            store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler_(
+                identifier,
+                json_rules,
+                _compiled
+            )
+
+        store.lookUpContentRuleListForIdentifier_completionHandler_(
+            identifier,
+            _lookup
+        )
+
+    @classmethod
+    def _load_json(cls):
+        # Inline minimal default (replace with file load later)
+        return """
+        [
+          {
+            "trigger": {
+              "url-filter": ".*doubleclick.net.*"
+            },
+            "action": {
+              "type": "block"
+            }
+          },
+          {
+            "trigger": {
+              "url-filter": ".*ads.*",
+              "resource-type": ["image", "script", "media"]
+            },
+            "action": {
+              "type": "block"
+            }
+          }
+        ]
+        """
+# --------------------------------------------
+# Initialize declarative content blocking ONCE
+# --------------------------------------------
+ContentRuleManager.load_rules()
+
 
 # ---- Darkelf Diagnostics / Kill-Switches ----
 DARKELF_DISABLE_COOKIE_SCRUBBER = False   # set True to rule out NSTimer cookie scrubber
@@ -2143,11 +2215,14 @@ class Browser(NSObject):
             
     def _new_wk(self) -> WKWebView:
         cfg = WKWebViewConfiguration.alloc().init()
+
+        # --- Ephemeral / non-persistent data store ---
         try:
             cfg.setWebsiteDataStore_(WKWebsiteDataStore.nonPersistentDataStore())
         except Exception:
             pass
-        
+
+        # --- Preferences ---
         prefs = WKPreferences.alloc().init()
         try:
             prefs.setJavaScriptEnabled_(bool(getattr(self, "js_enabled", True)))
@@ -2163,9 +2238,23 @@ class Browser(NSObject):
         except Exception:
             pass
 
+        # --- User Content Controller ---
         ucc = WKUserContentController.alloc().init()
-        
-            # --- REGISTER JS MESSAGE HANDLER FOR NETLOG ---
+
+        # =========================================================
+        # ✅ SAFARI-STYLE DECLARATIVE CONTENT BLOCKING (AD BLOCKING)
+        # =========================================================
+        try:
+            rule_list = getattr(ContentRuleManager, "_rule_list", None)
+            if rule_list:
+                ucc.addContentRuleList_(rule_list)
+                print("[Rules] Declarative content rules attached")
+            else:
+                print("[Rules] No content rule list available (yet)")
+        except Exception as e:
+            print("[Rules] Failed to attach content rules:", e)
+
+        # --- REGISTER JS MESSAGE HANDLER FOR NETLOG ---
         try:
             # remove any stale handlers (avoid duplicates)
             ucc.removeScriptMessageHandlerForName_("netlog")
@@ -2181,6 +2270,14 @@ class Browser(NSObject):
                 print("[Init] _nav delegate not set yet — cannot add netlog handler.")
         except Exception as e:
             print("[Init] Failed to register netlog handler:", e)
+
+        # --- Finalize configuration ---
+        cfg.setUserContentController_(ucc)
+
+        # --- Create WebView ---
+        web = WKWebView.alloc().initWithFrame_configuration_(((0, 0), (1, 1)), cfg)
+        return web
+
         # ------------------------------------------------
 
         # --- Search Handler (already in your code) ---
@@ -2222,19 +2319,19 @@ class Browser(NSObject):
                 pass
 
         # --- Optional: content rules when JS disabled ---
-        try:
-            if not getattr(self, "js_enabled", True):
-                from WebKit import WKContentRuleListStore
-                store = WKContentRuleListStore.defaultStore()
-                rule_text = '[{"trigger":{"url-filter":".*"},"action":{"type":"block","resource-type":["script"]}}]'
-                def _cb(rule_list, err):
-                    if rule_list and not err:
-                        ucc.addContentRuleList_(rule_list)
-                store.compileContentRuleListForIdentifier_source_completionHandler_(
-                    "darkelf_block_scripts", rule_text, _cb
-            )
-        except Exception:
-            pass
+        #try:
+            #if not getattr(self, "js_enabled", True):
+               # from WebKit import WKContentRuleListStore
+                #store = WKContentRuleListStore.defaultStore()
+                #rule_text = '[{"trigger":{"url-filter":".*"},"action":{"type":"block","resource-type":["script"]}}]'
+                #def _cb(rule_list, err):
+                   # if rule_list and not err:
+                       # ucc.addContentRuleList_(rule_list)
+                #store.compileContentRuleListForIdentifier_source_completionHandler_(
+                   # "darkelf_block_scripts", rule_text, _cb
+            #)
+        #except Exception:
+           # pass
 
         # --- Finish: attach controller & create webview ---
         cfg.setUserContentController_(ucc)
@@ -3443,3 +3540,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
