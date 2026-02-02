@@ -1,4 +1,4 @@
-# Darkelf Cocoa Browser v3.2.3 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa Browser v3.2.4 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -82,6 +82,103 @@ from WebKit import (
 from Foundation import NSURL, NSURLRequest, NSMakeRect, NSNotificationCenter, NSDate, NSTimer, NSObject, NSUserDefaults, NSRegistrationDomain
 
 from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttributedString, NSAlert, NSAlertStyleCritical, NSColor, NSAppearance
+
+class ContentRuleManager:
+    _rule_list = None
+    _loaded = False
+
+    @classmethod
+    def load_rules(cls):
+        if cls._loaded:
+            return
+
+        cls._loaded = True
+        store = WKContentRuleListStore.defaultStore()
+        identifier = "darkelf_builtin_rules_v2"
+
+        def _lookup(rule_list, error):
+            if rule_list:
+                cls._rule_list = rule_list
+                print("[Rules] Loaded cached content rule list")
+                return
+
+            json_rules = cls._load_json()
+
+            def _compiled(rule_list, error):
+                if error:
+                    print("[Rules] Compile error:", error)
+                    return
+                cls._rule_list = rule_list
+                print("[Rules] Content rules compiled & ready")
+
+            store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler_(
+                identifier,
+                json_rules,
+                _compiled
+            )
+
+        store.lookUpContentRuleListForIdentifier_completionHandler_(
+            identifier,
+            _lookup
+        )
+
+    @classmethod
+    def _load_json(cls):
+        # ⚠️ CANVAS-SAFE RULES (NO SCRIPT BLOCKING)
+        return """
+        [
+          {
+            "trigger": {
+              "url-filter": ".*doubleclick.net.*"
+            },
+            "action": {
+              "type": "block"
+            }
+          },
+          {
+            "trigger": {
+              "url-filter": ".*ads.*",
+              "resource-type": ["image", "media"]
+            },
+            "action": {
+              "type": "block"
+            }
+          }
+        ]
+        """
+        
+    @classmethod
+    def _load_json(cls):
+        # ⚠️ CANVAS-SAFE RULES (NO SCRIPT BLOCKING)
+        return """
+        [
+          {
+            "trigger": {
+              "url-filter": ".*doubleclick.net.*"
+            },
+            "action": {
+              "type": "block"
+            }
+          },
+          {
+            "trigger": {
+              "url-filter": ".*googlesyndication.com.*"
+            },
+            "action": {
+              "type": "block"
+            }
+          },
+          {
+            "trigger": {
+              "url-filter": ".*ads.*",
+              "resource-type": ["image"]
+            },
+            "action": {
+              "type": "block"
+            }
+          }
+        ]
+        """
 
 # ---- Darkelf Diagnostics / Kill-Switches ----
 DARKELF_DISABLE_COOKIE_SCRUBBER = False   # set True to rule out NSTimer cookie scrubber
@@ -1042,6 +1139,7 @@ class Browser(NSObject):
         self = objc.super(Browser, self).init()
         if self is None: return None
         
+        self.csp_enabled = True
         self.js_enabled = True
         self.window = self._make_window()
         self.toolbar = self._make_toolbar()
@@ -1350,12 +1448,18 @@ class Browser(NSObject):
 
         # JS row
         js_row, self._sw_js = make_row("bolt", "JavaScript", bool(getattr(self, "js_enabled", True)), "onToggleJS:")
-
-        # Trackers row (no switch)
-        track_row, _ = make_row("target", f"Trackers blocked: {int(getattr(self, '_tracker_count', 0))}")
+        
+        # CSP row
+        csp_enabled = bool(getattr(self, "csp_enabled", True))
+        csp_row, self._sw_csp = make_row(
+            "lock.shield",
+            "CSP",
+            csp_enabled,
+            "onToggleCSP:"
+        )
 
         # Add rows to vertical stack
-        for rv in (tor_row, js_row, track_row):
+        for rv in (tor_row, js_row, csp_row):
             stack.addArrangedSubview_(rv)
 
         vc = NSViewController.alloc().init()
@@ -1394,7 +1498,18 @@ class Browser(NSObject):
                 self._sw_js.setState_(1 if self.js_enabled else 0)
         except Exception as e:
             print("JS toggle error:", e)
+            
+            
+    def onToggleCSP_(self, sender):
+        try:
+            self.csp_enabled = bool(sender.state())
+            print(f"[Privacy] CSP {'ENABLED' if self.csp_enabled else 'DISABLED'}")
 
+            # CSP is enforced via headers / injection on navigation
+            # You likely already reference this flag elsewhere
+        except Exception as e:
+            print("CSP toggle error:", e)
+            
     def _make_toolbar(self):
         from AppKit import NSColor, NSAppearance
         tb = NSToolbar.alloc().initWithIdentifier_("DarkelfToolbar")
@@ -2115,13 +2230,11 @@ class Browser(NSObject):
             else:
                 _add(f"(function(){{ var SEED={seed}; try{{ var orig=HTMLCanvasElement.prototype.toDataURL; HTMLCanvasElement.prototype.toDataURL=function(){{ try{{ return orig.apply(this,arguments); }}catch(e){{return '';}} }}; }}catch(e){{}} }})();")
 
-            if ENABLE_LOCAL_CSP:
+            if self.csp_enabled:
                 self._install_local_csp(ucc)
                 print("[CSP] Local CSP injector attached to UCC")
-
-            print("[Inject] Core defense scripts added to UCC.")
-        except Exception as e:
-            pass
+            else:
+                print("[CSP] Local CSP disabled by toggle")
 
             if ENABLE_LOCAL_HSTS:
                 self._install_local_hsts(ucc)
@@ -2140,6 +2253,9 @@ class Browser(NSObject):
                 print("[ExposeHeaders] Local ORS header whitelist attached to UCC.")
 
             print("[Inject] Core defense scripts added to UCC.")
+            
+        except Exception as e:
+            print("[Inject] Core script injection failed:", e)
             
     def _new_wk(self) -> WKWebView:
         cfg = WKWebViewConfiguration.alloc().init()
@@ -3402,6 +3518,8 @@ class Browser(NSObject):
             
 class AppDelegate(NSObject):
     def applicationShouldTerminate_(self, sender):
+        ContentRuleManager.load_rules()
+        self.create_main_window()
         try:
             if hasattr(self, "browser") and self.browser is not None:
                 try:
@@ -3443,5 +3561,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
