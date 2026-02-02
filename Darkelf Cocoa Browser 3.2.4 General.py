@@ -1,4 +1,4 @@
-# Darkelf Cocoa Browser v3.2.0 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa Browser v3.2.4 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -953,7 +953,7 @@ class Browser(NSObject):
         # =========================
         # Browser state
         # =========================
-        self.cookies_enabled = True
+        self.cookies_enabled = False
         self.csp_enabled = True
         self.js_enabled = True
 
@@ -961,8 +961,7 @@ class Browser(NSObject):
         self.tab_btns = []
         self.tab_close_btns = []
         self.active = -1
-        self._tracker_count = 0
-
+        
         self.window = self._make_window()
         self.toolbar = self._make_toolbar()
         self.window.setToolbar_(self.toolbar)
@@ -2004,14 +2003,12 @@ class Browser(NSObject):
                 _add(CANVAS_DEFENSE_JS)
             else:
                 _add(f"(function(){{ var SEED={seed}; try{{ var orig=HTMLCanvasElement.prototype.toDataURL; HTMLCanvasElement.prototype.toDataURL=function(){{ try{{ return orig.apply(this,arguments); }}catch(e){{return '';}} }}; }}catch(e){{}} }})();")
-
-            if ENABLE_LOCAL_CSP:
+            
+            if self.csp_enabled:
                 self._install_local_csp(ucc)
                 print("[CSP] Local CSP injector attached to UCC")
-
-            print("[Inject] Core defense scripts added to UCC.")
-        except Exception as e:
-            pass
+            else:
+                print("[CSP] Local CSP disabled by toggle")
 
             if ENABLE_LOCAL_HSTS:
                 self._install_local_hsts(ucc)
@@ -2031,6 +2028,9 @@ class Browser(NSObject):
 
             print("[Inject] Core defense scripts added to UCC.")
             
+        except Exception as e:
+            print("[Inject] Core script injection failed:", e)
+
     def _new_wk(self) -> WKWebView:
         cfg = WKWebViewConfiguration.alloc().init()
         try:
@@ -3163,4 +3163,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
