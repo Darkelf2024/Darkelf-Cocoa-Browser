@@ -29,7 +29,8 @@ x25519MLKEM768 already integrated - MacOS
 - Maximum privacy defaults  
 - Aggressive fingerprint-reduction techniques  
 - Non-persistent sessions enforced  
-- Optional Tor / research-only features *(when enabled)*  
+- Optional Tor / research-only features *(when enabled)*
+- JavaScript, CSP toggle  
 - Hardened WebKit configuration  
 - Designed for **privacy research, testing, and high-risk browsing**
 
