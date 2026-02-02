@@ -1,4 +1,4 @@
-# Darkelf Cocoa Browser v3.2.4 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa Browser v3.2.5 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -97,12 +97,12 @@ class ContentRuleManager:
 
         cls._loaded = True
         store = WKContentRuleListStore.defaultStore()
-        identifier = "darkelf_builtin_rules"
+        identifier = "darkelf_builtin_rules_v4_media_safe"
 
         def _lookup(rule_list, error):
             if rule_list:
                 cls._rule_list = rule_list
-                print("[Rules] Loaded cached content rule list")
+                print("[Rules] Loaded cached media-safe rule list")
                 return
 
             json_rules = cls._load_json()
@@ -112,7 +112,7 @@ class ContentRuleManager:
                     print("[Rules] Compile error:", error)
                     return
                 cls._rule_list = rule_list
-                print("[Rules] Content rules compiled & ready")
+                print("[Rules] Media-safe content rules compiled & ready")
 
             store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler_(
                 identifier,
@@ -127,25 +127,61 @@ class ContentRuleManager:
 
     @classmethod
     def _load_json(cls):
-        # ⚠️ CANVAS-SAFE RULES (NO SCRIPT BLOCKING)
         return """
         [
+          /* ===================================================== */
+          /*  Safari-style content blocking (MEDIA-SAFE)           */
+          /*  IMPORTANT: NEVER block 'media' or 'iframe'           */
+          /* ===================================================== */
+
           {
             "trigger": {
-              "url-filter": ".*doubleclick.net.*"
+              "url-filter": "doubleclick\\.net",
+              "resource-type": ["script", "image"]
             },
-            "action": {
-              "type": "block"
-            }
+            "action": { "type": "block" }
           },
           {
             "trigger": {
-              "url-filter": ".*ads.*",
-              "resource-type": ["image", "media"]
+              "url-filter": "googlesyndication\\.com",
+              "resource-type": ["script", "image"]
             },
-            "action": {
-              "type": "block"
-            }
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "adsystem\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "adservice\\.google\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "criteo\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "taboola\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "outbrain\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
           }
         ]
         """
@@ -169,7 +205,12 @@ LOCAL_REFERRER_POLICY_VALUE = "strict-origin-when-cross-origin"
 # ---- Local WebSocket Policy (off by default) ----
 ENABLE_LOCAL_WEBSOCKET_POLICY = True  # toggle as needed
 # connect-src 'self' prevents cross-origin WebSocket or EventSource connections
-LOCAL_WEBSOCKET_POLICY_VALUE = "connect-src 'self';"
+LOCAL_WEBSOCKET_POLICY_VALUE = (
+    "connect-src 'self' https: wss: "
+    "https://*.googlevideo.com "
+    "https://youtubei.googleapis.com "
+    "https://*.youtube.com;"
+)
 # ---- Local ORS / CORS Header Whitelist (off by default) ----
 ENABLE_LOCAL_EXPOSE_HEADERS = True  # toggle on/off as needed
 # Only safe, minimal headers exposed to JavaScript
@@ -954,7 +995,6 @@ class Browser(NSObject):
         # Browser state
         # =========================
         self.cookies_enabled = False
-        self.csp_enabled = True
         self.js_enabled = True
 
         self.tabs = []
@@ -1270,16 +1310,27 @@ class Browser(NSObject):
         # JS row
         js_row, self._sw_js = make_row("bolt", "JavaScript", True, "onToggleJS:")
         
-        # CSP row
-        csp_enabled = bool(getattr(self, "csp_enabled", True))
-        csp_row, self._sw_csp = make_row(
-            "lock.shield",
-            "CSP",
-            csp_enabled,
-            "onToggleCSP:"
+        # Fingerprinting Defense (status only, always ON)
+        fp_row, _ = make_row(
+            "shield.lefthalf.filled",
+            "Fingerprinting Defense",
+            True,
+            None
         )
 
-        for rv in (js_row, csp_row):
+        stack.addArrangedSubview_(fp_row)
+        
+        # Tracker Blocking (status only, always ON)
+        tracker_row, _ = make_row(
+            "eye.slash",
+            "Tracker Blocking",
+            True,
+            None
+        )
+
+        stack.addArrangedSubview_(tracker_row)
+
+        for rv in (js_row, fp_row, tracker_row):
             stack.addArrangedSubview_(rv)
 
         vc = NSViewController.alloc().init()
@@ -1288,16 +1339,6 @@ class Browser(NSObject):
         pop.showRelativeToRect_ofView_preferredEdge_(anchor_view.bounds(), anchor_view, 1)
         self._quick_controls_popover = pop
                     
-    def onToggleCSP_(self, sender):
-        try:
-            self.csp_enabled = bool(sender.state())
-            print(f"[Privacy] CSP {'ENABLED' if self.csp_enabled else 'DISABLED'}")
-
-            # CSP is enforced via headers / injection on navigation
-            # You likely already reference this flag elsewhere
-        except Exception as e:
-            print("CSP toggle error:", e)
-
     def onToggleJS_(self, sender):
         try:
             self.actToggleJS_(None)
@@ -2004,12 +2045,6 @@ class Browser(NSObject):
             else:
                 _add(f"(function(){{ var SEED={seed}; try{{ var orig=HTMLCanvasElement.prototype.toDataURL; HTMLCanvasElement.prototype.toDataURL=function(){{ try{{ return orig.apply(this,arguments); }}catch(e){{return '';}} }}; }}catch(e){{}} }})();")
             
-            if self.csp_enabled:
-                self._install_local_csp(ucc)
-                print("[CSP] Local CSP injector attached to UCC")
-            else:
-                print("[CSP] Local CSP disabled by toggle")
-
             if ENABLE_LOCAL_HSTS:
                 self._install_local_hsts(ucc)
                 print("[HSTS] Local HSTS injector attached to UCC.")
