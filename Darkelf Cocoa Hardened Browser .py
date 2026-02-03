@@ -67,6 +67,10 @@ from dataclasses import dataclass
 from typing import List
 import objc
 import secrets
+import warnings
+from objc import ObjCPointerWarning
+
+warnings.filterwarnings("ignore", category=ObjCPointerWarning)
 
 from Cocoa import (
     NSApp, NSApplication, NSWindow, NSWindowStyleMaskTitled, NSWindowStyleMaskClosable,
