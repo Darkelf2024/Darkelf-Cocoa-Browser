@@ -1,4 +1,4 @@
-# Darkelf Cocoa Browser v3.2.5 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v3.2.6 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -1047,8 +1047,10 @@ class Browser(NSObject):
 
         self.window.makeKeyAndOrderFront_(None)
         NSApp().activateIgnoringOtherApps_(True)
+        
+        self._install_key_monitor()
         return self
-
+        
         # Resize listener
         try:
             nc = NSNotificationCenter.defaultCenter()
@@ -1130,6 +1132,7 @@ class Browser(NSObject):
             rect, style, 2, False
         )
         win.setTitle_(APP_NAME)
+        win.setDelegate_(self)
 
         try:
             win.setTitleVisibility_(1)
@@ -3155,6 +3158,19 @@ class Browser(NSObject):
         except Exception as e:
             print("[Wipe] Error wiping site data:", e)
             
+    def windowWillClose_(self, notification):
+        try:
+            self._stop_cookie_scrubber()
+        except Exception:
+            pass
+        NSApp().terminate_(None)
+
+    def applicationWillTerminate_(self, notification):
+        try:
+            self._stop_cookie_scrubber()
+        except Exception:
+            pass
+            
 class AppDelegate(NSObject):
     def applicationShouldTerminate_(self, sender):
         try:
@@ -3198,3 +3214,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
