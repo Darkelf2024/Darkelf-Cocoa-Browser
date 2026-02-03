@@ -2167,12 +2167,6 @@ class Browser(NSObject):
         except Exception:
             pass
 
-        # --- Finish: attach controller & create webview ---
-        cfg.setUserContentController_(ucc)
-        web = WKWebView.alloc().initWithFrame_configuration_(((0, 0), (100, 100)), cfg)
-
-        return web
-
         # --- Optional: JS killswitch stub ---
         # This is only useful if JS engine is ON but you want to "soft-block" JS
         # With engine OFF, this script will never execute.
