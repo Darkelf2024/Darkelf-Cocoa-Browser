@@ -1,4 +1,4 @@
-# Darkelf Cocoa Browser v3.2.4 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa Hardened Browser v3.2.5 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -94,12 +94,12 @@ class ContentRuleManager:
 
         cls._loaded = True
         store = WKContentRuleListStore.defaultStore()
-        identifier = "darkelf_builtin_rules_v2"
+        identifier = "darkelf_builtin_rules_v4_media_safe"
 
         def _lookup(rule_list, error):
             if rule_list:
                 cls._rule_list = rule_list
-                print("[Rules] Loaded cached content rule list")
+                print("[Rules] Loaded cached media-safe rule list")
                 return
 
             json_rules = cls._load_json()
@@ -109,7 +109,7 @@ class ContentRuleManager:
                     print("[Rules] Compile error:", error)
                     return
                 cls._rule_list = rule_list
-                print("[Rules] Content rules compiled & ready")
+                print("[Rules] Media-safe content rules compiled & ready")
 
             store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler_(
                 identifier,
@@ -124,58 +124,61 @@ class ContentRuleManager:
 
     @classmethod
     def _load_json(cls):
-        # ⚠️ CANVAS-SAFE RULES (NO SCRIPT BLOCKING)
         return """
         [
+          /* ===================================================== */
+          /*  Safari-style content blocking (MEDIA-SAFE)           */
+          /*  IMPORTANT: NEVER block 'media' or 'iframe'           */
+          /* ===================================================== */
+
           {
             "trigger": {
-              "url-filter": ".*doubleclick.net.*"
+              "url-filter": "doubleclick\\.net",
+              "resource-type": ["script", "image"]
             },
-            "action": {
-              "type": "block"
-            }
+            "action": { "type": "block" }
           },
           {
             "trigger": {
-              "url-filter": ".*ads.*",
-              "resource-type": ["image", "media"]
+              "url-filter": "googlesyndication\\.com",
+              "resource-type": ["script", "image"]
             },
-            "action": {
-              "type": "block"
-            }
-          }
-        ]
-        """
-        
-    @classmethod
-    def _load_json(cls):
-        # ⚠️ CANVAS-SAFE RULES (NO SCRIPT BLOCKING)
-        return """
-        [
-          {
-            "trigger": {
-              "url-filter": ".*doubleclick.net.*"
-            },
-            "action": {
-              "type": "block"
-            }
+            "action": { "type": "block" }
           },
           {
             "trigger": {
-              "url-filter": ".*googlesyndication.com.*"
+              "url-filter": "adsystem\\.com",
+              "resource-type": ["script", "image"]
             },
-            "action": {
-              "type": "block"
-            }
+            "action": { "type": "block" }
           },
           {
             "trigger": {
-              "url-filter": ".*ads.*",
-              "resource-type": ["image"]
+              "url-filter": "adservice\\.google\\.com",
+              "resource-type": ["script", "image"]
             },
-            "action": {
-              "type": "block"
-            }
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "criteo\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "taboola\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "outbrain\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
           }
         ]
         """
@@ -1979,7 +1982,7 @@ class Browser(NSObject):
                 except Exception:
                     pass
     
-    def _install_local_csp(ucc):
+    def _install_local_csp(self, ucc):
         """
         Injects a <meta http-equiv="Content-Security-Policy"> for pages we control.
         Default: only for file:// pages to avoid breaking the open web.
