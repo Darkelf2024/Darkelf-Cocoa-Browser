@@ -1,4 +1,4 @@
-# Darkelf Cocoa Hardened Browser v3.2.5 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa Hardened Browser v3.2.6 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -82,6 +82,8 @@ from WebKit import (
 from Foundation import NSURL, NSURLRequest, NSMakeRect, NSNotificationCenter, NSDate, NSTimer, NSObject, NSUserDefaults, NSRegistrationDomain
 
 from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttributedString, NSAlert, NSAlertStyleCritical, NSColor, NSAppearance
+
+from WebKit import WKContentRuleListStore
 
 class ContentRuleManager:
     _rule_list = None
@@ -1269,6 +1271,7 @@ class Browser(NSObject):
             rect, style, 2, False
         )
         win.setTitle_(APP_NAME)
+        win.setDelegate_(self)
 
         try:
             win.setTitleVisibility_(1)
@@ -1786,8 +1789,8 @@ class Browser(NSObject):
         except Exception:
             pass
         try:
-            self.btn_tab_add.setTitle_("")          # image-only
-            self.btn_tab_add.setImagePosition_(2)   # NSImageOnly
+            self.btn_tab_add.setTitle_(None)          # image-only
+            self.btn_tab_add.setImagePosition_(0)   # NSImageOnly
             self.btn_tab_add.setBordered_(False)
             self.btn_tab_add.setBezelStyle_(1)
             if hasattr(self.btn_tab_add, "setImageScaling_"):
@@ -3519,27 +3522,48 @@ class Browser(NSObject):
         except Exception as e:
             print("[Wipe] Error wiping site data:", e)
             
+    def windowWillClose_(self, notification):
+        try:
+            self._stop_cookie_scrubber()
+        except Exception:
+            pass
+        NSApp().terminate_(None)
+
+    def applicationWillTerminate_(self, notification):
+        try:
+            self._stop_cookie_scrubber()
+        except Exception:
+            pass
+
 class AppDelegate(NSObject):
+
     def applicationShouldTerminate_(self, sender):
-        ContentRuleManager.load_rules()
-        self.create_main_window()
+        # Allow termination immediately
+        return True
+
+    def applicationWillTerminate_(self, notification):
         try:
             if hasattr(self, "browser") and self.browser is not None:
                 try:
                     self.browser._stop_cookie_scrubber()
                 except Exception as e:
                     print("[Quit] Failed to stop cookie scrubber:", e)
+
                 try:
                     if hasattr(self.browser, "_tor_refresh_timer") and self.browser._tor_refresh_timer:
                         self.browser._tor_refresh_timer.invalidate()
                         self.browser._tor_refresh_timer = None
                 except Exception as e:
                     print("[Quit] Failed to stop tor refresh timer:", e)
-                self.browser._wipe_all_site_data()
-                print("[Quit Wipe] All WKWebsiteDataStore data cleared on quit.")
+
+                try:
+                    self.browser._wipe_all_site_data()
+                    print("[Quit Wipe] All WKWebsiteDataStore data cleared on quit.")
+                except Exception as e:
+                    print("[Quit Wipe] Error wiping data:", e)
+
         except Exception as e:
-            print("[Quit Wipe] Error wiping data:", e)
-        return True
+            print("[Quit] Unexpected shutdown error:", e)
 
 def main():
     try:
