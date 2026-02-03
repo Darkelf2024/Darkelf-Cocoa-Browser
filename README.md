@@ -189,13 +189,16 @@ python3 "Darkelf Cocoa.py"
 - Client Hints/UA Recognized as Tor Browser/Firefox
 - Random Canvas Signature Rotation Per Session
 - Validated Tor IP, Canvas Protection, Tor Letterboxing Mimic
+- Youtube Works - General Version
+- Tracking Monitor Results in Terminal
 - Other Goods!
 
 
 ## Bugs Known
-- No x on Tabs but You can still close tabs - Press Left of each tab - Finding a workaround
-- Youtube Works
-- Tracker Counting is getting fixed
+- Working on implementing History Dialog Box
+- Youtube Fullscreen limitation w/DDG Lite
+
+
 
 ---
 
