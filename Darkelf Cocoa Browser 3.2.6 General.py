@@ -68,6 +68,9 @@ from typing import List
 import objc
 import secrets
 import atexit
+from objc import ObjCPointerWarning
+
+warnings.filterwarnings("ignore", category=ObjCPointerWarning)
 
 from Cocoa import (
     NSApp, NSApplication, NSWindow, NSWindowStyleMaskTitled, NSWindowStyleMaskClosable,
