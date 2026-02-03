@@ -190,7 +190,7 @@ python3 "Darkelf Cocoa.py"
 - Random Canvas Signature Rotation Per Session
 - Validated Tor IP, Canvas Protection, Tor Letterboxing Mimic
 - Other Goods!
-- Invidious Works!
+
 
 ## Bugs Known
 - No x on Tabs but You can still close tabs - Press Left of each tab - Finding a workaround
