@@ -222,6 +222,29 @@ class _NavDelegate(NSObject):
         self._owner = owner
         return self
 
+    def webView_didFinishNavigation_(self, webView, nav):
+        try:
+            browser = self._owner
+            url = webView.URL()
+            title = webView.title()
+
+            for tab in browser.tabs:
+                if tab.view is webView:
+                    # UI update ONLY — no security escalation
+                    if title:
+                        tab.host = title
+                    elif url:
+                        tab.host = url.host() or url.absoluteString()
+
+                    if url:
+                        tab.url = url.absoluteString()
+
+                    browser._update_tab_buttons()
+                    browser._sync_addr()
+                    return
+        except Exception:
+            pass
+
     # ✅ NEW: Receive messages posted from NETLOG_JS and forward them to MiniAI
     def userContentController_didReceiveScriptMessage_(self, ucc, message):
         try:
