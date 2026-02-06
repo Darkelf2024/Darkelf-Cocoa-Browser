@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v3.2.6 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v3.2.7 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -2091,6 +2091,33 @@ class Browser(NSObject):
                 self._install_local_expose_headers(ucc)
                 print("[ExposeHeaders] Local ORS header whitelist attached to UCC.")
 
+            # Cosmetic ad container cleanup (EasyList-style)
+            _add(r"""
+            (function(){
+                try {
+                    if (
+                        location.hostname.includes("youtube.com") ||
+                        location.hostname.includes("coveryourtracks")
+                    ) return;
+
+                    var css = `
+                    iframe[src*="ad"],
+                    div[class*="ad"],
+                    div[id*="ad"],
+                    aside,
+                    [data-ad],
+                    [data-sponsored] {
+                        display: none !important;
+                    }`;
+
+                    var style = document.createElement('style');
+                    style.type = 'text/css';
+                    style.appendChild(document.createTextNode(css));
+                    document.documentElement.appendChild(style);
+                } catch(e){}
+            })();
+            """)
+
             print("[Inject] Core defense scripts added to UCC.")
             
         except Exception as e:
@@ -2132,6 +2159,105 @@ class Browser(NSObject):
 
         ucc = WKUserContentController.alloc().init()
         
+        # =========================================================
+        # Darkelf Native Ad & Tracker Blocking (WKContentRuleList)
+        # =========================================================
+        try:
+            from WebKit import WKContentRuleListStore
+
+            adblock_rules = r'''
+            [
+              // ===============================
+              // EasyList Core – Network Ads
+              // ===============================
+              {
+                "trigger": {
+                  "url-filter": ".*",
+                  "resource-type": [
+                    "image",
+                    "style-sheet",
+                    "script",
+                    "media",
+                    "raw",
+                    "font"
+                  ],
+                  "if-domain": [
+                    "doubleclick.net",
+                    "googlesyndication.com",
+                    "googleadservices.com",
+                    "adsystem.com",
+                    "adservice.google.com",
+                    "taboola.com",
+                    "outbrain.com",
+                    "criteo.com",
+                    "pubmatic.com",
+                    "openx.net",
+                    "rubiconproject.com",
+                    "adnxs.com",
+                    "scorecardresearch.com",
+                    "quantserve.com",
+                    "zedo.com",
+                    "revcontent.com",
+                    "uubooster.com"
+                  ]
+                },
+                "action": { "type": "block" }
+              },
+
+              // ===============================
+              // EasyList Core – Tracking Pixels
+              // ===============================
+              {
+                "trigger": {
+                  "url-filter": ".*(pixel|track|beacon|analytics).*",
+                  "resource-type": ["image", "script"]
+                },
+                "action": { "type": "block" }
+              },
+
+             // ===============================
+             // EasyList Core – Third-Party Iframes
+             // ===============================
+             {
+               "trigger": {
+                 "url-filter": ".*",
+                 "resource-type": ["document"],
+                 "load-type": ["third-party"]
+               },
+               "action": { "type": "block" }
+             },
+
+            // ===============================
+            // EasyList Core – Sponsored Scripts
+            // ===============================
+            {
+              "trigger": {
+                "url-filter": ".*(adserver|ads|sponsor|promoted).*",
+                "resource-type": ["script"]
+              },
+              "action": { "type": "block" }
+            }
+          ]
+          '''
+
+            store = WKContentRuleListStore.defaultStore()
+
+            def _adblock_ready(rule_list, error):
+                if rule_list and not error:
+                    ucc.addContentRuleList_(rule_list)
+                    print("[AdBlock] Native WebKit ad blocking enabled")
+                elif error:
+                    print("[AdBlock] Rule compilation error:", error)
+
+            store.compileContentRuleListForIdentifier_encodedContent_completionHandler_(
+                "darkelf_native_adblock",
+                adblock_rules,
+                _adblock_ready
+            )
+
+        except Exception as e:
+            print("[AdBlock] Failed to initialize native ad blocker:", e)
+
             # --- REGISTER JS MESSAGE HANDLER FOR NETLOG ---
         try:
             # remove any stale handlers (avoid duplicates)
@@ -3235,4 +3361,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
