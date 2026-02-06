@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v3.2.7 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v3.2.8 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -1704,18 +1704,24 @@ class Browser(NSObject):
             # --- "+" button at right end ---
             self.btn_tab_add.setFrame_(((tb.size.width - 32.0, (tab_h - tab_btn_height) / 2.0),
                                         (28.0, tab_btn_height)))
-    
+                                    
             # --- Tab buttons layout ---
             x = 8.0
-            tab_w = 180.0       # Fixed tab width
-            close_w = 18.0
+            tab_w = 180.0
             gap = 8.0
+            close_w = 14.0
+            inset = 10.0
 
             for b, close in zip(self.tab_btns, self.tab_close_btns):
+            # Place the tab (background + text)
                 b.setFrame_(((x, (tab_h - tab_btn_height) / 2.0),
-                            (tab_w, tab_btn_height)))
-                close.setFrame_(((x + 8.0, (tab_h - close_btn_height) / 2.0),
-                                (close_w, close_btn_height)))
+                             (tab_w, tab_btn_height)))
+
+            # Place close button INSIDE the tab
+                close.setFrame_(((inset,
+                                  (tab_btn_height - close_btn_height) / 2.0),
+                                 (close_w, close_btn_height)))
+
                 x += (tab_w + gap)
 
         except Exception as e:
@@ -1748,8 +1754,7 @@ class Browser(NSObject):
                 style = NSMutableParagraphStyle.alloc().init()
                 style.setAlignment_(1)  # center
 
-                close.setImage_(None)            # ensure no image path
-                close.setTitle_("•")
+                close.setImage_(None)
                 close.setAttributedTitle_(NSAttributedString.alloc().initWithString_attributes_(
                     "•",
                     {
@@ -1758,37 +1763,49 @@ class Browser(NSObject):
                         "NSColor": NSColor.whiteColor(),
                     }
                 ))
-                if hasattr(close, "setImagePosition_"):
-                    close.setImagePosition_(0)   # NSNoImage
                 close.setBordered_(False)
                 close.setBezelStyle_(1)
                 close.setToolTip_("Close Tab")
             except Exception:
                 pass
-            # Avoid tinting logic meant for images
+
             close.setTarget_(self)
             close.setAction_("actCloseTabIndex:")
             close.setTag_(idx)
 
             # --- Tab button (hostname or 'home') ---
             host = t.host or f"tab {idx+1}"
-            if host == "home" or t.url in ("about:home", "about:blank", "about:blank#blocked", "about://home"):
+            if host == "home" or t.url in (
+                "about:home", "about:blank", "about:blank#blocked", "about://home"
+            ):
                 label = "Home"
             else:
                 import re as _re
                 host = _re.sub(r"^\s*www\.", "", host, flags=_re.IGNORECASE)
                 label = host
+
             label = middle_ellipsis(label, 26)
 
             b = HoverButton.alloc().init()
             try:
-                # Centered attributed title
                 from AppKit import NSMutableParagraphStyle, NSFont, NSAttributedString
+
                 style = NSMutableParagraphStyle.alloc().init()
-                style.setAlignment_(1)  # center
+                style.setAlignment_(1)  # LEFT
+                style.setFirstLineHeadIndent_(26.0)  # space for close dot
+                style.setHeadIndent_(26.0)
+                #style.setTailIndent_(-34.0)
+                style.setLineBreakMode_(4)  # truncating tail
+
                 font = NSFont.systemFontOfSize_(12.0)
-                attrs = {"NSFont": font, "NSParagraphStyle": style}
-                b.setAttributedTitle_(NSAttributedString.alloc().initWithString_attributes_(label, attrs))
+                attrs = {
+                    "NSFont": font,
+                    "NSParagraphStyle": style,
+                }
+
+                b.setAttributedTitle_(NSAttributedString.alloc().initWithString_attributes_(
+                    label, attrs
+                ))
                 b.setBordered_(False)
                 b.setBezelStyle_(1)
                 b.setToolTip_(label)
@@ -1800,9 +1817,10 @@ class Browser(NSObject):
             b.setAction_("actSwitchTab:")
             b.setTag_(idx)
 
-            # Add tab button and close button to tabbar
+            # Add views (close INSIDE tab)
             self.tabbar.addSubview_(b)
-            self.tabbar.addSubview_(close)
+            b.addSubview_(close)
+
             self.tab_btns.append(b)
             self.tab_close_btns.append(close)
 
@@ -2746,7 +2764,7 @@ class Browser(NSObject):
                 wk.loadRequest_(req)
             except Exception:
                 pass
-
+                
     def _add_tab(self, url: str = "", home: bool = False):
         self._nav = _NavDelegate.alloc().initWithOwner_(self)
         wk = self._new_wk()
@@ -3361,3 +3379,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
