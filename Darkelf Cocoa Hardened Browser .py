@@ -1,4 +1,4 @@
-# Darkelf Cocoa Hardened Browser v3.2.6 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa Hardened Browser v3.2.8 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -1875,18 +1875,24 @@ class Browser(NSObject):
             # --- "+" button at right end ---
             self.btn_tab_add.setFrame_(((tb.size.width - 32.0, (tab_h - tab_btn_height) / 2.0),
                                         (28.0, tab_btn_height)))
-    
+                                    
             # --- Tab buttons layout ---
             x = 8.0
-            tab_w = 180.0       # Fixed tab width
-            close_w = 18.0
+            tab_w = 180.0
             gap = 8.0
+            close_w = 14.0
+            inset = 10.0
 
             for b, close in zip(self.tab_btns, self.tab_close_btns):
+            # Place the tab (background + text)
                 b.setFrame_(((x, (tab_h - tab_btn_height) / 2.0),
-                            (tab_w, tab_btn_height)))
-                close.setFrame_(((x + 8.0, (tab_h - close_btn_height) / 2.0),
-                                (close_w, close_btn_height)))
+                             (tab_w, tab_btn_height)))
+
+            # Place close button INSIDE the tab
+                close.setFrame_(((inset,
+                                  (tab_btn_height - close_btn_height) / 2.0),
+                                 (close_w, close_btn_height)))
+
                 x += (tab_w + gap)
 
         except Exception as e:
@@ -1919,8 +1925,7 @@ class Browser(NSObject):
                 style = NSMutableParagraphStyle.alloc().init()
                 style.setAlignment_(1)  # center
 
-                close.setImage_(None)            # ensure no image path
-                close.setTitle_("•")
+                close.setImage_(None)
                 close.setAttributedTitle_(NSAttributedString.alloc().initWithString_attributes_(
                     "•",
                     {
@@ -1929,37 +1934,49 @@ class Browser(NSObject):
                         "NSColor": NSColor.whiteColor(),
                     }
                 ))
-                if hasattr(close, "setImagePosition_"):
-                    close.setImagePosition_(0)   # NSNoImage
                 close.setBordered_(False)
                 close.setBezelStyle_(1)
                 close.setToolTip_("Close Tab")
             except Exception:
                 pass
-            # Avoid tinting logic meant for images
+
             close.setTarget_(self)
             close.setAction_("actCloseTabIndex:")
             close.setTag_(idx)
 
             # --- Tab button (hostname or 'home') ---
             host = t.host or f"tab {idx+1}"
-            if host == "home" or t.url in ("about:home", "about:blank", "about:blank#blocked", "about://home"):
+            if host == "home" or t.url in (
+                "about:home", "about:blank", "about:blank#blocked", "about://home"
+            ):
                 label = "Home"
             else:
                 import re as _re
                 host = _re.sub(r"^\s*www\.", "", host, flags=_re.IGNORECASE)
                 label = host
+
             label = middle_ellipsis(label, 26)
 
             b = HoverButton.alloc().init()
             try:
-                # Centered attributed title
                 from AppKit import NSMutableParagraphStyle, NSFont, NSAttributedString
+
                 style = NSMutableParagraphStyle.alloc().init()
-                style.setAlignment_(1)  # center
+                style.setAlignment_(1)  # LEFT
+                style.setFirstLineHeadIndent_(26.0)  # space for close dot
+                style.setHeadIndent_(26.0)
+                #style.setTailIndent_(-34.0)
+                style.setLineBreakMode_(4)  # truncating tail
+
                 font = NSFont.systemFontOfSize_(12.0)
-                attrs = {"NSFont": font, "NSParagraphStyle": style}
-                b.setAttributedTitle_(NSAttributedString.alloc().initWithString_attributes_(label, attrs))
+                attrs = {
+                    "NSFont": font,
+                    "NSParagraphStyle": style,
+                }
+
+                b.setAttributedTitle_(NSAttributedString.alloc().initWithString_attributes_(
+                    label, attrs
+                ))
                 b.setBordered_(False)
                 b.setBezelStyle_(1)
                 b.setToolTip_(label)
@@ -1971,9 +1988,10 @@ class Browser(NSObject):
             b.setAction_("actSwitchTab:")
             b.setTag_(idx)
 
-            # Add tab button and close button to tabbar
+            # Add views (close INSIDE tab)
             self.tabbar.addSubview_(b)
-            self.tabbar.addSubview_(close)
+            b.addSubview_(close)
+
             self.tab_btns.append(b)
             self.tab_close_btns.append(close)
 
@@ -1981,7 +1999,7 @@ class Browser(NSObject):
         self._style_tabs()
         self._layout()
         self._bring_tabbar_to_front()
-
+        
     def _style_tabs(self):
         """Active tab neon green background; others clear."""
         neon_green = NSColor.colorWithCalibratedRed_green_blue_alpha_(15/255.0, 255/255.0, 80/255.0, 1.0)
@@ -2011,7 +2029,7 @@ class Browser(NSObject):
                     b.setContentTintColor_(NSColor.whiteColor())
                 except Exception:
                     pass
-    
+                    
     def _install_local_csp(self, ucc):
         """
         Injects a <meta http-equiv="Content-Security-Policy"> for pages we control.
@@ -2214,12 +2232,7 @@ class Browser(NSObject):
 
     @objc.python_method
     def _inject_core_scripts(self, ucc):
-        """
-        Inject the core Darkelf protection scripts into the provided WKUserContentController.
-        This uses your existing JS constants if present (WEBRTC_DEFENSE_JS, WEBGL_DEFENSE_JS,
-        FIREFOX_NAV_SPOOF_JS, LETTERBOX_JS, CANVAS_DEFENSE_JS). If they aren't present,
-        it falls back to minimal safe versions.
-        """
+
         try:
             # Use whatever seed you've set up previously (falls back if missing)
             seed = getattr(self, "current_canvas_seed", None) or 123456789
@@ -2243,8 +2256,8 @@ class Browser(NSObject):
                 _add(WEBGL_DEFENSE_JS)
             else:
                 _add(r"(function(){ try{ if(window.WebGLRenderingContext){ var proto = window.WebGLRenderingContext.prototype; var orig = proto.getParameter; proto.getParameter = function(p){ if(p===0x1F00) return 'Intel Inc.'; if(p===0x1F01) return 'Intel(R) Iris(TM) Graphics 6100'; return orig.apply(this, arguments); }; } }catch(e){} })();")
-
-            # 3) Navigator / UA spoof
+                
+                        # 3) Navigator / UA spoof
             if 'FIREFOX_NAV_SPOOF_JS' in globals():
                 _add(FIREFOX_NAV_SPOOF_JS)
             else:
@@ -2255,20 +2268,14 @@ class Browser(NSObject):
                 _add(LETTERBOX_JS)
             else:
                 _add(r"(function(){ try{ Object.defineProperty(window,'innerWidth',{get:function(){return 1000;}}); Object.defineProperty(window,'innerHeight',{get:function(){return 1000;}}); }catch(e){} })();")
-
+                
             # 5) Canvas defense - use seed if available
             if 'CANVAS_DEFENSE_JS' in globals():
                 # If global used your {seed} formatting, it will be fine; otherwise fallback
                 _add(CANVAS_DEFENSE_JS)
             else:
                 _add(f"(function(){{ var SEED={seed}; try{{ var orig=HTMLCanvasElement.prototype.toDataURL; HTMLCanvasElement.prototype.toDataURL=function(){{ try{{ return orig.apply(this,arguments); }}catch(e){{return '';}} }}; }}catch(e){{}} }})();")
-
-            if self.csp_enabled:
-                self._install_local_csp(ucc)
-                print("[CSP] Local CSP injector attached to UCC")
-            else:
-                print("[CSP] Local CSP disabled by toggle")
-
+            
             if ENABLE_LOCAL_HSTS:
                 self._install_local_hsts(ucc)
                 print("[HSTS] Local HSTS injector attached to UCC.")
@@ -2285,13 +2292,52 @@ class Browser(NSObject):
                 self._install_local_expose_headers(ucc)
                 print("[ExposeHeaders] Local ORS header whitelist attached to UCC.")
 
+            # Cosmetic ad container cleanup (EasyList-style)
+            _add(r"""
+            (function(){
+                try {
+                    if (
+                        location.hostname.includes("youtube.com") ||
+                        location.hostname.includes("coveryourtracks")
+                    ) return;
+
+                    var css = `
+                    iframe[src*="ad"],
+                    div[class*="ad"],
+                    div[id*="ad"],
+                    aside,
+                    [data-ad],
+                    [data-sponsored] {
+                        display: none !important;
+                    }`;
+
+                    var style = document.createElement('style');
+                    style.type = 'text/css';
+                    style.appendChild(document.createTextNode(css));
+                    document.documentElement.appendChild(style);
+                } catch(e){}
+            })();
+            """)
+
             print("[Inject] Core defense scripts added to UCC.")
             
         except Exception as e:
             print("[Inject] Core script injection failed:", e)
-            
+
     def _new_wk(self) -> WKWebView:
         cfg = WKWebViewConfiguration.alloc().init()
+        try:
+            # Must be FALSE to allow native fullscreen takeover
+            cfg.setAllowsInlineMediaPlayback_(False)
+        except Exception:
+            pass
+
+        try:
+            # Allow media playback after user interaction
+            cfg.setMediaTypesRequiringUserActionForPlayback_(0)
+        except Exception:
+            pass
+        
         try:
             cfg.setWebsiteDataStore_(WKWebsiteDataStore.nonPersistentDataStore())
         except Exception:
@@ -2314,7 +2360,20 @@ class Browser(NSObject):
 
         ucc = WKUserContentController.alloc().init()
         
-            # --- REGISTER JS MESSAGE HANDLER FOR NETLOG ---
+        # =========================================================
+        # ✅ SAFARI-STYLE DECLARATIVE CONTENT BLOCKING (AD BLOCKING)
+        # =========================================================
+        try:
+            rule_list = getattr(ContentRuleManager, "_rule_list", None)
+            if rule_list:
+                ucc.addContentRuleList_(rule_list)
+                print("[Rules] Declarative content rules attached")
+            else:
+                print("[Rules] No content rule list available (yet)")
+        except Exception as e:
+            print("[Rules] Failed to attach content rules:", e)
+
+        # --- REGISTER JS MESSAGE HANDLER FOR NETLOG ---
         try:
             # remove any stale handlers (avoid duplicates)
             ucc.removeScriptMessageHandlerForName_("netlog")
@@ -2330,6 +2389,13 @@ class Browser(NSObject):
                 print("[Init] _nav delegate not set yet — cannot add netlog handler.")
         except Exception as e:
             print("[Init] Failed to register netlog handler:", e)
+
+        # --- Finalize configuration ---
+        cfg.setUserContentController_(ucc)
+
+        # --- Create WebView ---
+        web = WKWebView.alloc().initWithFrame_configuration_(((0, 0), (1, 1)), cfg)
+
         # ------------------------------------------------
 
         # --- Search Handler (already in your code) ---
@@ -2371,6 +2437,174 @@ class Browser(NSObject):
                 pass
 
         # --- Optional: content rules when JS disabled ---
+        #try:
+            #if not getattr(self, "js_enabled", True):
+               # from WebKit import WKContentRuleListStore
+                #store = WKContentRuleListStore.defaultStore()
+                #rule_text = '[{"trigger":{"url-filter":".*"},"action":{"type":"block","resource-type":["script"]}}]'
+                #def _cb(rule_list, err):
+                   # if rule_list and not err:
+                       # ucc.addContentRuleList_(rule_list)
+                #store.compileContentRuleListForIdentifier_source_completionHandler_(
+                   # "darkelf_block_scripts", rule_text, _cb
+            #)
+        #except Exception:
+           # pass
+
+        # --- Finish: attach controller & create webview ---
+        cfg.setUserContentController_(ucc)
+        web = WKWebView.alloc().initWithFrame_configuration_(((0, 0), (100, 100)), cfg)
+
+        # --- UA SPOOF (HTTP UA must match JS UA) ---
+        try:
+            web.setCustomUserAgent_(USER_AGENT_SPOOF)
+        except Exception:
+            pass
+
+        return web
+        # =========================================================
+        # Darkelf Native Ad & Tracker Blocking (WKContentRuleList)
+        # =========================================================
+        try:
+            from WebKit import WKContentRuleListStore
+
+            adblock_rules = r'''
+            [
+              // ===============================
+              // EasyList Core – Network Ads
+              // ===============================
+              {
+                "trigger": {
+                  "url-filter": ".*",
+                  "resource-type": [
+                    "image",
+                    "style-sheet",
+                    "script",
+                    "media",
+                    "raw",
+                    "font"
+                  ],
+                  "if-domain": [
+                    "doubleclick.net",
+                    "googlesyndication.com",
+                    "googleadservices.com",
+                    "adsystem.com",
+                    "adservice.google.com",
+                    "taboola.com",
+                    "outbrain.com",
+                    "criteo.com",
+                    "pubmatic.com",
+                    "openx.net",
+                    "rubiconproject.com",
+                    "adnxs.com",
+                    "scorecardresearch.com",
+                    "quantserve.com",
+                    "zedo.com",
+                    "revcontent.com",
+                    "uubooster.com"
+                  ]
+                },
+                "action": { "type": "block" }
+              },
+
+              // ===============================
+              // EasyList Core – Tracking Pixels
+              // ===============================
+              {
+                "trigger": {
+                  "url-filter": ".*(pixel|track|beacon|analytics).*",
+                  "resource-type": ["image", "script"]
+                },
+                "action": { "type": "block" }
+              },
+
+             // ===============================
+             // EasyList Core – Third-Party Iframes
+             // ===============================
+             {
+               "trigger": {
+                 "url-filter": ".*",
+                 "resource-type": ["document"],
+                 "load-type": ["third-party"]
+               },
+               "action": { "type": "block" }
+             },
+
+            // ===============================
+            // EasyList Core – Sponsored Scripts
+            // ===============================
+            {
+              "trigger": {
+                "url-filter": ".*(adserver|ads|sponsor|promoted).*",
+                "resource-type": ["script"]
+              },
+              "action": { "type": "block" }
+            }
+          ]
+          '''
+
+            store = WKContentRuleListStore.defaultStore()
+
+            def _adblock_ready(rule_list, error):
+                if rule_list and not error:
+                    ucc.addContentRuleList_(rule_list)
+                    print("[AdBlock] Native WebKit ad blocking enabled")
+                elif error:
+                    print("[AdBlock] Rule compilation error:", error)
+
+            store.compileContentRuleListForIdentifier_encodedContent_completionHandler_(
+                "darkelf_native_adblock",
+                adblock_rules,
+                _adblock_ready
+            )
+
+        except Exception as e:
+            print("[AdBlock] Failed to initialize native ad blocker:", e)
+
+            # --- REGISTER JS MESSAGE HANDLER FOR NETLOG ---
+        try:
+            # remove any stale handlers (avoid duplicates)
+            ucc.removeScriptMessageHandlerForName_("netlog")
+        except Exception:
+            pass
+
+        try:
+            # register our delegate (_NavDelegate) as JS message receiver
+            if hasattr(self, "_nav"):
+                ucc.addScriptMessageHandler_name_(self._nav, "netlog")
+                print("[Init] Netlog handler registered")
+            else:
+                print("[Init] _nav delegate not set yet — cannot add netlog handler.")
+        except Exception as e:
+            print("[Init] Failed to register netlog handler:", e)
+        # ------------------------------------------------
+
+        # --- Search Handler (already in your code) ---
+        self._search_handler = getattr(self, "_search_handler", None) or SearchHandler.alloc().initWithOwner_(self)
+        ucc.addScriptMessageHandler_name_(self._search_handler, "search")
+
+        # --- Canvas Fingerprint Seed ---
+        seed = secrets.randbits(64)
+        self.current_canvas_seed = seed
+
+        # --- Core defense scripts (ensure this function writes to UCC, not webview) ---
+        try:
+            self._inject_core_scripts(ucc)  # <— must accept UCC and call ucc.addUserScript_
+            print("[Inject] Core defense scripts added to UCC.")
+        except Exception as e:
+            print("[Inject] core scripts error:", e)
+
+        # --- Optional: JS killswitch stub when JS is logically OFF ---
+        if getattr(self, "js_enabled", True) is False:
+            print("[JS] Injecting JavaScript Killswitch user script (defensive stub)...")
+            js_killswitch = r"""(function(){ /* … your stub … */ })();"""
+            try:
+                ks = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(js_killswitch, 0, False)
+                ucc.addUserScript_(ks)
+            except Exception:
+                pass
+
+        # --- Optional: content rules when JS disabled ---
         try:
             if not getattr(self, "js_enabled", True):
                 from WebKit import WKContentRuleListStore
@@ -2385,11 +2619,71 @@ class Browser(NSObject):
         except Exception:
             pass
 
-        # --- Finish: attach controller & create webview ---
+        # --- Optional: JS killswitch stub ---
+        # This is only useful if JS engine is ON but you want to "soft-block" JS
+        # With engine OFF, this script will never execute.
+        if getattr(self, "js_enabled", True) is False:
+            print("[JS] Injecting JavaScript Killswitch user script (defensive stub)...")
+            js_killswitch = r"""
+            // Defensive: If JS engine is ON, block common APIs
+            (function(){
+                try { window.eval = function(){return null;}; } catch(e){}
+                try { window.Function = function(){throw new Error("JavaScript blocked by Darkelf");}; } catch(e){}
+                try { window.setTimeout = window.setInterval = window.requestAnimationFrame = function(){ return; }; } catch(e){}
+                try { document.write = function(){ return; }; } catch(e){}
+                try {
+                    var origSetAttr = Element.prototype.setAttribute;
+                    Element.prototype.setAttribute = function(name, value) {
+                        if (name && /^on/i.test(name)) return;
+                        return origSetAttr.apply(this, arguments);
+                    };
+                } catch(e){}
+                try {
+                    var origCreate = Document.prototype.createElement;
+                    Document.prototype.createElement = function(tag) {
+                        var el = origCreate.apply(this, arguments);
+                        try {
+                            if (String(tag).toLowerCase() === 'script') {
+                                Object.defineProperty(el, 'src', { set: function(){}, get: function(){return ''; } });
+                                el.type = 'darkelf/blocked';
+                                el.defer = true; el.noModule = true;
+                            }
+                        } catch(_){}
+                        return el;
+                    };
+                    var origAppend = Element.prototype.appendChild;
+                    Element.prototype.appendChild = function(node) {
+                        try { if (node && node.tagName === 'SCRIPT') return node; } catch(_){}
+                        return origAppend.apply(this, arguments);
+                    };
+                } catch(e){}
+            })();
+            """
+            try:
+                ks = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(js_killswitch, 0, False)
+                ucc.addUserScript_(ks)
+            except Exception as e:
+                pass
+
+        try:
+            if not getattr(self, "js_enabled", True):
+                from WebKit import WKContentRuleListStore
+                store = WKContentRuleListStore.defaultStore()
+                rule_text = '[{"trigger":{"url-filter":".*"},"action":{"type":"block","resource-type":["script"]}}]'
+                def _cb(rule_list, err):
+                    if rule_list and not err:
+                        ucc.addContentRuleList_(rule_list)
+                store.compileContentRuleListForIdentifier_source_completionHandler_(
+                    "darkelf_block_scripts", rule_text, _cb
+                )
+        except Exception as e:
+            pass
+
+        # --- Finish ---
         cfg.setUserContentController_(ucc)
         web = WKWebView.alloc().initWithFrame_configuration_(((0, 0), (100, 100)), cfg)
 
-        # --- UA SPOOF (HTTP UA must match JS UA) ---
+        # --- UA SPOOF (ensure helper/secondary webviews also send spoofed HTTP UA) ---
         try:
             web.setCustomUserAgent_(USER_AGENT_SPOOF)
         except Exception:
@@ -2541,7 +2835,7 @@ class Browser(NSObject):
           Object.defineProperty(navigator, 'buildID', {get: () => "20201001000000", configurable: true});
           Object.defineProperty(navigator, 'oscpu', {get: () => "Intel Mac OS X 10.15", configurable: true});
           Object.defineProperty(navigator, 'vendor', {get: () => "", configurable: true});
-          Object.defineProperty(navigator, 'userAgent', {get: () => "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:78.0) Gecko/20100101 Firefox/78.0", configurable: true});
+          Object.defineProperty(navigator, 'userAgent', {get: () => "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:102.0) Gecko/20100101 Firefox/78.0", configurable: true});
         })();
         """
                 
