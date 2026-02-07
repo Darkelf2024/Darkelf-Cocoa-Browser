@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v3.2.9 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v3.3.0 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -237,51 +237,29 @@ class _NavDelegate(NSObject):
 
             for tab in browser.tabs:
                 if tab.view is webView:
-                    # UI update ONLY — no security escalation
-                    if title:
-                        tab.host = title
-                    elif url:
-                        tab.host = url.host() or url.absoluteString()
 
-                    if url:
-                        tab.url = url.absoluteString()
+                    # Special-case internal Home
+                    if url and url.absoluteString() == HOME_URL:
+                        tab.host = "Darkelf Home"
+                        tab.url = HOME_URL
 
-                    browser._update_tab_buttons()
-                    browser._sync_addr()
-                    return
-        except Exception:
-            pass
-            
-        def webView_didFinishNavigation_(self, webView, nav):
-            try:
-                browser = self._owner
-                url = webView.URL()
-                title = webView.title()
-
-                for tab in browser.tabs:
-                    if tab.view is webView:
-
-                        # Special-case internal Home
+                    else:
+                        # UI update ONLY — no security escalation
+                        # 🔒 Preserve internal home tab title
                         if url and url.absoluteString() == HOME_URL:
                             tab.host = "Darkelf Home"
-                            tab.url = HOME_URL
+                        elif title:
+                            tab.host = title
+                        elif url:
+                            tab.host = url.host() or url.absoluteString()
 
-                        else:
-                            # UI update ONLY — no security escalation
-                            if title:
-                                tab.host = title
-                            elif url:
-                                tab.host = url.host() or url.absoluteString()
+                    browser._update_tab_buttons()
+                    browser._style_tabs()
+                    browser._sync_addr()
+                    return
 
-                            if url:
-                                tab.url = url.absoluteString()
-
-                        browser._update_tab_buttons()
-                        browser._sync_addr()
-                        return
-
-            except Exception:
-                pass
+        except Exception:
+            pass
 
     # ✅ NEW: Receive messages posted from NETLOG_JS and forward them to MiniAI
     def userContentController_didReceiveScriptMessage_(self, ucc, message):
@@ -2857,21 +2835,40 @@ class Browser(NSObject):
         )
         self.tabs.append(tab)
         self.active = len(self.tabs) - 1
-
+        
         if home:
-            try: self.addr.setStringValue_("")
-            except Exception: pass
-            wk.loadHTMLString_baseURL_(HOMEPAGE_HTML, NSURL.URLWithString_(HOME_URL)
+            try:
+                self.addr.setStringValue_("")
+            except Exception:
+                pass
+
+            wk.loadHTMLString_baseURL_(
+                HOMEPAGE_HTML,
+                NSURL.URLWithString_(HOME_URL)
             )
+
             tab.url = HOME_URL
-            tab.host = "home"
+            tab.host = "Darkelf Home"
+            if hasattr(tab, "is_new"):
+                tab.is_new = False
+
         else:
-            self._load_url_in_active(url)
+            if url:
+                try:
+                    req = NSURLRequest.requestWithURL_(
+                        NSURL.URLWithString_(url)
+                    )
+                    wk.loadRequest_(req)
+                except Exception:
+                    pass
+
+                tab.url = url
+                tab.host = "new"
 
         self._update_tab_buttons()
         self._style_tabs()
         self._sync_addr()
-        
+
     def _teardown_webview(self, wk):
         if not wk:
             return
@@ -3007,14 +3004,33 @@ class Browser(NSObject):
         try: self.tabs[self.active].view.goForward_(None)
         except Exception: pass
     def actReload_(self, _):
-        try: self.tabs[self.active].view.reload_(None)
-        except Exception: pass
+        try:
+            wk = self.tabs[self.active].view
+            u = wk.URL()
+            cur = str(u.absoluteString()) if u is not None else (self.tabs[self.active].url or "")
+            if cur == HOME_URL:
+                self.actHome_(None)
+            else:
+                wk.reload_(None)
+        except Exception as e:
+            print("[Reload] Failed:", e)
     def actHome_(self, _):
         try:
-            self.tabs[self.active].view.loadHTMLString_baseURL_(HOMEPAGE_HTML, NSURLWithString_(HOME_URL)
+            wk = self.tabs[self.active].view
+
+            wk.loadHTMLString_baseURL_(
+                HOMEPAGE_HTML,
+                NSURL.URLWithString_(HOME_URL)
             )
-            self.tabs[self.active].url = HOME_URL; self.tabs[self.active].host = "home"
-            self._sync_addr(); self._style_tabs()
+
+            self.tabs[self.active].url = HOME_URL
+            self.tabs[self.active].host = "Darkelf Home"
+
+            self._update_tab_buttons()
+            self._sync_addr()
+            
+        except Exception as e:
+            print("[Home] Failed:", e)
         except Exception: pass
     def actZoomIn_(self, _):
         try: s=self.tabs[self.active].view.magnification(); self.tabs[self.active].view.setMagnification_centeredAtPoint_(min(s+0.1,3.0),(0,0))
