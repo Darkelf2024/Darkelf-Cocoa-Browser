@@ -1,4 +1,4 @@
-# Darkelf Cocoa Hardened Browser v3.2.8 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa Hardened Browser v3.1 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -88,6 +88,13 @@ from Foundation import NSURL, NSURLRequest, NSMakeRect, NSNotificationCenter, NS
 from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttributedString, NSAlert, NSAlertStyleCritical, NSColor, NSAppearance
 
 from WebKit import WKContentRuleListStore
+import json
+
+HOME_URL = "darkelf://home"
+HOME_HOST = "Darkelf Home"
+
+_ATTACHED_RULE_CONTROLLERS = set()
+_KNOWN_UCCS = set()
 
 class ContentRuleManager:
     _rule_list = None
@@ -105,7 +112,19 @@ class ContentRuleManager:
         def _lookup(rule_list, error):
             if rule_list:
                 cls._rule_list = rule_list
-                print("[Rules] Loaded cached media-safe rule list")
+                print("[Rules] Content rules ready")
+
+                # 🔁 Attach to any UCCs that already exist
+                for ucc in list(_KNOWN_UCCS):
+                    try:
+                        ucc_id = id(ucc)
+                        if ucc_id not in _ATTACHED_RULE_CONTROLLERS:
+                            ucc.addContentRuleList_(rule_list)
+                            _ATTACHED_RULE_CONTROLLERS.add(ucc_id)
+                            print("[Rules] Declarative content rules attached (late)")
+                    except Exception:
+                        pass
+                        
                 return
 
             json_rules = cls._load_json()
@@ -132,56 +151,51 @@ class ContentRuleManager:
     def _load_json(cls):
         return """
         [
-          /* ===================================================== */
-          /*  Safari-style content blocking (MEDIA-SAFE)           */
-          /*  IMPORTANT: NEVER block 'media' or 'iframe'           */
-          /* ===================================================== */
-
           {
             "trigger": {
-              "url-filter": "doubleclick\\.net",
+              "url-filter": "doubleclick\\\\.net",
               "resource-type": ["script", "image"]
             },
             "action": { "type": "block" }
           },
           {
             "trigger": {
-              "url-filter": "googlesyndication\\.com",
+              "url-filter": "googlesyndication\\\\.com",
               "resource-type": ["script", "image"]
             },
             "action": { "type": "block" }
           },
           {
             "trigger": {
-              "url-filter": "adsystem\\.com",
+              "url-filter": "adsystem\\\\.com",
               "resource-type": ["script", "image"]
             },
             "action": { "type": "block" }
           },
           {
             "trigger": {
-              "url-filter": "adservice\\.google\\.com",
+              "url-filter": "adservice\\\\.google\\\\.com",
               "resource-type": ["script", "image"]
             },
             "action": { "type": "block" }
           },
           {
             "trigger": {
-              "url-filter": "criteo\\.com",
+              "url-filter": "criteo\\\\.com",
               "resource-type": ["script", "image"]
             },
             "action": { "type": "block" }
           },
           {
             "trigger": {
-              "url-filter": "taboola\\.com",
+              "url-filter": "taboola\\\\.com",
               "resource-type": ["script", "image"]
             },
             "action": { "type": "block" }
           },
           {
             "trigger": {
-              "url-filter": "outbrain\\.com",
+              "url-filter": "outbrain\\\\.com",
               "resource-type": ["script", "image"]
             },
             "action": { "type": "block" }
@@ -244,6 +258,37 @@ class _NavDelegate(NSObject):
                     return
         except Exception:
             pass
+            
+    def webView_didFinishNavigation_(self, webView, nav):
+        try:
+            browser = self._owner
+            url = webView.URL()
+            title = webView.title()
+
+            for tab in browser.tabs:
+                if tab.view is webView:
+
+                    # HARDENED HOME GUARD — never override Home
+                    if url and url.absoluteString() == HOME_URL:
+                        tab.url = HOME_URL
+                        tab.host = "Darkelf Home"
+
+                    else:
+                        # UI update ONLY — no security escalation
+                        if title:
+                            tab.host = title
+                        elif url:
+                            tab.host = url.host() or url.absoluteString()
+
+                        if url:
+                            tab.url = url.absoluteString()
+
+                    browser._update_tab_buttons()
+                    browser._sync_addr()
+                    return
+
+        except Exception:
+            pass
 
     # ✅ NEW: Receive messages posted from NETLOG_JS and forward them to MiniAI
     def userContentController_didReceiveScriptMessage_(self, ucc, message):
@@ -259,33 +304,57 @@ class _NavDelegate(NSObject):
             print("[Netlog Handler] Error:", e)
 
     def webView_decidePolicyForNavigationAction_decisionHandler_(self, webView, navAction, decisionHandler):
+        handled = False
         try:
             req = navAction.request()
             url = req.URL()
+
+            # 🔁 FIX: Reload on homepage must re-render HTML (WKWebView reload = white page)
+            if navAction.navigationType() == WKNavigationTypeReload:
+                url_str = str(url.absoluteString()) if url else ""
+                if url_str in (HOME_URL, "about:home", "about://home", ""):
+                    decisionHandler(WKNavigationActionPolicyCancel)
+                    handled = True
+                    try:
+                        self._owner.load_homepage()
+                    except Exception as e:
+                        print("[Reload] Failed:", e)
+                    return
+
             if url is None:
-                decisionHandler(WKNavigationActionPolicyAllow); return
+                decisionHandler(WKNavigationActionPolicyAllow)
+                handled = True
+                return
 
             scheme = (url.scheme() or "").lower()
 
-            # Block plaintext HTTP when Tor is OFF
+            # 🔒 Block plaintext HTTP when Tor is OFF (UNCHANGED)
             if scheme == "http" and not getattr(self._owner, "tor_on", False):
                 try:
-                    self._owner._show_block_alert("Plaintext HTTP is blocked.\nEnable Tor to access HTTP sites.")
+                    self._owner._show_block_alert(
+                        "Plaintext HTTP is blocked.\nEnable Tor to access HTTP sites."
+                    )
                 except Exception:
                     pass
-                decisionHandler(WKNavigationActionPolicyCancel); return
+                decisionHandler(WKNavigationActionPolicyCancel)
+                handled = True
+                return
 
-            # Send main-frame / iframe navigations to MiniAI (kept from your version)
+            # 📡 MiniAI network monitor (UNCHANGED)
             try:
                 if hasattr(self._owner, "mini_ai"):
                     headers = dict(req.allHTTPHeaderFields() or {})
-                    self._owner.mini_ai.monitor_network(str(url.absoluteString()), headers)
+                    self._owner.mini_ai.monitor_network(
+                        str(url.absoluteString()), headers
+                    )
             except Exception as e:
                 print("[Network Monitor] Failed:", e)
 
-            decisionHandler(WKNavigationActionPolicyAllow)
         except Exception:
-            decisionHandler(WKNavigationActionPolicyAllow)
+            pass
+        finally:
+            if not handled:
+                decisionHandler(WKNavigationActionPolicyAllow)
 
     def webView_didFailProvisionalNavigation_withError_(self, webView, nav, error):
         pass  
@@ -2359,17 +2428,22 @@ class Browser(NSObject):
             pass
 
         ucc = WKUserContentController.alloc().init()
-        
+                    
         # =========================================================
         # ✅ SAFARI-STYLE DECLARATIVE CONTENT BLOCKING (AD BLOCKING)
         # =========================================================
         try:
             rule_list = getattr(ContentRuleManager, "_rule_list", None)
-            if rule_list:
+            ucc_id = id(ucc)
+
+            if rule_list and ucc_id not in _ATTACHED_RULE_CONTROLLERS:
                 ucc.addContentRuleList_(rule_list)
+                _ATTACHED_RULE_CONTROLLERS.add(ucc_id)
                 print("[Rules] Declarative content rules attached")
-            else:
-                print("[Rules] No content rule list available (yet)")
+
+            elif not rule_list:
+                print("[Rules] Content rules not ready yet")
+
         except Exception as e:
             print("[Rules] Failed to attach content rules:", e)
 
@@ -3135,11 +3209,12 @@ class Browser(NSObject):
                 # Fall back to tab's remembered URL
                 url = old_url or self.tabs[self.active].url or ""
 
-                # If we're on the internal homepage or truly blank, render HOMEPAGE_HTML
+                   # If we're on the internal homepage or truly blank, render HOMEPAGE_HTML
                 if url in (None, "", "about:home", "about://home", "about:blank", "about:blank#blocked"):
                     try:
-                        self.tabs[self.active].view.loadHTMLString_baseURL_(HOMEPAGE_HTML, None)
-                        self.tabs[self.active].url  = "about:home"
+                        self.tabs[self.active].view.loadHTMLString_baseURL_(HOMEPAGE_HTML, NSURLWithString_(HOME_URL)
+                        )
+                        self.tabs[self.active].url  = HOME_URL
                         self.tabs[self.active].host = "home"
                         self._sync_addr()
                     except Exception:
@@ -3175,15 +3250,35 @@ class Browser(NSObject):
         )
         self.tabs.append(tab)
         self.active = len(self.tabs) - 1
-
+        
         if home:
-            try: self.addr.setStringValue_("")
-            except Exception: pass
-            wk.loadHTMLString_baseURL_(HOMEPAGE_HTML, None)
-            tab.url = "about:home"
-            tab.host = "home"
+            try:
+                self.addr.setStringValue_("")
+            except Exception:
+                pass
+
+            wk.loadHTMLString_baseURL_(
+                HOMEPAGE_HTML,
+                NSURL.URLWithString_(HOME_URL)
+            )
+
+            tab.url = HOME_URL
+            tab.host = "Darkelf Home"
+            if hasattr(tab, "is_new"):
+                tab.is_new = False
+
         else:
-            self._load_url_in_active(url)
+            if url:
+                try:
+                    req = NSURLRequest.requestWithURL_(
+                        NSURL.URLWithString_(url)
+                    )
+                    wk.loadRequest_(req)
+                except Exception:
+                    pass
+
+                tab.url = url
+                tab.host = "new"
 
         self._update_tab_buttons()
         self._style_tabs()
@@ -3324,13 +3419,33 @@ class Browser(NSObject):
         try: self.tabs[self.active].view.goForward_(None)
         except Exception: pass
     def actReload_(self, _):
-        try: self.tabs[self.active].view.reload_(None)
-        except Exception: pass
+        try:
+            wk = self.tabs[self.active].view
+            u = wk.URL()
+            cur = str(u.absoluteString()) if u is not None else (self.tabs[self.active].url or "")
+            if cur == HOME_URL:
+                self.actHome_(None)
+            else:
+                wk.reload_(None)
+        except Exception as e:
+            print("[Reload] Failed:", e)
     def actHome_(self, _):
         try:
-            self.tabs[self.active].view.loadHTMLString_baseURL_(HOMEPAGE_HTML, None)
-            self.tabs[self.active].url = "about:home"; self.tabs[self.active].host = "home"
-            self._sync_addr(); self._style_tabs()
+            wk = self.tabs[self.active].view
+
+            wk.loadHTMLString_baseURL_(
+                HOMEPAGE_HTML,
+                NSURL.URLWithString_(HOME_URL)
+            )
+
+            self.tabs[self.active].url = HOME_URL
+            self.tabs[self.active].host = "Darkelf Home"
+
+            self._update_tab_buttons()
+            self._sync_addr()
+            
+        except Exception as e:
+            print("[Home] Failed:", e)
         except Exception: pass
     def actZoomIn_(self, _):
         try: s=self.tabs[self.active].view.magnification(); self.tabs[self.active].view.setMagnification_centeredAtPoint_(min(s+0.1,3.0),(0,0))
@@ -3408,10 +3523,14 @@ class Browser(NSObject):
                 req = NSURLRequest.requestWithURL_(NSURL.URLWithString_(url))
                 self.tabs[self.active].view.loadRequest_(req)
             else:
-                # Always load your custom homepage (no base URL)
-                self.tabs[self.active].view.loadHTMLString_baseURL_(HOMEPAGE_HTML, None)
-                self.tabs[self.active].url  = "about:home"
-                self.tabs[self.active].host = "home"
+                # Always load your custom homepage (WITH a base URL)
+                self.tabs[self.active].view.loadHTMLString_baseURL_(
+                    HOMEPAGE_HTML,
+                    NSURL.URLWithString_(HOME_URL)
+                )
+                self.tabs[self.active].url  = HOME_URL
+                self.tabs[self.active].host = "Darkelf Home"
+
                 # keep the location bar blank on homepage
                 try:
                     if hasattr(self, "addr"):
@@ -3466,8 +3585,27 @@ class Browser(NSObject):
                     pass
             except Exception:
                 pass
-    
+                
+        except Exception as e:
+            print("[Tor] _refreshAfterTor_ failed:", e)
+            try:
+                # Fail-safe: go to homepage with a reloadable base URL
+                self.tabs[self.active].view.loadHTMLString_baseURL_(
+                    HOMEPAGE_HTML,
+                    NSURL.URLWithString_(HOME_URL)
+                )
+                self.tabs[self.active].url  = HOME_URL
+                self.tabs[self.active].host = "Darkelf Home"
 
+                # keep the address bar blank on homepage
+                try:
+                    if hasattr(self, "addr"):
+                        self.addr.setStringValue_("")
+                except Exception:
+                    pass
+            except Exception:
+                pass
+                
     @objc.python_method
     def _tint_alert_ok_green(self, alert):
         ACCENT = (52/255.0, 199/255.0, 89/255.0, 1.0)
@@ -3748,21 +3886,35 @@ class Browser(NSObject):
             self._sync_addr(); self._update_tab_buttons()
         except Exception as e:
             print("[Load] error:", e)
-
+        
     def _sync_addr(self):
         try:
             v = ""
             if 0 <= self.active < len(self.tabs):
                 try:
                     u = self.tabs[self.active].view.URL()
-                    if u is not None: v = str(u.absoluteString())
-                except Exception: pass
-                if not v: v = self.tabs[self.active].url or ""
-            # hide internal pages
-            if v in ("about:home", "about:blank", "about:blank#blocked", "about://home"):
+                    if u is not None:
+                        v = str(u.absoluteString())
+                except Exception:
+                    pass
+
+                if not v:
+                    v = self.tabs[self.active].url or ""
+
+            # 🔒 hide internal pages
+            if v in (
+                HOME_URL,
+                "about:home",
+                "about:blank",
+                "about:blank#blocked",
+                "about://home",
+            ):
                 v = ""
+
             self.addr.setStringValue_(v)
-        except Exception: pass
+
+        except Exception:
+            pass
 
     # Keyboard shortcuts
     def _install_key_monitor(self):
@@ -3895,6 +4047,9 @@ def main():
 
     from Cocoa import NSApplication
     app = NSApplication.sharedApplication()
+    # App startup
+    ContentRuleManager.load_rules()
+
     app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
 
     # create delegate and attach to app
@@ -3909,4 +4064,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
