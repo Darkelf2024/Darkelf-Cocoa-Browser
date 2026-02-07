@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v3.2.8 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v3.2.9 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -89,6 +89,9 @@ from Foundation import NSURL, NSURLRequest, NSMakeRect, NSNotificationCenter, NS
 from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttributedString, NSAlert, NSAlertStyleCritical, NSColor, NSAppearance
 
 from WebKit import WKContentRuleListStore
+import json
+
+HOME_URL = "darkelf://home"
 
 class ContentRuleManager:
     _rule_list = None
@@ -133,56 +136,51 @@ class ContentRuleManager:
     def _load_json(cls):
         return """
         [
-          /* ===================================================== */
-          /*  Safari-style content blocking (MEDIA-SAFE)           */
-          /*  IMPORTANT: NEVER block 'media' or 'iframe'           */
-          /* ===================================================== */
-
           {
             "trigger": {
-              "url-filter": "doubleclick\\.net",
+              "url-filter": "doubleclick\\\\.net",
               "resource-type": ["script", "image"]
             },
             "action": { "type": "block" }
           },
           {
             "trigger": {
-              "url-filter": "googlesyndication\\.com",
+              "url-filter": "googlesyndication\\\\.com",
               "resource-type": ["script", "image"]
             },
             "action": { "type": "block" }
           },
           {
             "trigger": {
-              "url-filter": "adsystem\\.com",
+              "url-filter": "adsystem\\\\.com",
               "resource-type": ["script", "image"]
             },
             "action": { "type": "block" }
           },
           {
             "trigger": {
-              "url-filter": "adservice\\.google\\.com",
+              "url-filter": "adservice\\\\.google\\\\.com",
               "resource-type": ["script", "image"]
             },
             "action": { "type": "block" }
           },
           {
             "trigger": {
-              "url-filter": "criteo\\.com",
+              "url-filter": "criteo\\\\.com",
               "resource-type": ["script", "image"]
             },
             "action": { "type": "block" }
           },
           {
             "trigger": {
-              "url-filter": "taboola\\.com",
+              "url-filter": "taboola\\\\.com",
               "resource-type": ["script", "image"]
             },
             "action": { "type": "block" }
           },
           {
             "trigger": {
-              "url-filter": "outbrain\\.com",
+              "url-filter": "outbrain\\\\.com",
               "resource-type": ["script", "image"]
             },
             "action": { "type": "block" }
@@ -253,6 +251,37 @@ class _NavDelegate(NSObject):
                     return
         except Exception:
             pass
+            
+        def webView_didFinishNavigation_(self, webView, nav):
+            try:
+                browser = self._owner
+                url = webView.URL()
+                title = webView.title()
+
+                for tab in browser.tabs:
+                    if tab.view is webView:
+
+                        # Special-case internal Home
+                        if url and url.absoluteString() == HOME_URL:
+                            tab.host = "Darkelf Home"
+                            tab.url = HOME_URL
+
+                        else:
+                            # UI update ONLY — no security escalation
+                            if title:
+                                tab.host = title
+                            elif url:
+                                tab.host = url.host() or url.absoluteString()
+
+                            if url:
+                                tab.url = url.absoluteString()
+
+                        browser._update_tab_buttons()
+                        browser._sync_addr()
+                        return
+
+            except Exception:
+                pass
 
     # ✅ NEW: Receive messages posted from NETLOG_JS and forward them to MiniAI
     def userContentController_didReceiveScriptMessage_(self, ucc, message):
@@ -267,14 +296,53 @@ class _NavDelegate(NSObject):
         except Exception as e:
             print("[Netlog Handler] Error:", e)
 
-    def webView_decidePolicyForNavigationAction_decisionHandler_(self, webView, navAction, decisionHandler):
+    def webView_decidePolicyForNavigationAction_decisionHandler_(
+        self, webView, navAction, decisionHandler
+    ):
+        # --- FIX: never call decisionHandler more than once ---
+        decided = {"called": False, "policy": WKNavigationActionPolicyAllow}
+
+        def _decide(policy):
+            # record first decision only; ignore later attempts
+            if not decided["called"]:
+                decided["called"] = True
+                decided["policy"] = policy
+
         try:
             req = navAction.request()
             url = req.URL()
-            if url is None:
-                decisionHandler(WKNavigationActionPolicyAllow); return
 
-            scheme = (url.scheme() or "").lower()
+            # 🔁 Handle Reload on Home (fix blank page)
+            if navAction.navigationType() == WKNavigationTypeReload:
+                if not url or url.absoluteString() == HOME_URL:
+                    _decide(WKNavigationActionPolicyCancel)
+                    try:
+                        self._owner.load_homepage()
+                    except Exception:
+                        pass
+                    # keep your return behavior
+                    return
+
+            # 📡 Network monitor (kept from your version)
+            try:
+                if url and hasattr(self._owner, "mini_ai"):
+                    headers = dict(req.allHTTPHeaderFields() or {})
+                    self._owner.mini_ai.monitor_network(
+                        str(url.absoluteString()), headers
+                    )
+            except Exception as e:
+                print("[Network Monitor] Failed:", e)
+
+            _decide(WKNavigationActionPolicyAllow)
+
+        except Exception:
+            _decide(WKNavigationActionPolicyAllow)
+
+            # keep your existing code intact
+            try:
+                scheme = (url.scheme() or "").lower()
+            except Exception:
+                scheme = ""
 
             # Send main-frame / iframe navigations to MiniAI (kept from your version)
             try:
@@ -284,9 +352,14 @@ class _NavDelegate(NSObject):
             except Exception as e:
                 print("[Network Monitor] Failed:", e)
 
-            decisionHandler(WKNavigationActionPolicyAllow)
+            _decide(WKNavigationActionPolicyAllow)
+
         except Exception:
-            decisionHandler(WKNavigationActionPolicyAllow)
+            _decide(WKNavigationActionPolicyAllow)
+
+        finally:
+            # ✅ EXACTLY ONE REAL CALL — GUARANTEED
+            decisionHandler(decided["policy"])
 
     def webView_didFailProvisionalNavigation_withError_(self, webView, nav, error):
         pass  
@@ -2185,9 +2258,6 @@ class Browser(NSObject):
 
             adblock_rules = r'''
             [
-              // ===============================
-              // EasyList Core – Network Ads
-              // ===============================
               {
                 "trigger": {
                   "url-filter": ".*",
@@ -2221,10 +2291,6 @@ class Browser(NSObject):
                 },
                 "action": { "type": "block" }
               },
-
-              // ===============================
-              // EasyList Core – Tracking Pixels
-              // ===============================
               {
                 "trigger": {
                   "url-filter": ".*(pixel|track|beacon|analytics).*",
@@ -2232,10 +2298,6 @@ class Browser(NSObject):
                 },
                 "action": { "type": "block" }
               },
-
-             // ===============================
-             // EasyList Core – Third-Party Iframes
-             // ===============================
              {
                "trigger": {
                  "url-filter": ".*",
@@ -2244,10 +2306,6 @@ class Browser(NSObject):
                },
                "action": { "type": "block" }
              },
-
-            // ===============================
-            // EasyList Core – Sponsored Scripts
-            // ===============================
             {
               "trigger": {
                 "url-filter": ".*(adserver|ads|sponsor|promoted).*",
@@ -2257,7 +2315,7 @@ class Browser(NSObject):
             }
           ]
           '''
-
+            
             store = WKContentRuleListStore.defaultStore()
 
             def _adblock_ready(rule_list, error):
@@ -2266,12 +2324,23 @@ class Browser(NSObject):
                     print("[AdBlock] Native WebKit ad blocking enabled")
                 elif error:
                     print("[AdBlock] Rule compilation error:", error)
+                    
+            rules = ContentRuleManager._load_json()
 
-            store.compileContentRuleListForIdentifier_encodedContent_completionHandler_(
-                "darkelf_native_adblock",
-                adblock_rules,
-                _adblock_ready
-            )
+            if hasattr(
+                store,
+                "compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler_"
+            ):
+                try:
+                    store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler_(
+                        "darkelf_native_adblock",
+                        rules,
+                        _adblock_ready
+                    )
+                except Exception as e:
+                    print("[AdBlock] Native adblock skipped:", e)
+            else:
+                print("[AdBlock] Native WebKit content blocking unavailable — using injector")
 
         except Exception as e:
             print("[AdBlock] Failed to initialize native ad blocker:", e)
@@ -2328,7 +2397,7 @@ class Browser(NSObject):
                 def _cb(rule_list, err):
                     if rule_list and not err:
                         ucc.addContentRuleList_(rule_list)
-                store.compileContentRuleListForIdentifier_source_completionHandler_(
+                store.compileContentRuleListForIdentifier_encodedcompletionHandler_(
                     "darkelf_block_scripts", rule_text, _cb
             )
         except Exception:
@@ -2382,13 +2451,12 @@ class Browser(NSObject):
 
         try:
             if not getattr(self, "js_enabled", True):
-                from WebKit import WKContentRuleListStore
                 store = WKContentRuleListStore.defaultStore()
                 rule_text = '[{"trigger":{"url-filter":".*"},"action":{"type":"block","resource-type":["script"]}}]'
                 def _cb(rule_list, err):
                     if rule_list and not err:
                         ucc.addContentRuleList_(rule_list)
-                store.compileContentRuleListForIdentifier_source_completionHandler_(
+                store.compileContentRuleListForIdentifier_encodedcompletionHandler_(
                     "darkelf_block_scripts", rule_text, _cb
                 )
         except Exception as e:
@@ -2677,7 +2745,7 @@ class Browser(NSObject):
                     def _cb(rule_list, err):
                         if rule_list and not err:
                             ucc.addContentRuleList_(rule_list)
-                    store.compileContentRuleListForIdentifier_source_completionHandler_(
+                    store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler_(
                         "darkelf_block_scripts", rule_text, _cb
                     )
             except Exception:
@@ -2751,8 +2819,9 @@ class Browser(NSObject):
                 # If we're on the internal homepage or truly blank, render HOMEPAGE_HTML
                 if url in (None, "", "about:home", "about://home", "about:blank", "about:blank#blocked"):
                     try:
-                        self.tabs[self.active].view.loadHTMLString_baseURL_(HOMEPAGE_HTML, None)
-                        self.tabs[self.active].url  = "about:home"
+                        self.tabs[self.active].view.loadHTMLString_baseURL_(HOMEPAGE_HTML, NSURLWithString_(HOME_URL)
+                        )
+                        self.tabs[self.active].url  = HOME_URL
                         self.tabs[self.active].host = "home"
                         self._sync_addr()
                     except Exception:
@@ -2792,8 +2861,9 @@ class Browser(NSObject):
         if home:
             try: self.addr.setStringValue_("")
             except Exception: pass
-            wk.loadHTMLString_baseURL_(HOMEPAGE_HTML, None)
-            tab.url = "about:home"
+            wk.loadHTMLString_baseURL_(HOMEPAGE_HTML, NSURL.URLWithString_(HOME_URL)
+            )
+            tab.url = HOME_URL
             tab.host = "home"
         else:
             self._load_url_in_active(url)
@@ -2941,8 +3011,9 @@ class Browser(NSObject):
         except Exception: pass
     def actHome_(self, _):
         try:
-            self.tabs[self.active].view.loadHTMLString_baseURL_(HOMEPAGE_HTML, None)
-            self.tabs[self.active].url = "about:home"; self.tabs[self.active].host = "home"
+            self.tabs[self.active].view.loadHTMLString_baseURL_(HOMEPAGE_HTML, NSURLWithString_(HOME_URL)
+            )
+            self.tabs[self.active].url = HOME_URL; self.tabs[self.active].host = "home"
             self._sync_addr(); self._style_tabs()
         except Exception: pass
     def actZoomIn_(self, _):
@@ -3235,14 +3306,28 @@ class Browser(NSObject):
             if 0 <= self.active < len(self.tabs):
                 try:
                     u = self.tabs[self.active].view.URL()
-                    if u is not None: v = str(u.absoluteString())
-                except Exception: pass
-                if not v: v = self.tabs[self.active].url or ""
-            # hide internal pages
-            if v in ("about:home", "about:blank", "about:blank#blocked", "about://home"):
+                    if u is not None:
+                        v = str(u.absoluteString())
+                except Exception:
+                    pass
+
+                if not v:
+                    v = self.tabs[self.active].url or ""
+
+            # 🔒 hide internal / non-user-facing pages
+            if v in (
+                HOME_URL,                  # darkelf://home
+                "about:home",
+                "about://home",
+                "about:blank",
+                "about:blank#blocked",
+            ):
                 v = ""
+
             self.addr.setStringValue_(v)
-        except Exception: pass
+
+        except Exception:
+            pass
 
     # Keyboard shortcuts
     def _install_key_monitor(self):
@@ -3379,4 +3464,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
