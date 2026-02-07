@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v3.3.0 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v3.1 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -3067,42 +3067,50 @@ class Browser(NSObject):
     def actToggleJS_(self, _):
         # Flip state
         self.js_enabled = not bool(getattr(self, "js_enabled", True))
+
+        # --- Update icon + tooltip ---
         try:
-            # Update icon + tooltip
             sym = "bolt" if self.js_enabled else "bolt.slash"
             img = NSImage.imageWithSystemSymbolName_accessibilityDescription_(sym, None)
             if img:
                 img.setTemplate_(True)
                 self.btn_js.setImage_(img)
                 self.btn_js.setImagePosition_(2)
+
             self.btn_js.setToolTip_(f"JavaScript: {'ON' if self.js_enabled else 'OFF'}")
+
             if hasattr(self.btn_js, "setContentTintColor_"):
                 if self.js_enabled:
                     self.btn_js.setContentTintColor_(
-                        NSColor.colorWithCalibratedRed_green_blue_alpha_(52/255.0, 199/255.0, 89/255.0, 1.0)
+                        NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                            52/255.0, 199/255.0, 89/255.0, 1.0
+                        )
                     )
                 else:
                     self.btn_js.setContentTintColor_(
-                        NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 59/255.0, 48/255.0, 1.0)
+                        NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                            1.0, 59/255.0, 48/255.0, 1.0
+                        )
                     )
         except Exception as e:
             print("JS icon color error:", e)
 
-        # ✅ Apply JS setting to the existing webview and reload in-place (no rebuild)
+        # --- Apply JS setting + reload safely ---
         try:
             wk = self.tabs[self.active].view
+
             cfg = wk.configuration() if hasattr(wk, "configuration") else None
             prefs = cfg.preferences() if cfg and hasattr(cfg, "preferences") else None
             if prefs:
                 try:
-                    prefs.setJavaScriptEnabled_(bool(getattr(self, "js_enabled", True)))
+                    prefs.setJavaScriptEnabled_(bool(self.js_enabled))
                 except Exception:
                     try:
-                        prefs.javaScriptEnabled = bool(getattr(self, "js_enabled", True))
+                        prefs.javaScriptEnabled = bool(self.js_enabled)
                     except Exception:
                         pass
 
-            # Figure out current URL
+            # Determine current URL
             current_url = ""
             try:
                 u = wk.URL()
@@ -3110,6 +3118,7 @@ class Browser(NSObject):
                     current_url = str(u.absoluteString())
             except Exception:
                 pass
+
             if not current_url:
                 try:
                     item = wk.backForwardList().currentItem()
@@ -3118,29 +3127,44 @@ class Browser(NSObject):
                 except Exception:
                     pass
 
-            # Homepage/blank needs explicit HTML reload
-            if current_url in (None, "", "about:home", "about://home", "about:blank", "about:blank#blocked"):
+            # --- Homepage / blank ---
+            if current_url in (
+                None, "", HOME_URL,
+                "about:home", "about://home",
+                "about:blank", "about:blank#blocked"
+            ):
                 try:
-                    wk.loadHTMLString_baseURL_(HOMEPAGE_HTML, None)
-                    self.tabs[self.active].url  = "about:home"
-                    self.tabs[self.active].host = "home"
+                    wk.loadHTMLString_baseURL_(
+                        HOMEPAGE_HTML,
+                        NSURL.URLWithString_(HOME_URL)
+                    )
+                    self.tabs[self.active].url  = HOME_URL
+                    self.tabs[self.active].host = "Darkelf Home"
+
+                    try:
+                        self.addr.setStringValue_("")
+                    except Exception:
+                        pass
                 except Exception:
                     pass
+
+            # --- Normal pages ---
             else:
-                # Normal pages: try a simple reload first
                 try:
                     wk.reload_(None)
                 except Exception:
-                    # Fallback: explicit request to same URL
                     try:
-                        req = NSURLRequest.requestWithURL_(NSURL.URLWithString_(current_url))
+                        req = NSURLRequest.requestWithURL_(
+                            NSURL.URLWithString_(current_url)
+                        )
                         wk.loadRequest_(req)
                     except Exception:
                         pass
+
         except Exception as e:
             print("[JS Toggle] in-place reload failed:", e)
 
-        # ✅ Keep Quick Controls switch in sync if present
+        # --- Sync Quick Controls toggle ---
         try:
             if hasattr(self, "_sw_js") and self._sw_js:
                 self._sw_js.setState_(1 if self.js_enabled else 0)
@@ -3480,3 +3504,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
