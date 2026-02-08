@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v3.1 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v3.3 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -92,7 +92,7 @@ from WebKit import WKContentRuleListStore
 import json
 
 HOME_URL = "darkelf://home"
-
+        
 class ContentRuleManager:
     _rule_list = None
     _loaded = False
@@ -187,7 +187,7 @@ class ContentRuleManager:
           }
         ]
         """
-
+        
 # ---- Darkelf Diagnostics / Kill-Switches ----
 DARKELF_DISABLE_COOKIE_SCRUBBER = False   # set True to rule out NSTimer cookie scrubber
 DARKELF_DISABLE_JS_HANDLERS    = False    # set True to disable all JS message handlers (netlog/search/tracker/panic)
@@ -245,17 +245,19 @@ class _NavDelegate(NSObject):
 
                     else:
                         # UI update ONLY — no security escalation
-                        # 🔒 Preserve internal home tab title
+                        # Preserve internal home tab title
                         if url and url.absoluteString() == HOME_URL:
                             tab.host = "Darkelf Home"
                         elif title:
                             tab.host = title
                         elif url:
                             tab.host = url.host() or url.absoluteString()
-
+                                                        
+                    # update UI
                     browser._update_tab_buttons()
                     browser._style_tabs()
                     browser._sync_addr()
+                    
                     return
 
         except Exception:
@@ -351,123 +353,308 @@ APP_NAME = "Darkelf"
 HOMEPAGE_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Darkelf Browser — Cocoa, Private, Hardened</title>
-  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
-  <style>
-    :root{--bg:#0a0b10;--accent:#34C759;--border:rgba(255,255,255,.10);--input-bg:#12141b;--input-text:#e5e7eb;}
-    *{box-sizing:border-box}
-    html,body{height:100%}
-    body{
-      margin:0;
-      font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
-      background:
-        radial-gradient(1200px 600px at 20% -10%, rgba(4,168,200,.25), transparent 60%),
-        radial-gradient(1000px 600px at 120% 10%, rgba(52,199,89,.18), transparent 60%),
-        var(--bg);
-      color:#eef2f6;
-      display:flex;
-      justify-content:center;
-      align-items:center;
-    }
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Darkelf Browser — Cocoa, Private, Hardened</title>
 
-    .container{
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      gap:18px;
-      padding:24px;
-      text-align:center;
-    }
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
 
-    .brand{
-      display:flex;
-      gap:10px;
-      align-items:center;
-      justify-content:center;
-      font-weight:700;
-      font-size:2rem;
-      color:var(--accent);
-    }
-    .brand i{color:var(--accent);}
-    .brand span{color:var(--accent);}
+<style>
+:root{
+  --bg:#07080d;
+  --green:#34C759;
+  --cyan:#04a8c8;
+  --red:#ff453a;
+  --yellow:#ffd60a;
+  --border:rgba(255,255,255,.10);
+  --input-bg:#12141b;
+  --text:#eef2f6;
+  --muted:#9aa3ad;
+}
 
-    .tagline{
-      font-size:1.25rem;
-      font-weight:800;
-      letter-spacing:.20em;
-      text-transform:uppercase;
-      color:#cfd8e3;
-      margin:0;
-    }
+*{box-sizing:border-box}
+html,body{height:100%}
 
-    .search-wrap{
-      display:flex;
-      align-items:stretch;
-      gap:10px;
-      justify-content:center;
-      width:100%;
-    }
-    .search-wrap input{
-      height:48px;
-      padding:0 16px;
-      width:min(720px,92vw);
-      border-radius:12px;
-      border:1px solid var(--border);
-      background:var(--input-bg);
-      color:var(--input-text);
-      font-size:16px;
-      outline:none;
-      color:#fff;
-      -webkit-text-fill-color:#fff;
-    }
-    .search-wrap input::placeholder{color:#9aa3ad;}
-    .search-wrap input:focus{box-shadow:0 0 0 3px rgba(52,199,89,.30);border-color:transparent;}
-    .search-wrap button{
-      width:48px;height:48px;border-radius:12px;border:none;cursor:pointer;font-size:20px;
-      display:inline-flex;align-items:center;justify-content:center;color:#fff;background:var(--accent);
-    }
-    .search-wrap button:focus{outline:2px solid #34C759;}
-  </style>
+body{
+  margin:0;
+  font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+  color:var(--text);
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  overflow:hidden;
+  background:var(--bg);
+}
+
+/* Aurora background */
+body::before,
+body::after{
+  content:"";
+  position:absolute;
+  inset:-20%;
+  z-index:-2;
+  background:
+    radial-gradient(900px 500px at 20% 10%, rgba(4,168,200,.18), transparent 60%),
+    radial-gradient(800px 500px at 80% 20%, rgba(52,199,89,.22), transparent 60%),
+    radial-gradient(600px 400px at 50% 90%, rgba(52,199,89,.12), transparent 60%);
+  animation:drift 36s ease-in-out infinite;
+}
+body::after{
+  animation-duration:54s;
+  animation-direction:reverse;
+  opacity:.6;
+}
+
+@keyframes drift{
+  0%{transform:translate(0,0)}
+  50%{transform:translate(-6%,-4%)}
+  100%{transform:translate(0,0)}
+}
+
+/* Vignette + grain */
+.vignette{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background:radial-gradient(circle at center, transparent 55%, rgba(0,0,0,.6));
+  z-index:-1;
+}
+.grain{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  mix-blend-mode:overlay;
+  z-index:-1;
+}
+
+/* Center content */
+.container{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:20px;
+  padding:36px;
+  text-align:center;
+  animation:fadeUp .8s ease forwards;
+}
+@keyframes fadeUp{
+  from{opacity:0;transform:translateY(10px)}
+  to{opacity:1;transform:none}
+}
+
+/* Brand */
+.brand{
+  display:flex;
+  gap:12px;
+  align-items:center;
+  font-weight:900;
+  font-size:2.3rem;
+  color:var(--green);
+}
+.brand i{
+  font-size:2.6rem;
+  filter:drop-shadow(0 0 18px rgba(52,199,89,.55));
+}
+.tagline{
+  font-size:1.05rem;
+  font-weight:800;
+  letter-spacing:.28em;
+  text-transform:uppercase;
+  color:#cfd8e3;
+  margin-top:-6px;
+}
+
+/* Search */
+.search-wrap{
+  display:flex;
+  gap:12px;
+  width:100%;
+  margin-top:18px;
+}
+.search-wrap input{
+  height:54px;
+  padding:0 18px;
+  width:min(720px,92vw);
+  border-radius:14px;
+  border:1px solid var(--border);
+  background:var(--input-bg);
+  color:#fff;
+  font-size:17px;
+  outline:none;
+}
+.search-wrap input::placeholder{color:var(--muted)}
+.search-wrap input:focus{
+  box-shadow:0 0 0 3px rgba(52,199,89,.35);
+  border-color:transparent;
+}
+.search-wrap button{
+  width:56px;
+  height:54px;
+  border-radius:14px;
+  border:none;
+  cursor:pointer;
+  font-size:20px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  color:#fff;
+  background:var(--green);
+  box-shadow:0 0 22px rgba(52,199,89,.55);
+}
+
+/* Darkelf MiniAI status */
+.ai-status{
+  margin-top:6px;
+  font-size:.78rem;
+  color:var(--muted);
+  opacity:.75;
+  letter-spacing:.06em;
+}
+
+/* 🔻 Security HUD (fade + hover light-up) */
+.security-hud{
+  position:fixed;
+  right:22px;
+  bottom:22px;
+  display:flex;
+  gap:10px;
+  padding:10px 12px;
+  border-radius:14px;
+  background:rgba(10,12,18,.75);
+  backdrop-filter:blur(14px);
+  border:1px solid rgba(255,255,255,.08);
+
+  opacity:.35;
+  transition:opacity .35s ease;
+}
+
+.security-hud:hover{
+  opacity:1;
+}
+
+/* Chips */
+.chip{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:6px 10px;
+  border-radius:999px;
+  font-size:.75rem;
+  font-weight:700;
+  border:1px solid;
+  transition:all .3s ease;
+}
+
+.chip.ok{
+  background:rgba(52,199,89,.16);
+  border-color:rgba(52,199,89,.45);
+  color:var(--green);
+}
+
+.chip.warn{
+  background:rgba(255,214,10,.18);
+  border-color:rgba(255,214,10,.55);
+  color:var(--yellow);
+}
+
+.chip.locked{
+  background:rgba(255,69,58,.18);
+  border-color:rgba(255,69,58,.45);
+  color:var(--red);
+}
+
+/* Panic overrides fade */
+.chip.panic{
+  background:rgba(255,69,58,.28);
+  border-color:var(--red);
+  color:var(--red);
+  opacity:1 !important;
+  animation:panicPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes panicPulse{
+  0%,100%{box-shadow:0 0 0 rgba(255,69,58,0)}
+  50%{box-shadow:0 0 24px rgba(255,69,58,.7)}
+}
+
+/* Glow on hover */
+.security-hud:hover .chip.ok{
+  box-shadow:0 0 18px rgba(52,199,89,.45);
+}
+.security-hud:hover .chip.warn{
+  box-shadow:0 0 18px rgba(255,214,10,.45);
+}
+.security-hud:hover .chip.locked{
+  box-shadow:0 0 18px rgba(255,69,58,.35);
+}
+</style>
 </head>
-<body>
-  <div class="container">
-    <div class="brand">
-      <i class="bi bi-shield-lock"></i>
-      <span>Darkelf Browser</span>
-    </div>
-    <div class="tagline">Cocoa • Private • Hardened</div>
-    <form class="search-wrap"
-      action="https://lite.duckduckgo.com/lite/"
-      method="get" role="search" aria-label="Search DuckDuckGo">
-      <input type="text" name="q" placeholder="Search DuckDuckGo" aria-label="Search query" />
-      <button type="submit" aria-label="Search">
-        <i class="bi bi-search"></i>
-      </button>
-    </form>
-  </div>
 
-  <script>
-  (function() {
-      // Only run if in WKWebView (macOS)
-      if (!navigator.platform.toLowerCase().includes('mac')) return;
-      var form = document.querySelector('.search-wrap');
-      if (form) {
-          form.addEventListener('submit', function(ev) {
-              ev.preventDefault();
-              var q = form.querySelector('input[name="q"]').value;
-              if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.search) {
-                  window.webkit.messageHandlers.search.postMessage(q);
-              } else {
-                  // fallback: redirect to DDG Lite results page
-                  window.location.href = "https://lite.duckduckgo.com/lite/?q=" + encodeURIComponent(q);
-              }
-          });
-      }
-  })();
-  </script>
+<body>
+<div class="vignette"></div>
+<div class="grain"></div>
+
+<div class="container">
+  <div class="brand">
+    <i class="bi bi-shield-lock"></i>
+    <span>Darkelf Browser</span>
+  </div>
+  <div class="tagline">Cocoa • Private • Hardened</div>
+
+  <form class="search-wrap" action="https://lite.duckduckgo.com/lite/" method="get">
+    <input type="text" name="q" placeholder="Search DuckDuckGo"/>
+    <button type="submit"><i class="bi bi-search"></i></button>
+  </form>
+
+  <div id="ai-status" class="ai-status">
+    Darkelf MiniAI secure — environment hardened
+  </div>
+</div>
+
+<!-- 🔻 Security HUD -->
+<div id="securityHud" class="security-hud">
+  <div id="chip-js" class="chip ok"><i class="bi bi-lightning-fill"></i>JS</div>
+  <div id="chip-fp" class="chip ok"><i class="bi bi-fingerprint"></i>FP</div>
+  <div id="chip-trk" class="chip ok"><i class="bi bi-shield-check"></i>TRK</div>
+  <div id="chip-panic" class="chip locked"><i class="bi bi-exclamation-octagon"></i>PANIC</div>
+</div>
+
+<script>
+function setState(name,state){
+  const el=document.getElementById('chip-'+name)
+  if(el) el.className='chip '+state
+}
+
+window.DarkelfStatus={
+  update:function(p){
+    if(p.js) setState('js',p.js)
+    if(p.fp) setState('fp',p.fp)
+    if(p.trk) setState('trk',p.trk)
+    if(p.panic){
+      setState('panic','panic')
+      document.getElementById('ai-status').textContent =
+        'Darkelf MiniAI intervened — threat detected'
+    }
+  }
+}
+
+/* Search bridge */
+(function(){
+  if(!navigator.platform.toLowerCase().includes('mac')) return;
+  const f=document.querySelector('.search-wrap')
+  f.addEventListener('submit',e=>{
+    e.preventDefault()
+    const q=f.querySelector('input').value
+    if(window.webkit?.messageHandlers?.search){
+      window.webkit.messageHandlers.search.postMessage(q)
+    }else{
+      location.href="https://lite.duckduckgo.com/lite/?q="+encodeURIComponent(q)
+    }
+  })
+})();
+</script>
 </body>
 </html>
 """
@@ -557,6 +744,7 @@ CANVAS_DEFENSE_JS = r'''
     } catch(e){}
 })();
 '''
+
 WEBGL_DEFENSE_JS = r"""
 (function(){
   function spoofGL(ctxProto, vendor, renderer) {
@@ -611,39 +799,9 @@ PERFORMANCE_DEFENSE_JS = r'''
   }
 })();
 '''
-NETLOG_JS = r"""
-(function(){
-  if (!window.webkit || !window.webkit.messageHandlers || !window.webkit.messageHandlers.netlog) return;
 
-  const send = (u, h) => {
-    try { window.webkit.messageHandlers.netlog.postMessage({ url: String(u||""), headers: h || {} }); }
-    catch (e) {}
-  };
-
-  // Hook fetch
-  const _fetch = window.fetch;
-  if (typeof _fetch === "function") {
-    window.fetch = function(input, init) {
-      try {
-        const url = (typeof input === "string") ? input : (input && input.url) || "";
-        const hdrs = (init && init.headers) || {};
-        send(url, hdrs);
-      } catch(e) {}
-      return _fetch.apply(this, arguments);
-    };
-  }
-
-  // Hook XHR
-  const _open = XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open = function(method, url) {
-    try { send(url, {}); } catch(e) {}
-    return _open.apply(this, arguments);
-  };
-})();
-"""
-
-# MINI AI (from PyWebView version, adapted)
 class DarkelfMiniAI(NSObject):
+
     TRUSTED_DOMAINS = [
         "duckduckgo.com",
         "lite.duckduckgo.com",
@@ -652,56 +810,46 @@ class DarkelfMiniAI(NSObject):
         "privacytools.io",
         "coveryourtracks.eff.org"
     ]
+
     MALWARE_PATTERNS = [
-        r"(onerror\s*=|<script.*src=.*(\.php|\.exe|\.js)\??|<iframe.*src=.*hack)",
-        r"(base64,|eval\(|atob\()",
+        r"(onerror\s*=|<script.*src=.*(\.php|\.exe)\??|<iframe.*hack)",
+        r"(base64,|atob\()",
         r"(document\.cookie|localStorage|sessionStorage)\s*=",
-        r"(window\.open\(|location\.replace\(|location\.assign\()",
-        r"(navigator\.sendBeacon|navigator\.clipboard|navigator\.mediaDevices)",
-        r"(fetch\(|XMLHttpRequest|ActiveXObject)"
+        r"(navigator\.sendBeacon|navigator\.clipboard)",
+        r"(ActiveXObject)"
     ]
+
     PHISHING_KEYWORDS = [
         "login", "verify", "update account", "reset password",
-        "bank", "security alert", "recovery", "payment", "confirm", "restricted"
+        "bank", "security alert", "recovery", "payment", "confirm"
     ]
+
     SNIFFING_HEADER_PATTERNS = [
-        "x-forwarded-for", "via", "proxy-connection", "user-agent:curl", "user-agent:nmap"
+        "x-forwarded-for", "via", "proxy-connection"
     ]
+
     KNOWN_TOOL_SIGNATURES = [
-        "wireshark", "burpsuite", "mitmproxy", "fiddler", "nmap", "tcpdump", "ettercap"
+        "wireshark", "burpsuite", "mitmproxy", "fiddler", "tcpdump", "ettercap"
     ]
-    PANIC_LOCKOUT_SEC = 120
 
     TRACKER_PATTERNS = [
         r"(^|\.)google-analytics\.com$",
         r"(^|\.)googletagmanager\.com$",
-        r"(^|\.)googleadservices\.com$",
         r"(^|\.)doubleclick\.net$",
-        r"(^|\.)adservice\.google\.com$",
-        r"(^|\.)facebook\.net$",
-        r"(^|\.)connect\.facebook\.com$",
-        r"(^|\.)facebook\.com\/tr",            # Facebook Pixel endpoint
+        r"(^|\.)facebook\.com\/tr",
         r"(^|\.)pixel\.facebook\.com",
         r"(^|\.)ads\.twitter\.com",
-        r"(^|\.)analytics\.twitter\.com",
         r"(^|\.)hotjar\.com",
         r"(^|\.)mixpanel\.com",
         r"(^|\.)segment\.io$",
         r"(^|\.)amplitude\.com",
-        r"(^|\.)quantserve\.com",
-        r"(^|\.)scorecardresearch\.com",
-        r"(^|\.)cdn\.ampproject\.org",        # include some CDNs that host trackers
-        r"(^|\.)adroll\.com",
-        r"(^|\.)criteo\.com",
-        r"(^|\.)taboola\.com",
-        r"(^|\.)outbrain\.com",
-        r"(^|\.)sentry\.io",                  # error+telemetry endpoints (optional)
-        r"(^|\.)clarity\.microsoft\.com",
-        r"(^|\.)bing-analytics\.com",
-        r"\btrack(er|ing|ify|js)\b",          # generic 'track' or 'tracking' script names
+        r"(^|\.)sentry\.io",
         r"\bpixel\b",
-        r"\bad(s|service|server)\b",
+        r"\btrack(er|ing)\b"
     ]
+
+    PANIC_LOCKOUT_SEC = 120
+    PANIC_THRESHOLD = 6
 
     def initWithBrowser_(self, browser):
         self = objc.super(DarkelfMiniAI, self).init()
@@ -710,14 +858,18 @@ class DarkelfMiniAI(NSObject):
         self.browser = browser
         self.panic_mode = False
         self._panic_timer = None
+        self.risk_score = 0
+        self.tracker_count = 0
         return self
 
+    # ----------------------------
+    # Injection
+    # ----------------------------
     @objc.python_method
     def inject(self, wkview):
         self._inject_js(wkview, self._js_panic_bridge())
         self._inject_js(wkview, self._js_phishing_malware_detector())
         self._inject_js(wkview, self._js_sniffer_detector())
-        self._inject_js(wkview, NETLOG_JS)
 
     @objc.python_method
     def _inject_js(self, wkview, js):
@@ -731,96 +883,109 @@ class DarkelfMiniAI(NSObject):
         except Exception as e:
             print("[MiniAI] JS inject failed:", e)
 
+    # ----------------------------
+    # Network monitoring
+    # ----------------------------
     @objc.python_method
     def monitor_network(self, url, headers):
-        """Monitor outgoing requests for suspicious, sniffing, or tracking activity."""
         if self.panic_mode:
             return
 
-        # --- 1. Detect sniffing headers ---
+        url_l = (url or "").lower()
+
+        # 1️⃣ Sniffing headers (high severity)
         for h, v in headers.items():
             for patt in self.SNIFFING_HEADER_PATTERNS:
                 if patt in str(h).lower() or patt in str(v).lower():
-                    self.trigger_panic(f"Sniffing header detected: {h}: {v}")
+                    self._raise_risk(4, f"Sniffing header detected: {h}")
                     return
 
-        # --- 2. Detect known interception / hacking tools ---
-        url_l = (url or "").lower()
+        # 2️⃣ Known tools (high severity)
         for sig in self.KNOWN_TOOL_SIGNATURES:
             if sig in url_l or any(sig in str(v).lower() for v in headers.values()):
-                self.trigger_panic(f"Known tool detected: {sig}")
+                self._raise_risk(4, f"Known interception tool: {sig}")
                 return
 
-        # --- 3. Detect trackers / analytics / ad networks ---
+        # 3️⃣ Trackers (low severity)
         import re
-        matched_tracker = None
-        for patt in getattr(self, "TRACKER_PATTERNS", []):
+        for patt in self.TRACKER_PATTERNS:
             if re.search(patt, url_l, re.IGNORECASE):
-                matched_tracker = patt
-                break
+                self.tracker_count += 1
+                self._raise_risk(1, f"Tracker blocked: {url}", ui_only=True)
+                return
 
-        if matched_tracker:
-            # Increment counter safely
-            self.tracker_count = getattr(self, "tracker_count", 0) + 1
-            print(f"[Tracker Blocked] {url}  (pattern: {matched_tracker})")
+        # Safe request → decay risk
+        self._decay_risk()
 
-            # Optional: update UI label if available
-            if hasattr(self, "update_tracker_label"):
-                try:
-                    self.update_tracker_label()
-                except Exception as e:
-                    print("[Tracker UI] Failed to update label:", e)
+    # ----------------------------
+    # Risk handling
+    # ----------------------------
+    def _raise_risk(self, amount, reason, ui_only=False):
+        self.risk_score += amount
+        print(f"[MiniAI] Risk +{amount}: {reason} (score={self.risk_score})")
 
-            # Optional: block request logic (uncomment if needed)
-            # self.trigger_panic(f"Tracker blocked: {url}")
+        # HUD update (warn)
+        try:
+            self.browser.push_home_status(trk="warn")
+        except Exception:
+            pass
+
+        if ui_only:
             return
 
-    def showPanicAlert_(self, reason):
-        try:
-            from AppKit import NSAlert
-            alert = NSAlert.alloc().init()
-            alert.setMessageText_("PANIC MODE: Suspicious Activity Detected!")
-            alert.setInformativeText_(f"Reason: {reason}\nBrowsing is temporarily locked.")
-            alert.runModal()
-        except Exception as e:
-            print(f"[MiniAI] Show Panic Alert failed: {e}")
+        if self.risk_score >= self.PANIC_THRESHOLD:
+            self.trigger_panic(reason)
 
-    def showReleaseAlert_(self, _):
-        try:
-            from AppKit import NSAlert
-            alert = NSAlert.alloc().init()
-            alert.setMessageText_("Panic mode released")
-            alert.setInformativeText_("Browsing restored.")
-            alert.runModal()
-        except Exception as e:
-            print(f"[MiniAI] Show Release Alert failed: {e}")
+    def _decay_risk(self):
+        if self.risk_score > 0:
+            self.risk_score = max(0, self.risk_score - 1)
 
+    # ----------------------------
+    # Panic lifecycle
+    # ----------------------------
     @objc.python_method
     def trigger_panic(self, reason=""):
         if self.panic_mode:
             return
         self.panic_mode = True
+        print("[MiniAI] PANIC:", reason)
 
         try:
             self.browser.js_enabled = False
             self.browser._rebuild_active_webview()
-        except Exception as e:
-            print("[MiniAI] JS disable/rebuild failed:", e)
+        except Exception:
+            pass
 
         try:
             self.browser.actHome_(None)
-        except Exception as e:
-            print("[MiniAI] actHome_ failed:", e)
+            self.browser.push_home_status(panic=True)
+        except Exception:
+            pass
 
         try:
-            self.performSelectorOnMainThread_withObject_waitUntilDone_("showPanicAlert_", reason, False)
-        except Exception as e:
-            print(f"PANIC MODE ACTIVATED (no modal): {reason} [{e}]")
+            self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "showPanicAlert_", reason, False
+            )
+        except Exception:
+            pass
 
         if self._panic_timer:
             self._panic_timer.cancel()
+            
+        try:
+            self.browser.evaluate_js_on_active(
+                "window.DarkelfStatus && DarkelfStatus.update({panic:true});"
+            )
+        except Exception:
+            pass
+
         import threading
-        self._panic_timer = threading.Timer(self.PANIC_LOCKOUT_SEC, lambda: self.performSelectorOnMainThread_withObject_waitUntilDone_("releasePanicMainThread_", None, False))
+        self._panic_timer = threading.Timer(
+            self.PANIC_LOCKOUT_SEC,
+            lambda: self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "releasePanicMainThread_", None, False
+            )
+        )
         self._panic_timer.start()
 
     def releasePanicMainThread_(self, _):
@@ -829,27 +994,50 @@ class DarkelfMiniAI(NSObject):
     @objc.python_method
     def _release_panic(self):
         self.panic_mode = False
+        self.risk_score = 0
+        self.tracker_count = 0
+
         try:
             self.browser.js_enabled = True
             self.browser._rebuild_active_webview()
-        except Exception as e:
-            print("[MiniAI] JS enable/rebuild failed:", e)
-        try:
             self.browser.actReload_(None)
-        except Exception as e:
-            print("[MiniAI] actReload_ failed:", e)
-        try:
-            self.performSelectorOnMainThread_withObject_waitUntilDone_("showReleaseAlert_", None, False)
-        except Exception as e:
-            print("[MiniAI] Release alert failed:", e)
+        except Exception:
+            pass
 
+        try:
+            self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "showReleaseAlert_", None, False
+            )
+        except Exception:
+            pass
+
+    # ----------------------------
+    # Alerts
+    # ----------------------------
+    def showPanicAlert_(self, reason):
+        from AppKit import NSAlert
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("PANIC MODE ACTIVATED")
+        alert.setInformativeText_(f"Reason: {reason}")
+        alert.runModal()
+
+    def showReleaseAlert_(self, _):
+        from AppKit import NSAlert
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("Panic mode released")
+        alert.setInformativeText_("Browsing restored.")
+        alert.runModal()
+
+    # ----------------------------
+    # JS detectors (SAFE)
+    # ----------------------------
     @objc.python_method
     def _js_panic_bridge(self):
         return r"""
         if (!window.__darkelf_panic_trigger) {
           window.__darkelf_panic_trigger = function(reason) {
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.panic) {
-                window.webkit.messageHandlers.panic.postMessage(reason);
+            if (window.webkit?.messageHandlers?.panic) {
+              window.webkit.messageHandlers.panic.postMessage(reason);
             }
           }
         }
@@ -858,111 +1046,200 @@ class DarkelfMiniAI(NSObject):
     @objc.python_method
     def _js_phishing_malware_detector(self):
         trusted_domains_js = json.dumps(self.TRUSTED_DOMAINS)
-        js = f"""
-        (() => {{
-            var trusted = {trusted_domains_js};
-            if (trusted.some(domain => window.location.hostname.indexOf(domain) !== -1)) return;
+        phishing_words = json.dumps(self.PHISHING_KEYWORDS)
+        malware_patterns = json.dumps(self.MALWARE_PATTERNS)
 
-            const phishingWords = {repr(self.PHISHING_KEYWORDS)};
-            const malwarePatterns = [{','.join([repr(p) for p in self.MALWARE_PATTERNS])}].map(r => new RegExp(r, "i"));
-            let panic = false;
-            function scanForms() {{
-                const forms = document.querySelectorAll("form");
-                for (const f of forms) {{
-                    const txt = (f.textContent || "") + " " + (f.outerHTML || "");
-                    if (f.querySelector('input[type="password"]')) {{
-                        for (const w of phishingWords) {{
-                            if (txt.toLowerCase().includes(w)) {{
-                                window.__darkelf_panic_trigger && window.__darkelf_panic_trigger("Phishing form detected: " + w);
-                                panic = true; return;
-                            }}
-                        }}
-                    }}
-                }}
+        return f"""
+    (() => {{
+      const trusted = {trusted_domains_js};
+      if (trusted.some(d => location.hostname.includes(d))) return;
+
+      const phishingWords = {phishing_words};
+      const malwarePatterns = {malware_patterns}.map(p => new RegExp(p, "i"));
+
+      let panic = false;
+
+      function scanForms() {{
+        const forms = document.querySelectorAll("form");
+        for (const f of forms) {{
+          if (f.querySelector("input[type=password]")) {{
+          const text = (f.innerText || "").toLowerCase();
+          for (const w of phishingWords) {{
+            if (text.includes(w)) {{
+              window.__darkelf_panic_trigger?.("Phishing form detected: " + w);
+              panic = true;
+              return;
             }}
-            function scanScripts() {{
-                const scripts = document.querySelectorAll("script");
-                for (const s of scripts) {{
-                    const code = s.textContent || s.src || "";
-                    for (const r of malwarePatterns) {{
-                        if (r.test(code)) {{
-                            window.__darkelf_panic_trigger && window.__darkelf_panic_trigger("Malware script detected.");
-                            panic = true; return;
-                        }}
-                    }}
-                }}
-            }}
-            function runScans() {{
-                if (panic) return;
-                scanForms(); scanScripts();
-            }}
-            runScans();
-            document.addEventListener("DOMContentLoaded", runScans);
-            setTimeout(runScans, 1500);
-        }})();
-        """
-        return js
+          }}
+        }}
+      }}
+    }}
+
+    function scanScripts() {{
+      const scripts = document.querySelectorAll("script");
+      for (const s of scripts) {{
+        const code = s.src || s.textContent || "";
+        for (const r of malwarePatterns) {{
+          if (r.test(code)) {{
+            window.__darkelf_panic_trigger?.("Malware-like script detected");
+            panic = true;
+            return;
+          }}
+        }}
+      }}
+    }}
+
+    function runScans() {{
+      if (panic) return;
+      scanForms();
+      scanScripts();
+    }}
+
+    runScans();
+    document.addEventListener("DOMContentLoaded", runScans);
+    setTimeout(runScans, 1500);
+  }})();
+  """
 
     @objc.python_method
     def _js_sniffer_detector(self):
-        js = r"""
+        return r"""
         (() => {
-            function trigger(reason) {
-                window.__darkelf_panic_trigger && window.__darkelf_panic_trigger(reason);
-            }
-            if (window.RTCPeerConnection || window.webkitRTCPeerConnection) {
-                trigger("WebRTC detected (possible sniffing).");
-            }
-            if (window.Wireshark || window.BurpSuite || window.Fiddler) {
-                trigger("Known sniffing tool detected.");
-            }
-            let evalCount = 0;
-            const origEval = window.eval;
-            window.eval = function(code) {
-                evalCount++; if (evalCount > 3) trigger("Excessive eval() usage (possible malware).");
-                return origEval(code);
+          let evalCount=0, rtcUsed=false;
+
+          if(window.RTCPeerConnection){
+            const O=window.RTCPeerConnection;
+            window.RTCPeerConnection=function(...a){
+              rtcUsed=true;
+              return new O(...a);
             };
-            let funcCount = 0;
-            const OrigFunc = Function;
-            window.Function = function(...args) {
-                funcCount++; if (funcCount > 3) trigger("Excessive Function() usage (possible malware).");
-                return OrigFunc(...args);
-            };
+          }
+
+          const e=window.eval;
+          window.eval=function(c){
+            evalCount++;
+            return e(c);
+          };
+
+          setTimeout(()=>{
+            if(rtcUsed && evalCount>2){
+              window.__darkelf_panic_trigger?.(
+                'Suspicious WebRTC + script behavior'
+              );
+            }
+          },2000);
         })();
         """
-        return js
         
+    @objc.python_method
+    def on_tracker_blocked(self, count):
+        self.tracker_count = count
+
+        # Low severity signal
+        self._raise_risk(
+            amount=1,
+            reason=f"Tracker blocked ({count})",
+            ui_only=True
+        )
+
+        # Update homepage HUD if visible
+        try:
+            self.browser.push_home_status(trk="warn")
+        except Exception:
+            pass
+            
+    @objc.python_method
+    def on_tracker_blocked(self, count):
+        self.tracker_count = count
+        self._raise_risk(
+            amount=1,
+            reason=f"Tracker blocked ({count})",
+            ui_only=True
+        )
+        try:
+            self.browser.push_home_status(trk="warn")
+        except Exception:
+            pass
+
 # ================= Tracker blocker (JS) =================
+
 TRACKER_LIST = [
-    "adservice.google.com","www.google-analytics.com","ssl.google-analytics.com",
-    "connect.facebook.net","static.chartbeat.com","www.googletagmanager.com",
-    "analytics.twitter.com","cdn.segment.com","api.segment.io","snap.licdn.com",
-    "cdn.branch.io","bat.bing.com","js-agent.newrelic.com","www.hotjar.com",
-    "script.hotjar.com","in.hotjar.com","cdn.heapanalytics.com","static.ads-twitter.com",
+    "adservice.google.com", "www.google-analytics.com", "ssl.google-analytics.com",
+    "connect.facebook.net", "static.chartbeat.com", "www.googletagmanager.com",
+    "analytics.twitter.com", "cdn.segment.com", "api.segment.io", "snap.licdn.com",
+    "cdn.branch.io", "bat.bing.com", "js-agent.newrelic.com", "www.hotjar.com",
+    "script.hotjar.com", "in.hotjar.com", "cdn.heapanalytics.com",
+    "static.ads-twitter.com",
 ]
-def tracker_js(block_hosts: List[str]) -> str:
+
+# ================= Unified Network Guard (JS) =================
+
+def unified_net_guard_js(block_hosts: list) -> str:
     hosts = json.dumps(block_hosts)
-    return """(() => {
-  const blockedHosts = new Set(%s);
-  const post = (n) => window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.tracker && window.webkit.messageHandlers.tracker.postMessage(n);
-  let count = 0;
-  function shouldBlock(u){
-    try{ const h=new URL(u, location.href).hostname;
-      return blockedHosts.has(h) || [...blockedHosts].some(x => h.endsWith('.'+x)); }
-    catch(_){ return false; }
+
+    js = """
+(() => {
+  if (window.__darkelf_netguard_installed) return;
+  window.__darkelf_netguard_installed = true;
+
+  const blockedHosts = new Set({hosts});
+  let trackerCount = 0;
+
+  const postTracker = (n) =>
+    window.webkit?.messageHandlers?.tracker?.postMessage(n);
+
+  const postNetlog = (url, headers) =>
+    window.webkit?.messageHandlers?.netlog?.postMessage({
+      url: String(url || ""),
+      headers: headers || {}
+    });
+
+  function hostMatches(url) {
+    try {
+      const h = new URL(url, location.href).hostname;
+      return blockedHosts.has(h) ||
+        [...blockedHosts].some(x => h.endsWith("." + x));
+    } catch {
+      return false;
+    }
   }
+
+  // ---------------- FETCH ----------------
   const origFetch = window.fetch;
-  window.fetch = async function(input, init){
-    const url = (typeof input==='string') ? input : (input && input.url) || '';
-    if (shouldBlock(url)) { count++; post(count); return new Response('', {status: 204}); }
-    return origFetch.apply(this, arguments);
+  if (typeof origFetch === "function") {
+    window.fetch = function(input, init) {
+      const url = (typeof input === "string") ? input : input?.url || "";
+      const headers = init?.headers || {};
+
+      postNetlog(url, headers);
+
+      if (hostMatches(url)) {
+        trackerCount++;
+        postTracker(trackerCount);
+        return Promise.resolve(new Response("", { status: 204 }));
+      }
+
+      return origFetch.apply(this, arguments);
+    };
+  }
+
+  // ---------------- XHR ----------------
+  const origOpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(method, url) {
+    postNetlog(url, {});
+
+    if (hostMatches(url)) {
+      trackerCount++;
+      postTracker(trackerCount);
+      this.abort();
+      return;
+    }
+
+    return origOpen.apply(this, arguments);
   };
-  const open = XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open = function(m,u){
-    if (shouldBlock(u)) { count++; post(count); this.abort(); return; }
-    return open.apply(this, arguments);
-  };
-})();""" % hosts
+})();
+"""
+    return js.format(hosts=hosts)
 
 # ================= Helper widgets =================
 class HoverButton(NSButton):
@@ -1027,43 +1304,97 @@ class Tab:
     host: str = "new"
     canvas_seed: int = None  # Unique canvas seed per tab
 
-# ================= Script Message Handler =================
+# ================= Script Message Handlers =================
+
 class TrackerHandler(objc.lookUpClass("NSObject")):
     def initWithOwner_(self, owner):
         self = objc.super(TrackerHandler, self).init()
-        if self is None: return None
-        self.owner = owner; return self
+        if self is None:
+            return None
+        self.owner = owner
+        return self
+
     def userContentController_didReceiveScriptMessage_(self, controller, message):
-        try: self.owner.bump_tracker_count(int(message.body()))
-        except Exception: pass
+        try:
+            count = int(message.body())
+
+            # Existing UI / toolbar counter
+            self.owner.bump_tracker_count(count)
+
+            # 🔥 NEW: forward to MiniAI as low-severity signal
+            if hasattr(self.owner, "mini_ai") and self.owner.mini_ai:
+                self.owner.mini_ai.on_tracker_blocked(count)
+
+        except Exception as e:
+            print("[TrackerHandler] error:", e)
+
 
 class SearchHandler(objc.lookUpClass("NSObject")):
     def initWithOwner_(self, owner):
         self = objc.super(SearchHandler, self).init()
-        if self is None: return None
-        self.owner = owner; return self
+        if self is None:
+            return None
+        self.owner = owner
+        return self
+
     def userContentController_didReceiveScriptMessage_(self, controller, message):
         try:
-            q = str(message.body())
-            url = "https://lite.duckduckgo.com/lite/?q=" + re.sub(r"\s+","+",q)
+            q = str(message.body()).strip()
+            if not q:
+                return
+
+            url = "https://lite.duckduckgo.com/lite/?q=" + re.sub(r"\s+", "+", q)
             self.owner._add_tab(url)
+
         except Exception as e:
-            print("SearchHandler error:", e)
-            
-# Script Message Handler for MiniAI Panic ==========
+            print("[SearchHandler] error:", e)
+
+
+# ================= MiniAI Panic Bridge =================
+
 class MiniAIPanicHandler(objc.lookUpClass("NSObject")):
     def initWithOwner_(self, owner):
         self = objc.super(MiniAIPanicHandler, self).init()
-        if self is None: return None
-        self.owner = owner; return self
+        if self is None:
+            return None
+        self.owner = owner
+        return self
+
     def userContentController_didReceiveScriptMessage_(self, controller, message):
         try:
             reason = str(message.body())
+
+            # Safety guard
+            if not hasattr(self.owner, "mini_ai") or not self.owner.mini_ai:
+                return
+
+            # Let MiniAI decide escalation
             self.owner.mini_ai.trigger_panic(reason)
-        except Exception: pass
-        
+
+        except Exception as e:
+            print("[MiniAIPanicHandler] error:", e)
+            
+class NetlogHandler(objc.lookUpClass("NSObject")):
+    def initWithOwner_(self, owner):
+        self = objc.super(NetlogHandler, self).init()
+        if self is None:
+            return None
+        self.owner = owner
+        return self
+
+    def userContentController_didReceiveScriptMessage_(self, controller, message):
+        try:
+            data = message.body()
+            url = data.get("url")
+            headers = data.get("headers", {})
+            if hasattr(self.owner, "mini_ai"):
+                self.owner.mini_ai.monitor_network(url, headers)
+        except Exception as e:
+            print("[NetlogHandler] error:", e)
+
 # BROWSER CONTROLLER PATCH ===============
 class Browser(NSObject):
+
     def init(self):
         self = objc.super(Browser, self).init()
         if self is None:
@@ -1079,8 +1410,12 @@ class Browser(NSObject):
         self.tab_btns = []
         self.tab_close_btns = []
         self.active = -1
-        
+
+        # =========================
+        # Window
+        # =========================
         self.window = self._make_window()
+
         self.toolbar = self._make_toolbar()
         self.window.setToolbar_(self.toolbar)
         try:
@@ -1088,29 +1423,44 @@ class Browser(NSObject):
         except Exception:
             pass
 
-        self._tab_neon_green = NSColor.colorWithCalibratedRed_green_blue_alpha_(
-            52/255.0, 199/255.0, 89/255.0, 1.0
-        )
-        self._tab_neon_green_cg = self._tab_neon_green.CGColor()
-
+        # =========================
+        # 🔧 BUILD TAB BAR FIRST
+        # =========================
         self._build_tabbar()
 
-        # 🔒 wipe everything BEFORE creating the first tab
-        try:
-            self._wipe_all_site_data()
-        except Exception:
-            pass
-
         # =========================
-        # 🔥 FIRST WKWebView CREATED HERE
+        # Create initial HOME tab
         # =========================
         self._add_tab(home=True)
 
-        # optional: start cookie scrubber
+        # =========================
+        # Final layout / z-order
+        # =========================
+        self._bring_tabbar_to_front()
+
+        # =========================
+        # Show window ONCE
+        # =========================
+        self.window.makeKeyAndOrderFront_(None)
+        NSApp().activateIgnoringOtherApps_(True)
+
+        # =========================
+        # Input + notifications
+        # =========================
+        self._install_key_monitor()
+
         try:
-            self._start_cookie_scrubber()
+            nc = NSNotificationCenter.defaultCenter()
+            nc.addObserver_selector_name_object_(
+                self,
+                "onResize:",
+                "NSWindowDidResizeNotification",
+                self.window
+            )
         except Exception:
             pass
+
+        return self
 
         # =========================
         # MiniAI
@@ -1122,12 +1472,6 @@ class Browser(NSObject):
             print("[Init] MiniAI tracker monitor initialized")
         except Exception as e:
             print("[Init] MiniAI inject failed:", e)
-
-        self.window.makeKeyAndOrderFront_(None)
-        NSApp().activateIgnoringOtherApps_(True)
-        
-        self._install_key_monitor()
-        return self
         
         # Resize listener
         try:
@@ -1140,7 +1484,7 @@ class Browser(NSObject):
         self.window.makeKeyAndOrderFront_(None)
         NSApp().activateIgnoringOtherApps_(True)
         return self
-
+                    
     # ---- SAFE COOKIE SCRUBBER (selector-based; fixes NSTimer segfault) ----
     def _start_cookie_scrubber(self):
         """Start periodic cookie scrubbing using a real Obj-C selector."""
@@ -1245,6 +1589,12 @@ class Browser(NSObject):
         except Exception:
             pass
         return win
+        
+    def windowShouldClose_(self, sender):
+        return True
+        
+    def actCloseTab_(self, _):
+        self._close_tab()
 
     # ----- Toolbar -----
     def _mk_btn(self, symbol, tooltip):
@@ -1276,157 +1626,6 @@ class Browser(NSObject):
         if hasattr(b, "setContentTintColor_"):
             b.setContentTintColor_(NSColor.whiteColor())
         return b
-        
-    @objc.python_method
-    def _show_quick_controls_popover(self, anchor_view):
-        from AppKit import (
-            NSPopover, NSView, NSStackView, NSTextField, NSSwitch,
-            NSColor, NSLayoutConstraint, NSImage, NSImageView,
-            NSImageSymbolConfiguration, NSViewController, NSFont
-        )
-
-        ACCENT = NSColor.colorWithCalibratedRed_green_blue_alpha_(52/255.0,199/255.0,89/255.0,1.0)
-
-        pop = NSPopover.alloc().init()
-        pop.setBehavior_(1)
-        pop.setAnimates_(True)
-
-        root = NSView.alloc().initWithFrame_(((0, 0), (260, 200)))
-        stack = NSStackView.alloc().init()
-        stack.setOrientation_(1)  # vertical
-        stack.setSpacing_(16.0)
-        stack.setTranslatesAutoresizingMaskIntoConstraints_(False)
-        root.addSubview_(stack)
-
-        NSLayoutConstraint.activateConstraints_([
-            stack.topAnchor().constraintEqualToAnchor_constant_(root.topAnchor(), 12),
-            stack.leadingAnchor().constraintEqualToAnchor_constant_(root.leadingAnchor(), 12),
-            stack.trailingAnchor().constraintEqualToAnchor_constant_(root.trailingAnchor(), -12),
-            stack.bottomAnchor().constraintEqualToAnchor_constant_(root.bottomAnchor(), -12),
-        ])
-
-        def get_icon(symbol_name):
-            icon = None
-            try:
-                icon = NSImage.imageWithSystemSymbolName_accessibilityDescription_(symbol_name, None)
-                if icon and hasattr(icon, "imageByApplyingSymbolConfiguration_"):
-                    cfg = NSImageSymbolConfiguration.configurationWithPointSize_weight_scale_(18.0, 2, 2)
-                    icon = icon.imageByApplyingSymbolConfiguration_(cfg)
-            except Exception:
-                try:
-                    icon = NSImage.imageWithSystemSymbolName_accessibilityDescription_(symbol_name, None)
-                except Exception:
-                    icon = None
-            return icon
-
-        from AppKit import NSLayoutAttributeCenterY  # constant, not an enum member
-
-        def make_row(symbol_name, title, initial_on=None, toggle_selector=None):
-            # icon
-            icon = get_icon(symbol_name)
-            iv = NSImageView.alloc().initWithFrame_(((0, 0), (18, 18)))
-            if icon:
-                iv.setImage_(icon)
-                iv.setContentTintColor_(NSColor.whiteColor())
-
-            # label
-            label = NSTextField.labelWithString_(title)
-            label.setTextColor_(NSColor.whiteColor())
-            label.setFont_(NSFont.systemFontOfSize_(15))
-            label.setLineBreakMode_(4)  # NSLineBreakByTruncatingTail
-
-            # horizontal stack
-            rowv = NSStackView.alloc().init()
-            rowv.setOrientation_(0)            # horizontal
-            rowv.setSpacing_(10)
-            rowv.setAlignment_(NSLayoutAttributeCenterY)  # ✅ correct vertical centering
-            rowv.setTranslatesAutoresizingMaskIntoConstraints_(False)
-
-            # Add views in order: icon → label
-            rowv.addArrangedSubview_(iv)
-            rowv.addArrangedSubview_(label)
-
-            # Make label flexible so it doesn't push the switch away
-            try:
-                # Lower compression resistance horizontally so label can truncate before pushing siblings
-                label.setContentCompressionResistancePriority_forOrientation_(250, 0)  # 0 = horizontal
-                # Lower hugging so label can expand/shrink as needed
-                label.setContentHuggingPriority_forOrientation_(249, 0)
-            except Exception:
-                pass
-
-            # Optional: add a switch
-            sw = None
-            if initial_on is not None and toggle_selector is not None:
-                sw = NSSwitch.alloc().init()
-                sw.setTarget_(self)
-                sw.setAction_(toggle_selector)
-                if hasattr(sw, "setState_"):
-                    sw.setState_(1 if initial_on else 0)
-                try:
-                    if hasattr(sw, "setControlTintColor_"):
-                        sw.setControlTintColor_(ACCENT)
-                    elif hasattr(sw, "setTintColor_"):
-                        sw.setTintColor_(ACCENT)
-                except Exception:
-                    pass
-
-                # Keep the switch from stretching
-                try:
-                    sw.setContentHuggingPriority_forOrientation_(751, 0)
-                    sw.setContentCompressionResistancePriority_forOrientation_(751, 0)
-                except Exception:
-                    pass
-
-                rowv.addArrangedSubview_(sw)
-
-            # Distribution hint (may be no-op on some macOS versions)
-            try:
-                rowv.setDistribution_(0)  # Fill
-            except Exception:
-                pass
-
-            return rowv, sw
-
-        # JS row
-        js_row, self._sw_js = make_row("bolt", "JavaScript", True, "onToggleJS:")
-        
-        # Fingerprinting Defense (status only, always ON)
-        fp_row, _ = make_row(
-            "shield.lefthalf.filled",
-            "Fingerprinting Defense",
-            True,
-            None
-        )
-
-        stack.addArrangedSubview_(fp_row)
-        
-        # Tracker Blocking (status only, always ON)
-        tracker_row, _ = make_row(
-            "eye.slash",
-            "Tracker Blocking",
-            True,
-            None
-        )
-
-        stack.addArrangedSubview_(tracker_row)
-
-        for rv in (js_row, fp_row, tracker_row):
-            stack.addArrangedSubview_(rv)
-
-        vc = NSViewController.alloc().init()
-        vc.setView_(root)
-        pop.setContentViewController_(vc)
-        pop.showRelativeToRect_ofView_preferredEdge_(anchor_view.bounds(), anchor_view, 1)
-        self._quick_controls_popover = pop
-                    
-    def onToggleJS_(self, sender):
-        try:
-            self.actToggleJS_(None)
-            if hasattr(self, "_sw_js"):
-                self._sw_js.setState_(1 if self.js_enabled else 0)
-        except Exception as e:
-            print("JS toggle error:", e)
 
     def _make_toolbar(self):
         from AppKit import NSColor, NSAppearance
@@ -1617,7 +1816,7 @@ class Browser(NSObject):
             item('ZoomOut', self.btn_zoom_out),
             item('Full', self.btn_full),
             item('Nuke', self.btn_nuke),
-            item('More', self.btn_more),
+            #item('More', self.btn_more),
         ]
 
         # tracker badge overlay placeholder (keep your real BadgeView in prod)
@@ -1723,57 +1922,73 @@ class Browser(NSObject):
             cv.addSubview_(self.tabbar)  # last added == topmost
             self.tabbar.displayIfNeeded()
         except Exception: pass
-
-    def onResize_(self, note): self._layout()
+        
+    def onResize_(self, note):
+        # Only relayout tab bar & webview frame
+        self._layout()
 
     def _layout(self):
         """Lay out the tabbar and its buttons consistently with contentLayoutRect."""
         try:
             cv = self.window.contentView()
-            tab_h = 36.0                     # Fixed tab bar height
-            tab_btn_height = tab_h - 8.0     # Button height with padding
+
+            # --- Constants ---
+            tab_h = 36.0
+            tab_btn_height = tab_h - 8.0
             close_btn_height = tab_btn_height
-
-            # --- Use contentLayoutRect for accurate top positioning ---
-            try:
-                clr = self.window.contentLayoutRect()
-                y = clr.origin.y + clr.size.height - tab_h  # Pin just below toolbar
-                w = clr.size.width
-            except Exception:
-                # Fallback for older macOS versions
-                f = cv.frame()
-                title_h = 40.0
-                y = f.size.height - title_h - tab_h
-                w = f.size.width
-
-            # --- Set tab bar frame, width flexible but height fixed ---
-            self.tabbar.setAutoresizingMask_(10)  # WidthSizable + MinYMargin
-            self.tabbar.setFrame_(((0, y), (w, tab_h)))
-
-            tb = self.tabbar.frame()
-
-            # --- "+" button at right end ---
-            self.btn_tab_add.setFrame_(((tb.size.width - 32.0, (tab_h - tab_btn_height) / 2.0),
-                                        (28.0, tab_btn_height)))
-                                    
-            # --- Tab buttons layout ---
-            x = 8.0
             tab_w = 180.0
             gap = 8.0
             close_w = 14.0
             inset = 10.0
 
+            # --- Determine top position ---
+            try:
+                clr = self.window.contentLayoutRect()
+                y = clr.origin.y + clr.size.height - tab_h
+                w = clr.size.width
+            except Exception:
+                f = cv.frame()
+                title_h = 40.0
+                y = f.size.height - title_h - tab_h
+                w = f.size.width
+
+            # --- Tabbar frame ---
+            self.tabbar.setAutoresizingMask_(10)
+            self.tabbar.setFrame_(((0, y), (w, tab_h)))
+
+            tb = self.tabbar.frame()
+
+            # --- "+" button ---
+            self.btn_tab_add.setFrame_(
+                ((tb.size.width - 32.0, (tab_h - tab_btn_height) / 2.0),
+                 (28.0, tab_btn_height))
+            )
+
+            # --- Tabs ---
+            x = 8.0
+
             for b, close in zip(self.tab_btns, self.tab_close_btns):
-            # Place the tab (background + text)
-                b.setFrame_(((x, (tab_h - tab_btn_height) / 2.0),
-                             (tab_w, tab_btn_height)))
+                # Tab button frame
+                b.setFrame_(
+                    ((x, (tab_h - tab_btn_height) / 2.0),
+                     (tab_w, tab_btn_height))
+                )
 
-            # Place close button INSIDE the tab
-                close.setFrame_(((inset,
-                                  (tab_btn_height - close_btn_height) / 2.0),
-                                 (close_w, close_btn_height)))
+                # Close dot frame
+                close.setFrame_(
+                    ((x + inset,
+                      (tab_h - close_btn_height) / 2.0),
+                     (close_w, close_btn_height))
+                )
 
-                x += (tab_w + gap)
+                # Ensure dot is above tab and clickable
+                close.removeFromSuperview()
+                self.tabbar.addSubview_positioned_relativeTo_(close, 1, b)
+
+                close.setHidden_(False)
+                close.setEnabled_(True)
+
+                x += tab_w + gap
 
         except Exception as e:
             print("Layout error:", e)
@@ -1823,6 +2038,7 @@ class Browser(NSObject):
             close.setTarget_(self)
             close.setAction_("actCloseTabIndex:")
             close.setTag_(idx)
+            close.setTransparent_(False)
 
             # --- Tab button (hostname or 'home') ---
             host = t.host or f"tab {idx+1}"
@@ -1869,8 +2085,9 @@ class Browser(NSObject):
             b.setTag_(idx)
 
             # Add views (close INSIDE tab)
+
             self.tabbar.addSubview_(b)
-            b.addSubview_(close)
+            self.tabbar.addSubview_(close)
 
             self.tab_btns.append(b)
             self.tab_close_btns.append(close)
@@ -1878,7 +2095,6 @@ class Browser(NSObject):
         # Restyle and layout
         self._style_tabs()
         self._layout()
-        self._bring_tabbar_to_front()
 
     def _style_tabs(self):
         """Active tab neon green background; others clear."""
@@ -1909,7 +2125,7 @@ class Browser(NSObject):
                     b.setContentTintColor_(NSColor.whiteColor())
                 except Exception:
                     pass
-    
+
     def _install_local_csp(ucc):
         """
         Injects a <meta http-equiv="Content-Security-Policy"> for pages we control.
@@ -2186,14 +2402,14 @@ class Browser(NSObject):
                 } catch(e){}
             })();
             """)
-
-            print("[Inject] Core defense scripts added to UCC.")
-            
+                            
         except Exception as e:
             print("[Inject] Core script injection failed:", e)
 
     def _new_wk(self) -> WKWebView:
         cfg = WKWebViewConfiguration.alloc().init()
+        
+        ucc = WKUserContentController.alloc().init()
         try:
             # Must be FALSE to allow native fullscreen takeover
             cfg.setAllowsInlineMediaPlayback_(False)
@@ -2225,8 +2441,13 @@ class Browser(NSObject):
             print("[Debug] App-bound domain restriction OFF")
         except Exception:
             pass
+            
+        # --- MiniAI panic handler (CREATE FIRST, THEN REGISTER) ---
+        self._mini_ai_handler = getattr(self, "_mini_ai_handler", None)
+        if self._mini_ai_handler is None:
+            self._mini_ai_handler = MiniAIPanicHandler.alloc().initWithOwner_(self)
 
-        ucc = WKUserContentController.alloc().init()
+        ucc.addScriptMessageHandler_name_(self._mini_ai_handler, "panic")
         
         # =========================================================
         # Darkelf Native Ad & Tracker Blocking (WKContentRuleList)
@@ -2330,13 +2551,19 @@ class Browser(NSObject):
         except Exception:
             pass
 
+        # --- REGISTER JS MESSAGE HANDLER FOR NETLOG ---
         try:
-            # register our delegate (_NavDelegate) as JS message receiver
-            if hasattr(self, "_nav"):
-                ucc.addScriptMessageHandler_name_(self._nav, "netlog")
-                print("[Init] Netlog handler registered")
-            else:
-                print("[Init] _nav delegate not set yet — cannot add netlog handler.")
+            ucc.removeScriptMessageHandlerForName_("netlog")
+        except Exception:
+            pass
+            
+        try:
+            self._netlog_handler = getattr(self, "_netlog_handler", None) or \
+                NetlogHandler.alloc().initWithOwner_(self)
+
+            ucc.addScriptMessageHandler_name_(self._netlog_handler, "netlog")
+            print("[Init] Netlog handler registered → Darkelf MiniAI")
+
         except Exception as e:
             print("[Init] Failed to register netlog handler:", e)
         # ------------------------------------------------
@@ -2597,15 +2824,18 @@ class Browser(NSObject):
             )
             ucc.addUserScript_(script)
 
-        # === TRACKER BLOCKER ===
+        # === UNIFIED NETWORK GUARD (TRACKERS + NETLOG) ===
         if self.js_enabled:
-            js = tracker_js(TRACKER_LIST)
+            js = unified_net_guard_js(TRACKER_LIST)
             script = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
                 js, 0, False
             )
             ucc.addUserScript_(script)
-            self._tracker_handler = getattr(self, "_tracker_handler", None) or TrackerHandler.alloc().initWithOwner_(self)
-            ucc.addScriptMessageHandler_name_(self._tracker_handler, "tracker")
+
+        # tracker counter handler (KEEP)
+        self._tracker_handler = getattr(self, "_tracker_handler", None) or \
+            TrackerHandler.alloc().initWithOwner_(self)
+        ucc.addScriptMessageHandler_name_(self._tracker_handler, "tracker")
 
         # === MINI AI SCRIPTS ===
         self._mini_ai_handler = getattr(self, "_mini_ai_handler", None) or MiniAIPanicHandler.alloc().initWithOwner_(self)
@@ -2627,15 +2857,39 @@ class Browser(NSObject):
         
     def _mount_webview(self, wk):
         """Mount the webview BELOW the tabbar so tabs never get covered."""
+        from AppKit import NSColor
+
         cv = self.window.contentView()
         tab_h = 34.0
+
         try:
             clr = self.window.contentLayoutRect()
             web_rect = ((0, 0), (clr.size.width, max(0.0, clr.size.height - tab_h)))
         except Exception:
-            f = cv.frame(); title_h = 40.0
+            f = cv.frame()
+            title_h = 40.0
             web_rect = ((0, 0), (f.size.width, max(0.0, f.size.height - (title_h + tab_h))))
-        cv.addSubview_(wk); wk.setFrame_(web_rect); wk.setAutoresizingMask_(18)
+
+        # 🔴 Add webview FIRST
+        cv.addSubview_(wk)
+
+        # ✅ FORCE DARK BACKGROUND (prevents "dead black homepage")
+        try:
+            wk.setDrawsBackground_(True)
+            wk.setBackgroundColor_(NSColor.blackColor())
+        except Exception:
+            pass
+
+        # 🔒 Layout + autoresize
+        wk.setFrame_(web_rect)
+        wk.setAutoresizingMask_(18)
+        
+        try:
+            wk.enableCursorRects()
+        except Exception:
+            pass
+
+        # 🔝 Keep UI overlays visible
         self._bring_tabbar_to_front()
 
     def _rebuild_active_webview(self):
@@ -2864,7 +3118,7 @@ class Browser(NSObject):
 
                 tab.url = url
                 tab.host = "new"
-
+                    
         self._update_tab_buttons()
         self._style_tabs()
         self._sync_addr()
@@ -2934,50 +3188,36 @@ class Browser(NSObject):
         except Exception:
             pass
 
-    def _close_tab(self):
-        if not self.tabs:
-            return
-        cur = self.tabs.pop(self.active)
-        try:
-            self._teardown_webview(cur.view)
-        except Exception:
-            pass
-        # If no tabs left, stop cookie scrubber to prevent segfaults, then add a new home tab
-        if not self.tabs:
-            try:
-                self._stop_cookie_scrubber()
-            except Exception:
-                pass
-            self._add_tab(home=True)
-            return
-        self.active = min(self.active, len(self.tabs)-1)
-        self._mount_webview(self.tabs[self.active].view)
-        self._sync_addr()
-        self._update_tab_buttons()
-        self._style_tabs()
-
     def actNewTab_(self, _): self._add_tab(home=True)
 
     def actSwitchTab_(self, sender):
-        try: idx = int(sender.tag())
-        except Exception: return
-        if not (0 <= idx < len(self.tabs)) or idx == self.active: return
-        try: self.tabs[self.active].view.removeFromSuperview()
-        except Exception: pass
+        try:
+            idx = int(sender.tag())
+        except Exception:
+            return
+
+        if not (0 <= idx < len(self.tabs)) or idx == self.active:
+            return
+
         self.active = idx
         self._mount_webview(self.tabs[self.active].view)
         self._bring_tabbar_to_front()
         self._style_tabs()
         self._sync_addr()
-
+                
     def actCloseTabIndex_(self, sender):
-        try: idx = int(sender.tag())
-        except Exception: return
-        if not (0 <= idx < len(self.tabs)): return
+        try:
+            idx = int(sender.tag())
+        except Exception:
+            return
 
-        # Teardown the target tab’s webview whether it’s active or not
-        try: self._teardown_webview(self.tabs[idx].view)
-        except Exception: pass
+        if not (0 <= idx < len(self.tabs)):
+            return
+
+        try:
+            self._teardown_webview(self.tabs[idx].view)
+        except Exception:
+            pass
 
         del self.tabs[idx]
 
@@ -2995,7 +3235,12 @@ class Browser(NSObject):
         self._style_tabs()
         self._sync_addr()
 
-    def actCloseTab_(self, _): self._close_tab()
+    def _close_tab(self):
+        if 0 <= self.active < len(self.tabs):
+            class _Tmp:
+                def tag(self_inner):
+                    return self.active
+            self.actCloseTabIndex_(_Tmp())
 
     def actBack_(self, _):
         try: self.tabs[self.active].view.goBack_(None)
@@ -3064,112 +3309,6 @@ class Browser(NSObject):
 
     def actTrackInfo_(self, _):
         print(f"[Trackers] Blocked so far: {self._tracker_count}")
-    def actToggleJS_(self, _):
-        # Flip state
-        self.js_enabled = not bool(getattr(self, "js_enabled", True))
-
-        # --- Update icon + tooltip ---
-        try:
-            sym = "bolt" if self.js_enabled else "bolt.slash"
-            img = NSImage.imageWithSystemSymbolName_accessibilityDescription_(sym, None)
-            if img:
-                img.setTemplate_(True)
-                self.btn_js.setImage_(img)
-                self.btn_js.setImagePosition_(2)
-
-            self.btn_js.setToolTip_(f"JavaScript: {'ON' if self.js_enabled else 'OFF'}")
-
-            if hasattr(self.btn_js, "setContentTintColor_"):
-                if self.js_enabled:
-                    self.btn_js.setContentTintColor_(
-                        NSColor.colorWithCalibratedRed_green_blue_alpha_(
-                            52/255.0, 199/255.0, 89/255.0, 1.0
-                        )
-                    )
-                else:
-                    self.btn_js.setContentTintColor_(
-                        NSColor.colorWithCalibratedRed_green_blue_alpha_(
-                            1.0, 59/255.0, 48/255.0, 1.0
-                        )
-                    )
-        except Exception as e:
-            print("JS icon color error:", e)
-
-        # --- Apply JS setting + reload safely ---
-        try:
-            wk = self.tabs[self.active].view
-
-            cfg = wk.configuration() if hasattr(wk, "configuration") else None
-            prefs = cfg.preferences() if cfg and hasattr(cfg, "preferences") else None
-            if prefs:
-                try:
-                    prefs.setJavaScriptEnabled_(bool(self.js_enabled))
-                except Exception:
-                    try:
-                        prefs.javaScriptEnabled = bool(self.js_enabled)
-                    except Exception:
-                        pass
-
-            # Determine current URL
-            current_url = ""
-            try:
-                u = wk.URL()
-                if u:
-                    current_url = str(u.absoluteString())
-            except Exception:
-                pass
-
-            if not current_url:
-                try:
-                    item = wk.backForwardList().currentItem()
-                    if item and item.URL():
-                        current_url = str(item.URL().absoluteString())
-                except Exception:
-                    pass
-
-            # --- Homepage / blank ---
-            if current_url in (
-                None, "", HOME_URL,
-                "about:home", "about://home",
-                "about:blank", "about:blank#blocked"
-            ):
-                try:
-                    wk.loadHTMLString_baseURL_(
-                        HOMEPAGE_HTML,
-                        NSURL.URLWithString_(HOME_URL)
-                    )
-                    self.tabs[self.active].url  = HOME_URL
-                    self.tabs[self.active].host = "Darkelf Home"
-
-                    try:
-                        self.addr.setStringValue_("")
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-
-            # --- Normal pages ---
-            else:
-                try:
-                    wk.reload_(None)
-                except Exception:
-                    try:
-                        req = NSURLRequest.requestWithURL_(
-                            NSURL.URLWithString_(current_url)
-                        )
-                        wk.loadRequest_(req)
-                    except Exception:
-                        pass
-
-        except Exception as e:
-            print("[JS Toggle] in-place reload failed:", e)
-
-        # --- Sync Quick Controls toggle ---
-        try:
-            if hasattr(self, "_sw_js") and self._sw_js:
-                self._sw_js.setState_(1 if self.js_enabled else 0)
-        except Exception:
-            pass
 
     def actQuickControls_(self, _):
         try:
@@ -3430,7 +3569,7 @@ class Browser(NSObject):
                                 pass
         except Exception as e:
             print("[Browser] Failed to remove JS handlers in __del__:", e)
-            
+                                
     def _wipe_all_site_data(self):
         try:
             store = WKWebsiteDataStore.defaultDataStore()
