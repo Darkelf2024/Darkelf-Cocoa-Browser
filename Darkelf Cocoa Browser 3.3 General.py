@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v3.3 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v3.4 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -92,7 +92,7 @@ from WebKit import WKContentRuleListStore
 import json
 
 HOME_URL = "darkelf://home"
-        
+
 class ContentRuleManager:
     _rule_list = None
     _loaded = False
@@ -187,7 +187,7 @@ class ContentRuleManager:
           }
         ]
         """
-        
+
 # ---- Darkelf Diagnostics / Kill-Switches ----
 DARKELF_DISABLE_COOKIE_SCRUBBER = False   # set True to rule out NSTimer cookie scrubber
 DARKELF_DISABLE_JS_HANDLERS    = False    # set True to disable all JS message handlers (netlog/search/tracker/panic)
@@ -245,19 +245,17 @@ class _NavDelegate(NSObject):
 
                     else:
                         # UI update ONLY — no security escalation
-                        # Preserve internal home tab title
+                        # 🔒 Preserve internal home tab title
                         if url and url.absoluteString() == HOME_URL:
                             tab.host = "Darkelf Home"
                         elif title:
                             tab.host = title
                         elif url:
                             tab.host = url.host() or url.absoluteString()
-                                                        
-                    # update UI
+
                     browser._update_tab_buttons()
                     browser._style_tabs()
                     browser._sync_addr()
-                    
                     return
 
         except Exception:
@@ -744,7 +742,6 @@ CANVAS_DEFENSE_JS = r'''
     } catch(e){}
 })();
 '''
-
 WEBGL_DEFENSE_JS = r"""
 (function(){
   function spoofGL(ctxProto, vendor, renderer) {
@@ -1172,8 +1169,6 @@ TRACKER_LIST = [
     "static.ads-twitter.com",
 ]
 
-# ================= Unified Network Guard (JS) =================
-
 def unified_net_guard_js(block_hosts: list) -> str:
     hosts = json.dumps(block_hosts)
 
@@ -1185,14 +1180,50 @@ def unified_net_guard_js(block_hosts: list) -> str:
   const blockedHosts = new Set({hosts});
   let trackerCount = 0;
 
-  const postTracker = (n) =>
-    window.webkit?.messageHandlers?.tracker?.postMessage(n);
+  // ---------------- Mouse activity guard ----------------
+  let __darkelfLastMouseMove = Date.now();
+  window.addEventListener("mousemove", () => {
+    __darkelfLastMouseMove = Date.now();
+  }, { passive: true });
 
-  const postNetlog = (url, headers) =>
-    window.webkit?.messageHandlers?.netlog?.postMessage({
+  function mouseIdle() {
+    return (Date.now() - __darkelfLastMouseMove) > 200;
+  }
+
+  // ---------------- Tracker debounce ----------------
+  let __darkelfLastTracker = 0;
+  function postTrackerDebounced(count) {
+    if (mouseIdle()) return;
+
+    const now = Date.now();
+    if (now - __darkelfLastTracker < 150) return;
+    __darkelfLastTracker = now;
+
+    window.webkit?.messageHandlers?.tracker?.postMessage(count);
+  }
+
+  // ---------------- Netlog debounce ----------------
+  let __darkelfLastNetlog = 0;
+  let __darkelfQueuedNetlog = null;
+
+  function postNetlog(url, headers) {
+    if (!window.__darkelfTabActive) return;
+    if (mouseIdle()) return;
+
+    const now = Date.now();
+    __darkelfQueuedNetlog = {
       url: String(url || ""),
       headers: headers || {}
-    });
+    };
+
+    if (now - __darkelfLastNetlog < 120) return;
+    __darkelfLastNetlog = now;
+
+    if (window.webkit?.messageHandlers?.netlog) {
+      window.webkit.messageHandlers.netlog.postMessage(__darkelfQueuedNetlog);
+      __darkelfQueuedNetlog = null;
+    }
+  }
 
   function hostMatches(url) {
     try {
@@ -1215,7 +1246,7 @@ def unified_net_guard_js(block_hosts: list) -> str:
 
       if (hostMatches(url)) {
         trackerCount++;
-        postTracker(trackerCount);
+        postTrackerDebounced(trackerCount);
         return Promise.resolve(new Response("", { status: 204 }));
       }
 
@@ -1230,7 +1261,7 @@ def unified_net_guard_js(block_hosts: list) -> str:
 
     if (hostMatches(url)) {
       trackerCount++;
-      postTracker(trackerCount);
+      postTrackerDebounced(trackerCount);
       this.abort();
       return;
     }
@@ -1304,7 +1335,6 @@ class Tab:
     host: str = "new"
     canvas_seed: int = None  # Unique canvas seed per tab
 
-# ================= Script Message Handlers =================
 
 class TrackerHandler(objc.lookUpClass("NSObject")):
     def initWithOwner_(self, owner):
@@ -1349,7 +1379,6 @@ class SearchHandler(objc.lookUpClass("NSObject")):
         except Exception as e:
             print("[SearchHandler] error:", e)
 
-
 # ================= MiniAI Panic Bridge =================
 
 class MiniAIPanicHandler(objc.lookUpClass("NSObject")):
@@ -1391,10 +1420,9 @@ class NetlogHandler(objc.lookUpClass("NSObject")):
                 self.owner.mini_ai.monitor_network(url, headers)
         except Exception as e:
             print("[NetlogHandler] error:", e)
-
+            
 # BROWSER CONTROLLER PATCH ===============
 class Browser(NSObject):
-
     def init(self):
         self = objc.super(Browser, self).init()
         if self is None:
@@ -1410,12 +1438,8 @@ class Browser(NSObject):
         self.tab_btns = []
         self.tab_close_btns = []
         self.active = -1
-
-        # =========================
-        # Window
-        # =========================
+        
         self.window = self._make_window()
-
         self.toolbar = self._make_toolbar()
         self.window.setToolbar_(self.toolbar)
         try:
@@ -1423,44 +1447,29 @@ class Browser(NSObject):
         except Exception:
             pass
 
-        # =========================
-        # 🔧 BUILD TAB BAR FIRST
-        # =========================
+        self._tab_neon_green = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+            52/255.0, 199/255.0, 89/255.0, 1.0
+        )
+        self._tab_neon_green_cg = self._tab_neon_green.CGColor()
+
         self._build_tabbar()
 
-        # =========================
-        # Create initial HOME tab
-        # =========================
-        self._add_tab(home=True)
-
-        # =========================
-        # Final layout / z-order
-        # =========================
-        self._bring_tabbar_to_front()
-
-        # =========================
-        # Show window ONCE
-        # =========================
-        self.window.makeKeyAndOrderFront_(None)
-        NSApp().activateIgnoringOtherApps_(True)
-
-        # =========================
-        # Input + notifications
-        # =========================
-        self._install_key_monitor()
-
+        # 🔒 wipe everything BEFORE creating the first tab
         try:
-            nc = NSNotificationCenter.defaultCenter()
-            nc.addObserver_selector_name_object_(
-                self,
-                "onResize:",
-                "NSWindowDidResizeNotification",
-                self.window
-            )
+            self._wipe_all_site_data()
         except Exception:
             pass
 
-        return self
+        # =========================
+        # 🔥 FIRST WKWebView CREATED HERE
+        # =========================
+        self._add_tab(home=True)
+
+        # optional: start cookie scrubber
+        try:
+            self._start_cookie_scrubber()
+        except Exception:
+            pass
 
         # =========================
         # MiniAI
@@ -1469,7 +1478,7 @@ class Browser(NSObject):
         try:
             if 0 <= self.active < len(self.tabs):
                 self.mini_ai.inject(self.tabs[self.active].view)
-            print("[Init] MiniAI tracker monitor initialized")
+            print("[Init] Darkelf MiniAI tracker monitor initialized")
         except Exception as e:
             print("[Init] MiniAI inject failed:", e)
         
@@ -1484,7 +1493,7 @@ class Browser(NSObject):
         self.window.makeKeyAndOrderFront_(None)
         NSApp().activateIgnoringOtherApps_(True)
         return self
-                    
+        
     # ---- SAFE COOKIE SCRUBBER (selector-based; fixes NSTimer segfault) ----
     def _start_cookie_scrubber(self):
         """Start periodic cookie scrubbing using a real Obj-C selector."""
@@ -1589,12 +1598,6 @@ class Browser(NSObject):
         except Exception:
             pass
         return win
-        
-    def windowShouldClose_(self, sender):
-        return True
-        
-    def actCloseTab_(self, _):
-        self._close_tab()
 
     # ----- Toolbar -----
     def _mk_btn(self, symbol, tooltip):
@@ -1626,7 +1629,122 @@ class Browser(NSObject):
         if hasattr(b, "setContentTintColor_"):
             b.setContentTintColor_(NSColor.whiteColor())
         return b
+        
+        def get_icon(symbol_name):
+            icon = None
+            try:
+                icon = NSImage.imageWithSystemSymbolName_accessibilityDescription_(symbol_name, None)
+                if icon and hasattr(icon, "imageByApplyingSymbolConfiguration_"):
+                    cfg = NSImageSymbolConfiguration.configurationWithPointSize_weight_scale_(18.0, 2, 2)
+                    icon = icon.imageByApplyingSymbolConfiguration_(cfg)
+            except Exception:
+                try:
+                    icon = NSImage.imageWithSystemSymbolName_accessibilityDescription_(symbol_name, None)
+                except Exception:
+                    icon = None
+            return icon
 
+        from AppKit import NSLayoutAttributeCenterY  # constant, not an enum member
+
+        def make_row(symbol_name, title, initial_on=None, toggle_selector=None):
+            # icon
+            icon = get_icon(symbol_name)
+            iv = NSImageView.alloc().initWithFrame_(((0, 0), (18, 18)))
+            if icon:
+                iv.setImage_(icon)
+                iv.setContentTintColor_(NSColor.whiteColor())
+
+            # label
+            label = NSTextField.labelWithString_(title)
+            label.setTextColor_(NSColor.whiteColor())
+            label.setFont_(NSFont.systemFontOfSize_(15))
+            label.setLineBreakMode_(4)  # NSLineBreakByTruncatingTail
+
+            # horizontal stack
+            rowv = NSStackView.alloc().init()
+            rowv.setOrientation_(0)            # horizontal
+            rowv.setSpacing_(10)
+            rowv.setAlignment_(NSLayoutAttributeCenterY)  # ✅ correct vertical centering
+            rowv.setTranslatesAutoresizingMaskIntoConstraints_(False)
+
+            # Add views in order: icon → label
+            rowv.addArrangedSubview_(iv)
+            rowv.addArrangedSubview_(label)
+
+            # Make label flexible so it doesn't push the switch away
+            try:
+                # Lower compression resistance horizontally so label can truncate before pushing siblings
+                label.setContentCompressionResistancePriority_forOrientation_(250, 0)  # 0 = horizontal
+                # Lower hugging so label can expand/shrink as needed
+                label.setContentHuggingPriority_forOrientation_(249, 0)
+            except Exception:
+                pass
+
+            # Optional: add a switch
+            sw = None
+            if initial_on is not None and toggle_selector is not None:
+                sw = NSSwitch.alloc().init()
+                sw.setTarget_(self)
+                sw.setAction_(toggle_selector)
+                if hasattr(sw, "setState_"):
+                    sw.setState_(1 if initial_on else 0)
+                try:
+                    if hasattr(sw, "setControlTintColor_"):
+                        sw.setControlTintColor_(ACCENT)
+                    elif hasattr(sw, "setTintColor_"):
+                        sw.setTintColor_(ACCENT)
+                except Exception:
+                    pass
+
+                # Keep the switch from stretching
+                try:
+                    sw.setContentHuggingPriority_forOrientation_(751, 0)
+                    sw.setContentCompressionResistancePriority_forOrientation_(751, 0)
+                except Exception:
+                    pass
+
+                rowv.addArrangedSubview_(sw)
+
+            # Distribution hint (may be no-op on some macOS versions)
+            try:
+                rowv.setDistribution_(0)  # Fill
+            except Exception:
+                pass
+
+            return rowv, sw
+
+        # JS row
+        js_row, self._sw_js = make_row("bolt", "JavaScript", True, "onToggleJS:")
+        
+        # Fingerprinting Defense (status only, always ON)
+        fp_row, _ = make_row(
+            "shield.lefthalf.filled",
+            "Fingerprinting Defense",
+            True,
+            None
+        )
+
+        stack.addArrangedSubview_(fp_row)
+        
+        # Tracker Blocking (status only, always ON)
+        tracker_row, _ = make_row(
+            "eye.slash",
+            "Tracker Blocking",
+            True,
+            None
+        )
+
+        stack.addArrangedSubview_(tracker_row)
+
+        for rv in (js_row, fp_row, tracker_row):
+            stack.addArrangedSubview_(rv)
+
+        vc = NSViewController.alloc().init()
+        vc.setView_(root)
+        pop.setContentViewController_(vc)
+        pop.showRelativeToRect_ofView_preferredEdge_(anchor_view.bounds(), anchor_view, 1)
+        self._quick_controls_popover = pop
+                    
     def _make_toolbar(self):
         from AppKit import NSColor, NSAppearance
         tb = NSToolbar.alloc().initWithIdentifier_("DarkelfToolbar")
@@ -1663,26 +1781,6 @@ class Browser(NSObject):
         self.btn_zoom_out = big_btn("minus.magnifyingglass", "Zoom Out")
         self.btn_full   = big_btn("arrow.up.left.and.arrow.down.right", "Fullscreen")
         self.btn_track  = big_btn("target", "Trackers Blocked")
-        self.btn_js     = big_btn("bolt.slash", "Toggle JavaScript")
-        self.btn_more = big_btn("ellipsis.circle", "Quick Controls")
-
-        # JS button coloring
-        img = NSImage.imageWithSystemSymbolName_accessibilityDescription_("bolt", None)
-        if img:
-            img.setTemplate_(True)
-            self.btn_js.setImage_(img)
-            self.btn_js.setImagePosition_(2)    # Image only
-        self.btn_js.setTitle_("")               # <-- This removes the "Button" text
-        self.btn_js.setToolTip_(f"JavaScript: {'ON' if self.js_enabled else 'OFF'}")
-        if hasattr(self.btn_js, "setContentTintColor_"):
-            if self.js_enabled:
-                self.btn_js.setContentTintColor_(
-                    NSColor.colorWithCalibratedRed_green_blue_alpha_(52/255.0, 199/255.0, 89/255.0, 1.0)
-                )
-            else:
-                self.btn_js.setContentTintColor_(
-                    NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 59/255.0, 48/255.0, 1.0)
-            )
             
         # --- Nuke / Clear All Data ---
         def _load_symbol_with_fallback(symbols):
@@ -1733,8 +1831,6 @@ class Browser(NSObject):
             (self.btn_zoom_in, 'actZoomIn:'),
             (self.btn_zoom_out, 'actZoomOut:'),
             (self.btn_full, 'actFull:'),
-            #(self.btn_js, 'actToggleJS:'),
-            (self.btn_more, 'actQuickControls:'),
             (self.btn_nuke, 'actNuke:'),
         ]:
             b.setTarget_(self); b.setAction_(sel)
@@ -1811,12 +1907,11 @@ class Browser(NSObject):
             "NSToolbarFlexibleSpaceItem",
             item('NewTab', self.btn_newtab),
             item('CloseTab', self.btn_close),
-            #item('JS', self.btn_js),
             item('ZoomIn', self.btn_zoom_in),
             item('ZoomOut', self.btn_zoom_out),
             item('Full', self.btn_full),
             item('Nuke', self.btn_nuke),
-            #item('More', self.btn_more),
+
         ]
 
         # tracker badge overlay placeholder (keep your real BadgeView in prod)
@@ -1922,73 +2017,57 @@ class Browser(NSObject):
             cv.addSubview_(self.tabbar)  # last added == topmost
             self.tabbar.displayIfNeeded()
         except Exception: pass
-        
-    def onResize_(self, note):
-        # Only relayout tab bar & webview frame
-        self._layout()
+
+    def onResize_(self, note): self._layout()
 
     def _layout(self):
         """Lay out the tabbar and its buttons consistently with contentLayoutRect."""
         try:
             cv = self.window.contentView()
-
-            # --- Constants ---
-            tab_h = 36.0
-            tab_btn_height = tab_h - 8.0
+            tab_h = 36.0                     # Fixed tab bar height
+            tab_btn_height = tab_h - 8.0     # Button height with padding
             close_btn_height = tab_btn_height
-            tab_w = 180.0
-            gap = 8.0
-            close_w = 14.0
-            inset = 10.0
 
-            # --- Determine top position ---
+            # --- Use contentLayoutRect for accurate top positioning ---
             try:
                 clr = self.window.contentLayoutRect()
-                y = clr.origin.y + clr.size.height - tab_h
+                y = clr.origin.y + clr.size.height - tab_h  # Pin just below toolbar
                 w = clr.size.width
             except Exception:
+                # Fallback for older macOS versions
                 f = cv.frame()
                 title_h = 40.0
                 y = f.size.height - title_h - tab_h
                 w = f.size.width
 
-            # --- Tabbar frame ---
-            self.tabbar.setAutoresizingMask_(10)
+            # --- Set tab bar frame, width flexible but height fixed ---
+            self.tabbar.setAutoresizingMask_(10)  # WidthSizable + MinYMargin
             self.tabbar.setFrame_(((0, y), (w, tab_h)))
 
             tb = self.tabbar.frame()
 
-            # --- "+" button ---
-            self.btn_tab_add.setFrame_(
-                ((tb.size.width - 32.0, (tab_h - tab_btn_height) / 2.0),
-                 (28.0, tab_btn_height))
-            )
-
-            # --- Tabs ---
+            # --- "+" button at right end ---
+            self.btn_tab_add.setFrame_(((tb.size.width - 32.0, (tab_h - tab_btn_height) / 2.0),
+                                        (28.0, tab_btn_height)))
+                                    
+            # --- Tab buttons layout ---
             x = 8.0
+            tab_w = 180.0
+            gap = 8.0
+            close_w = 14.0
+            inset = 10.0
 
             for b, close in zip(self.tab_btns, self.tab_close_btns):
-                # Tab button frame
-                b.setFrame_(
-                    ((x, (tab_h - tab_btn_height) / 2.0),
-                     (tab_w, tab_btn_height))
-                )
+            # Place the tab (background + text)
+                b.setFrame_(((x, (tab_h - tab_btn_height) / 2.0),
+                             (tab_w, tab_btn_height)))
 
-                # Close dot frame
-                close.setFrame_(
-                    ((x + inset,
-                      (tab_h - close_btn_height) / 2.0),
-                     (close_w, close_btn_height))
-                )
+            # Place close button INSIDE the tab
+                close.setFrame_(((inset,
+                                  (tab_btn_height - close_btn_height) / 2.0),
+                                 (close_w, close_btn_height)))
 
-                # Ensure dot is above tab and clickable
-                close.removeFromSuperview()
-                self.tabbar.addSubview_positioned_relativeTo_(close, 1, b)
-
-                close.setHidden_(False)
-                close.setEnabled_(True)
-
-                x += tab_w + gap
+                x += (tab_w + gap)
 
         except Exception as e:
             print("Layout error:", e)
@@ -2038,7 +2117,6 @@ class Browser(NSObject):
             close.setTarget_(self)
             close.setAction_("actCloseTabIndex:")
             close.setTag_(idx)
-            close.setTransparent_(False)
 
             # --- Tab button (hostname or 'home') ---
             host = t.host or f"tab {idx+1}"
@@ -2085,9 +2163,8 @@ class Browser(NSObject):
             b.setTag_(idx)
 
             # Add views (close INSIDE tab)
-
             self.tabbar.addSubview_(b)
-            self.tabbar.addSubview_(close)
+            b.addSubview_(close)
 
             self.tab_btns.append(b)
             self.tab_close_btns.append(close)
@@ -2095,6 +2172,7 @@ class Browser(NSObject):
         # Restyle and layout
         self._style_tabs()
         self._layout()
+        self._bring_tabbar_to_front()
 
     def _style_tabs(self):
         """Active tab neon green background; others clear."""
@@ -2125,7 +2203,7 @@ class Browser(NSObject):
                     b.setContentTintColor_(NSColor.whiteColor())
                 except Exception:
                     pass
-
+    
     def _install_local_csp(ucc):
         """
         Injects a <meta http-equiv="Content-Security-Policy"> for pages we control.
@@ -2402,7 +2480,9 @@ class Browser(NSObject):
                 } catch(e){}
             })();
             """)
-                            
+
+            print("[Inject] Core defense scripts added to UCC.")
+            
         except Exception as e:
             print("[Inject] Core script injection failed:", e)
 
@@ -2551,12 +2631,6 @@ class Browser(NSObject):
         except Exception:
             pass
 
-        # --- REGISTER JS MESSAGE HANDLER FOR NETLOG ---
-        try:
-            ucc.removeScriptMessageHandlerForName_("netlog")
-        except Exception:
-            pass
-            
         try:
             self._netlog_handler = getattr(self, "_netlog_handler", None) or \
                 NetlogHandler.alloc().initWithOwner_(self)
@@ -2832,10 +2906,8 @@ class Browser(NSObject):
             )
             ucc.addUserScript_(script)
 
-        # tracker counter handler (KEEP)
-        self._tracker_handler = getattr(self, "_tracker_handler", None) or \
-            TrackerHandler.alloc().initWithOwner_(self)
-        ucc.addScriptMessageHandler_name_(self._tracker_handler, "tracker")
+            self._tracker_handler = getattr(self, "_tracker_handler", None) or TrackerHandler.alloc().initWithOwner_(self)
+            ucc.addScriptMessageHandler_name_(self._tracker_handler, "tracker")
 
         # === MINI AI SCRIPTS ===
         self._mini_ai_handler = getattr(self, "_mini_ai_handler", None) or MiniAIPanicHandler.alloc().initWithOwner_(self)
@@ -2857,39 +2929,15 @@ class Browser(NSObject):
         
     def _mount_webview(self, wk):
         """Mount the webview BELOW the tabbar so tabs never get covered."""
-        from AppKit import NSColor
-
         cv = self.window.contentView()
         tab_h = 34.0
-
         try:
             clr = self.window.contentLayoutRect()
             web_rect = ((0, 0), (clr.size.width, max(0.0, clr.size.height - tab_h)))
         except Exception:
-            f = cv.frame()
-            title_h = 40.0
+            f = cv.frame(); title_h = 40.0
             web_rect = ((0, 0), (f.size.width, max(0.0, f.size.height - (title_h + tab_h))))
-
-        # 🔴 Add webview FIRST
-        cv.addSubview_(wk)
-
-        # ✅ FORCE DARK BACKGROUND (prevents "dead black homepage")
-        try:
-            wk.setDrawsBackground_(True)
-            wk.setBackgroundColor_(NSColor.blackColor())
-        except Exception:
-            pass
-
-        # 🔒 Layout + autoresize
-        wk.setFrame_(web_rect)
-        wk.setAutoresizingMask_(18)
-        
-        try:
-            wk.enableCursorRects()
-        except Exception:
-            pass
-
-        # 🔝 Keep UI overlays visible
+        cv.addSubview_(wk); wk.setFrame_(web_rect); wk.setAutoresizingMask_(18)
         self._bring_tabbar_to_front()
 
     def _rebuild_active_webview(self):
@@ -3118,7 +3166,7 @@ class Browser(NSObject):
 
                 tab.url = url
                 tab.host = "new"
-                    
+
         self._update_tab_buttons()
         self._style_tabs()
         self._sync_addr()
@@ -3188,36 +3236,50 @@ class Browser(NSObject):
         except Exception:
             pass
 
+    def _close_tab(self):
+        if not self.tabs:
+            return
+        cur = self.tabs.pop(self.active)
+        try:
+            self._teardown_webview(cur.view)
+        except Exception:
+            pass
+        # If no tabs left, stop cookie scrubber to prevent segfaults, then add a new home tab
+        if not self.tabs:
+            try:
+                self._stop_cookie_scrubber()
+            except Exception:
+                pass
+            self._add_tab(home=True)
+            return
+        self.active = min(self.active, len(self.tabs)-1)
+        self._mount_webview(self.tabs[self.active].view)
+        self._sync_addr()
+        self._update_tab_buttons()
+        self._style_tabs()
+
     def actNewTab_(self, _): self._add_tab(home=True)
 
     def actSwitchTab_(self, sender):
-        try:
-            idx = int(sender.tag())
-        except Exception:
-            return
-
-        if not (0 <= idx < len(self.tabs)) or idx == self.active:
-            return
-
+        try: idx = int(sender.tag())
+        except Exception: return
+        if not (0 <= idx < len(self.tabs)) or idx == self.active: return
+        try: self.tabs[self.active].view.removeFromSuperview()
+        except Exception: pass
         self.active = idx
         self._mount_webview(self.tabs[self.active].view)
         self._bring_tabbar_to_front()
         self._style_tabs()
         self._sync_addr()
-                
+
     def actCloseTabIndex_(self, sender):
-        try:
-            idx = int(sender.tag())
-        except Exception:
-            return
+        try: idx = int(sender.tag())
+        except Exception: return
+        if not (0 <= idx < len(self.tabs)): return
 
-        if not (0 <= idx < len(self.tabs)):
-            return
-
-        try:
-            self._teardown_webview(self.tabs[idx].view)
-        except Exception:
-            pass
+        # Teardown the target tab’s webview whether it’s active or not
+        try: self._teardown_webview(self.tabs[idx].view)
+        except Exception: pass
 
         del self.tabs[idx]
 
@@ -3235,12 +3297,7 @@ class Browser(NSObject):
         self._style_tabs()
         self._sync_addr()
 
-    def _close_tab(self):
-        if 0 <= self.active < len(self.tabs):
-            class _Tmp:
-                def tag(self_inner):
-                    return self.active
-            self.actCloseTabIndex_(_Tmp())
+    def actCloseTab_(self, _): self._close_tab()
 
     def actBack_(self, _):
         try: self.tabs[self.active].view.goBack_(None)
@@ -3310,11 +3367,108 @@ class Browser(NSObject):
     def actTrackInfo_(self, _):
         print(f"[Trackers] Blocked so far: {self._tracker_count}")
 
-    def actQuickControls_(self, _):
+        # --- Update icon + tooltip ---
         try:
-            self._show_quick_controls_popover(self.btn_more)
+            sym = "bolt" if self.js_enabled else "bolt.slash"
+            img = NSImage.imageWithSystemSymbolName_accessibilityDescription_(sym, None)
+            if img:
+                img.setTemplate_(True)
+                self.btn_js.setImage_(img)
+                self.btn_js.setImagePosition_(2)
+
+            self.btn_js.setToolTip_(f"JavaScript: {'ON' if self.js_enabled else 'OFF'}")
+
+            if hasattr(self.btn_js, "setContentTintColor_"):
+                if self.js_enabled:
+                    self.btn_js.setContentTintColor_(
+                        NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                            52/255.0, 199/255.0, 89/255.0, 1.0
+                        )
+                    )
+                else:
+                    self.btn_js.setContentTintColor_(
+                        NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                            1.0, 59/255.0, 48/255.0, 1.0
+                        )
+                    )
         except Exception as e:
-            print("Quick Controls popover error:", e)
+            print("JS icon color error:", e)
+
+        # --- Apply JS setting + reload safely ---
+        try:
+            wk = self.tabs[self.active].view
+
+            cfg = wk.configuration() if hasattr(wk, "configuration") else None
+            prefs = cfg.preferences() if cfg and hasattr(cfg, "preferences") else None
+            if prefs:
+                try:
+                    prefs.setJavaScriptEnabled_(bool(self.js_enabled))
+                except Exception:
+                    try:
+                        prefs.javaScriptEnabled = bool(self.js_enabled)
+                    except Exception:
+                        pass
+
+            # Determine current URL
+            current_url = ""
+            try:
+                u = wk.URL()
+                if u:
+                    current_url = str(u.absoluteString())
+            except Exception:
+                pass
+
+            if not current_url:
+                try:
+                    item = wk.backForwardList().currentItem()
+                    if item and item.URL():
+                        current_url = str(item.URL().absoluteString())
+                except Exception:
+                    pass
+
+            # --- Homepage / blank ---
+            if current_url in (
+                None, "", HOME_URL,
+                "about:home", "about://home",
+                "about:blank", "about:blank#blocked"
+            ):
+                try:
+                    wk.loadHTMLString_baseURL_(
+                        HOMEPAGE_HTML,
+                        NSURL.URLWithString_(HOME_URL)
+                    )
+                    self.tabs[self.active].url  = HOME_URL
+                    self.tabs[self.active].host = "Darkelf Home"
+
+                    try:
+                        self.addr.setStringValue_("")
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+
+            # --- Normal pages ---
+            else:
+                try:
+                    wk.reload_(None)
+                except Exception:
+                    try:
+                        req = NSURLRequest.requestWithURL_(
+                            NSURL.URLWithString_(current_url)
+                        )
+                        wk.loadRequest_(req)
+                    except Exception:
+                        pass
+
+        except Exception as e:
+            print("[JS Toggle] in-place reload failed:", e)
+
+        # --- Sync Quick Controls toggle ---
+        try:
+            if hasattr(self, "_sw_js") and self._sw_js:
+                self._sw_js.setState_(1 if self.js_enabled else 0)
+        except Exception:
+            pass
 
     def actGo_(self, sender):
         try:
@@ -3569,7 +3723,7 @@ class Browser(NSObject):
                                 pass
         except Exception as e:
             print("[Browser] Failed to remove JS handlers in __del__:", e)
-                                
+            
     def _wipe_all_site_data(self):
         try:
             store = WKWebsiteDataStore.defaultDataStore()
@@ -3643,4 +3797,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
