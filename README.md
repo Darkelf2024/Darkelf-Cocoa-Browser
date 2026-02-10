@@ -36,6 +36,8 @@ x25519MLKEM768 already integrated - MacOS
 - Designed for **privacy research, testing, and high-risk browsing**
 - Setup homebrew and torrc - Then toggle to activate Tor inside the browser
 
+- NOTE: Hardened Edition Getting Revised Big Changes Improvements Coming!
+
 📂 Browser Variants (Source Files)
 
 🟢 General Use Browser
