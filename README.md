@@ -16,7 +16,8 @@ x25519MLKEM768 already integrated - MacOS
 - Direct (non-proxied) networking  
 - Safari-style **declarative ad blocking**  
 - Privacy-hardened defaults  
-- Non-persistent browsing data  
+- Non-persistent browsing data
+- JS Chip enable/disable on click
 - Darkelf MiniAI - Monitored/Environment Hardened
 - No Tor, no SOCKS, no proxy dependencies  
 - Designed for **daily, general browsing**
@@ -38,7 +39,7 @@ x25519MLKEM768 already integrated - MacOS
 📂 Browser Variants (Source Files)
 
 🟢 General Use Browser
-- [Darkelf General Cocoa Browser](https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/blob/main/Darkelf%20Cocoa%20Browser%203.1%20General.py)
+- [Darkelf General Cocoa Browser](https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/blob/main/Darkelf%20Cocoa%20Browser%203.5%20General.py)
   
 🔒 Darkelf Hardened Browser
 - [Darkelf Hardened Cocoa Browser](https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/blob/main/Darkelf%20Cocoa%20Hardened%20Browser%203.1.py)
