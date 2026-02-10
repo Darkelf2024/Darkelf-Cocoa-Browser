@@ -657,9 +657,6 @@ FONTS_DEFENSE_JS = r'''
 '''
 
 NAV_SPOOF_JS = r'''
-Object.defineProperty(navigator, 'platform', {get: () => "Win32", configurable: true});
-Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 2, configurable: true});
-Object.defineProperty(navigator, 'deviceMemory', {get: () => 2, configurable: true});
 '''
 
 MEDIA_ENUM_DEFENSE_JS = r'''
