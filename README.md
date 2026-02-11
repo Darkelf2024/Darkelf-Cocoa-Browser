@@ -17,10 +17,11 @@ x25519MLKEM768 already integrated - MacOS
 - Safari-style **declarative ad blocking**  
 - Privacy-hardened defaults  
 - Non-persistent browsing data
-- JS Chip enable/disable on click
+- JavaScript, Tor Buttons 
 - Darkelf MiniAI - Monitored/Environment Hardened
 - No Tor, no SOCKS, no proxy dependencies  
 - Designed for **daily, general browsing**
+- Darkelf MiniAi - Monitors for Safety
 
 ---
 
@@ -31,17 +32,18 @@ x25519MLKEM768 already integrated - MacOS
 - Aggressive fingerprint-reduction techniques  
 - Non-persistent sessions enforced  
 - Optional Tor / research-only features *(when enabled)*
-- JavaScript, CSP toggle  
+- JavaScript, Tor Buttons 
 - Hardened WebKit configuration  
 - Designed for **privacy research, testing, and high-risk browsing**
 - Setup homebrew and torrc - Then toggle to activate Tor inside the browser
+- Darkelf MiniAI - Monitors for Safety
 
 - NOTE: Hardened Edition Getting Revised Big Changes Improvements Coming!
 
 📂 Browser Variants (Source Files)
 
-🟢 General Use Browser
-- [Darkelf General Cocoa Browser](https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/blob/main/Darkelf%20images/1HM.png)
+🟢 Darkelf Cocoa Browser
+- [Darkelf Cocoa Browser](https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/blob/main/Darkelf_Cocoa_Browser_3.6.py)
   
 🔒 Darkelf Hardened Browser
 - [Darkelf Hardened Cocoa Browser](https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/blob/main/Darkelf%20Cocoa%20Hardened%20Browser%203.6.py)
