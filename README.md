@@ -206,11 +206,13 @@ python3 "Darkelf Cocoa.py"
 
 
 ## Bugs Known
-- Working on implementing History Dialog Box
 - Youtube Fullscreen limitation w/DDG Lite
 
-
-
+## Note
+- No History Dialog Box included
+- No Bookmark functions
+- No Download functions
+  
 ---
 
 ## 🧑‍⚖️ License
