@@ -17,11 +17,11 @@ x25519MLKEM768 already integrated - MacOS
 - Safari-style **declarative ad blocking**  
 - Privacy-hardened defaults  
 - Non-persistent browsing data
-- JavaScript, Tor Buttons 
+- JavaScript, Button
 - Darkelf MiniAI - Monitored/Environment Hardened
 - No Tor, no SOCKS, no proxy dependencies  
 - Designed for **daily, general browsing**
-- Darkelf MiniAi - Monitors for Safety
+- Hotkeys
 
 ---
 
@@ -36,7 +36,9 @@ x25519MLKEM768 already integrated - MacOS
 - Hardened WebKit configuration  
 - Designed for **privacy research, testing, and high-risk browsing**
 - Setup homebrew and torrc - Then toggle to activate Tor inside the browser
-- Darkelf MiniAI - Monitors for Safety
+- Darkelf MiniAI - Monitored/Environment Hardened
+- Hotkeys
+
 
 - NOTE: Hardened Edition Getting Revised Big Changes Improvements Coming!
 
