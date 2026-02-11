@@ -2738,22 +2738,59 @@ class Browser(NSObject):
             pass
 
     def _install_key_monitor(self):
+        from AppKit import NSEventModifierFlagCommand, NSEventModifierFlagShift
+
         def handler(evt):
             try:
-                if evt.type() == 10:
-                    cmd = bool(evt.modifierFlags() & (1 << 20))
-                    if not cmd: return evt
-                    ch = evt.charactersIgnoringModifiers()
-                    if ch == "t": self.actNewTab_(None); return None
-                    if ch == "w": self.actCloseTab_(None); return None
-                    if ch == "r": self.actReload_(None); return None
-                    if ch == "l":
-                        try: self.window.makeFirstResponder_(self.addr)
-                        except Exception: pass
-                        return None
-            except Exception: pass
+                if evt.type() != 10:  # KeyDown
+                    return evt
+
+                flags = evt.modifierFlags()
+                cmd = bool(flags & NSEventModifierFlagCommand)
+                shift = bool(flags & NSEventModifierFlagShift)
+
+                if not cmd:
+                    return evt
+
+                ch = evt.charactersIgnoringModifiers()
+
+                # ⌘ + T
+                if ch == "t":
+                    self.actNewTab_(None)
+                    return None
+
+                # ⌘ + W
+                if ch == "w":
+                    self.actCloseTab_(None)
+                    return None
+
+                # ⌘ + R
+                if ch == "r":
+                    self.actReload_(None)
+                    return None
+
+                # ⌘ + L
+                if ch == "l":
+                    self.window.makeFirstResponder_(self.addr)
+                    return None
+
+                # 🔥 ⌘ + S  → Snapshot
+                if ch == "s":
+                    self.actSnapshot_(None)
+                    return None
+
+                # 🔥 ⌘ + Shift + X  → Instant Exit
+                if ch == "x" and shift:
+                    NSApp().terminate_(None)
+                    return None
+
+            except Exception as e:
+                print("Key handler error:", e)
+
             return evt
-        NSEvent.addLocalMonitorForEventsMatchingMask_handler_(1<<10, handler)
+
+        NSEvent.addLocalMonitorForEventsMatchingMask_handler_(1 << 10, handler)
+
         
     def __del__(self):
         try:
@@ -2826,6 +2863,29 @@ class Browser(NSObject):
         except Exception:
             pass
             
+    def actSnapshot_(self, sender):
+        try:
+            wk = self.tabs[self.active].view
+
+            def handler(image, error):
+                if image and not error:
+                    from AppKit import NSSavePanel
+                    panel = NSSavePanel.savePanel()
+                    panel.setNameFieldStringValue_("darkelf_snapshot.png")
+
+                    if panel.runModal() == 1:
+                        url = panel.URL()
+                        tiff = image.TIFFRepresentation()
+                        from AppKit import NSBitmapImageRep
+                        rep = NSBitmapImageRep.imageRepWithData_(tiff)
+                        png = rep.representationUsingType_properties_(4, None)  # PNG
+                        png.writeToURL_atomically_(url, True)
+
+            wk.takeSnapshotWithConfiguration_completionHandler_(None, handler)
+
+        except Exception as e:
+            print("[Snapshot] Failed:", e)
+
 class AppDelegate(NSObject):
 
     def applicationShouldTerminate_(self, sender):
