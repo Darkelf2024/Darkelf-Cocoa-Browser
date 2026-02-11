@@ -1047,34 +1047,7 @@ class Browser(NSObject):
         if hasattr(b, "setContentTintColor_"):
             b.setContentTintColor_(NSColor.whiteColor())
         return b
-                    
-    # ----- Toolbar -----
-    def _mk_btn(self, symbol, tooltip):
-        b = HoverButton.alloc().init()
-        try:
-            img = NSImage.imageWithSystemSymbolName_accessibilityDescription_(symbol, None)
-            # First, try the user-requested configuration
-            cfg = NSImageSymbolConfiguration.configurationWithPointSize_weight_scale_(54.0, 2, 2)
-            if img and hasattr(img, "imageByApplyingSymbolConfiguration_"):
-                img = img.imageByApplyingSymbolConfiguration_(cfg)
-            if img:
-                try:
-                    img.setTemplate_(True)
-                except Exception:
-                    pass
-                b.setImage_(img)
-        except Exception:
-            pass
-        try:
-            b.setBordered_(False)
-            b.setBezelStyle_(1)
-            b.setToolTip_(tooltip or "")
-        except Exception:
-            pass
-        if hasattr(b, "setContentTintColor_"):
-            b.setContentTintColor_(NSColor.whiteColor())
-        return b
-                    
+                                        
     def _make_toolbar(self):
         from AppKit import NSColor, NSAppearance
         tb = NSToolbar.alloc().initWithIdentifier_("DarkelfToolbar")
