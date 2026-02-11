@@ -1,4 +1,4 @@
-# Darkelf Cocoa Hardened Browser v3.1 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa Hardened Browser v3.6 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -19,14 +19,14 @@
 # ────────────────────────────────────────────────────────────────────────────────
 # PROJECT SCOPE (EPHEMERAL COCOA BUILD)
 # Darkelf Cocoa Browser is the macOS edition of the Darkelf-Mini project,
-# implemented using PyObjC bindings to Apple’s Cocoa and WebKit frameworks.
+# implemented using PyObjC bindings to Apple's Cocoa and WebKit frameworks.
 #
 # • All browsing data (cookies, cache, history, localStorage, IndexedDB, etc.)
 #   is held in memory only and automatically discarded when the process exits.
 # • Download requests are disabled by default to prevent disk persistence.
 # • No telemetry, analytics, or network beacons are included.
 # • Tracker detection and privacy monitoring are implemented through
-#   DarkelfMiniAI — an on-device heuristic filter that inspects network headers
+#   on-device heuristic filters that inspect network headers
 #   and JavaScript activity without transmitting data externally.
 #
 # For additional defense-in-depth, users are encouraged to use macOS full-disk
@@ -35,7 +35,7 @@
 # ────────────────────────────────────────────────────────────────────────────────
 # EXPORT / CRYPTOGRAPHY NOTICE
 # This source distribution does not itself implement proprietary cryptographic
-# algorithms. Any network encryption (such as TLS/SSL) is provided by Apple’s
+# algorithms. Any network encryption (such as TLS/SSL) is provided by Apple's
 # WebKit and macOS security frameworks under their respective licenses.
 #
 # If you distribute binaries that include or link against cryptographic
@@ -90,6 +90,48 @@ from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttribute
 from WebKit import WKContentRuleListStore
 import json
 
+# =========================
+# Darkelf MiniAI (SAFE / PASSIVE)
+# =========================
+class DarkelfMiniAISentinel:
+    """
+    Cocoa-safe Darkelf MiniAI
+    Passive observer only
+    No JS injection
+    No blocking
+    No timers
+    """
+    def __init__(self):
+        self.enabled = True
+        self.events = []
+        self.tracker_hits = 0
+        self.suspicious_hits = 0
+        print("[MiniAI] Sentinel enabled (passive mode)")
+
+    def monitor_network(self, url, headers):
+        if not self.enabled or not url:
+            return
+        try:
+            u = url.lower()
+            if any(x in u for x in ("exploit","payload","phish","malware")):
+                self.suspicious_hits += 1
+            if any(x in u for x in ("tracker","analytics","beacon","doubleclick")):
+                self.tracker_hits += 1
+            self.events.append(u)
+            if len(self.events) > 500:
+                self.events.pop(0)
+        except Exception:
+            pass
+
+    def on_tracker_blocked(self, count):
+        try:
+            self.tracker_hits += int(count)
+        except Exception:
+            pass
+
+    def shutdown(self):
+        self.enabled = False
+        
 HOME_URL = "darkelf://home"
 HOME_HOST = "Darkelf Home"
 
@@ -205,7 +247,7 @@ class ContentRuleManager:
 
 # ---- Darkelf Diagnostics / Kill-Switches ----
 DARKELF_DISABLE_COOKIE_SCRUBBER = False   # set True to rule out NSTimer cookie scrubber
-DARKELF_DISABLE_JS_HANDLERS    = False    # set True to disable all JS message handlers (netlog/search/tracker/panic)
+DARKELF_DISABLE_JS_HANDLERS    = False    # set True to disable all JS message handlers (netlog/search/tracker)
 DARKELF_DISABLE_RESIZE_HANDLER = False    # set True to ignore onResize notifications
 
 # ---- Local CSP (off by default) ----
@@ -290,19 +332,6 @@ class _NavDelegate(NSObject):
         except Exception:
             pass
 
-    # ✅ NEW: Receive messages posted from NETLOG_JS and forward them to MiniAI
-    def userContentController_didReceiveScriptMessage_(self, ucc, message):
-        try:
-            if message.name() != "netlog":
-                return
-            data = message.body() or {}
-            url = str(data.get("url", ""))
-            headers = data.get("headers", {}) or {}
-            if hasattr(self._owner, "mini_ai"):
-                self._owner.mini_ai.monitor_network(url, headers)
-        except Exception as e:
-            print("[Netlog Handler] Error:", e)
-
     def webView_decidePolicyForNavigationAction_decisionHandler_(self, webView, navAction, decisionHandler):
         handled = False
         try:
@@ -340,16 +369,6 @@ class _NavDelegate(NSObject):
                 handled = True
                 return
 
-            # 📡 MiniAI network monitor (UNCHANGED)
-            try:
-                if hasattr(self._owner, "mini_ai"):
-                    headers = dict(req.allHTTPHeaderFields() or {})
-                    self._owner.mini_ai.monitor_network(
-                        str(url.absoluteString()), headers
-                    )
-            except Exception as e:
-                print("[Network Monitor] Failed:", e)
-
         except Exception:
             pass
         finally:
@@ -357,7 +376,7 @@ class _NavDelegate(NSObject):
                 decisionHandler(WKNavigationActionPolicyAllow)
 
     def webView_didFailProvisionalNavigation_withError_(self, webView, nav, error):
-        pass  
+        pass
         
 IS_MAC = sys.platform == "darwin"
 if not IS_MAC:
@@ -368,127 +387,200 @@ APP_NAME = "Darkelf"
 HOMEPAGE_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Darkelf Browser — Cocoa, Private, Hardened</title>
-  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
-  <style>
-    :root{--bg:#0a0b10;--accent:#34C759;--border:rgba(255,255,255,.10);--input-bg:#12141b;--input-text:#e5e7eb;}
-    *{box-sizing:border-box}
-    html,body{height:100%}
-    body{
-      margin:0;
-      font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
-      background:
-        radial-gradient(1200px 600px at 20% -10%, rgba(4,168,200,.25), transparent 60%),
-        radial-gradient(1000px 600px at 120% 10%, rgba(52,199,89,.18), transparent 60%),
-        var(--bg);
-      color:#eef2f6;
-      display:flex;
-      justify-content:center;
-      align-items:center;
-    }
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Darkelf Browser — Cocoa, Private, Hardened</title>
 
-    .container{
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      gap:18px;
-      padding:24px;
-      text-align:center;
-    }
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
 
-    .brand{
-      display:flex;
-      gap:10px;
-      align-items:center;
-      justify-content:center;
-      font-weight:700;
-      font-size:2rem;
-      color:var(--accent);
-    }
-    .brand i{color:var(--accent);}
-    .brand span{color:var(--accent);}
+<style>
+:root{
+  --bg:#07080d;
+  --green:#34C759;
+  --cyan:#04a8c8;
+  --border:rgba(255,255,255,.10);
+  --input-bg:#12141b;
+  --text:#eef2f6;
+  --muted:#9aa3ad;
+}
 
-    .tagline{
-      font-size:1.25rem;
-      font-weight:800;
-      letter-spacing:.20em;
-      text-transform:uppercase;
-      color:#cfd8e3;
-      margin:0;
-    }
+*{box-sizing:border-box}
+html,body{height:100%}
 
-    .search-wrap{
-      display:flex;
-      align-items:stretch;
-      gap:10px;
-      justify-content:center;
-      width:100%;
-    }
-    .search-wrap input{
-      height:48px;
-      padding:0 16px;
-      width:min(720px,92vw);
-      border-radius:12px;
-      border:1px solid var(--border);
-      background:var(--input-bg);
-      color:var(--input-text);
-      font-size:16px;
-      outline:none;
-      color:#fff;
-      -webkit-text-fill-color:#fff;
-    }
-    .search-wrap input::placeholder{color:#9aa3ad;}
-    .search-wrap input:focus{box-shadow:0 0 0 3px rgba(52,199,89,.30);border-color:transparent;}
-    .search-wrap button{
-      width:48px;height:48px;border-radius:12px;border:none;cursor:pointer;font-size:20px;
-      display:inline-flex;align-items:center;justify-content:center;color:#fff;background:var(--accent);
-    }
-    .search-wrap button:focus{outline:2px solid #34C759;}
-  </style>
+body{
+  margin:0;
+  font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+  color:var(--text);
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  overflow:hidden;
+  background:var(--bg);
+}
+
+/* Aurora */
+body::before,
+body::after{
+  content:"";
+  position:absolute;
+  inset:-20%;
+  z-index:-2;
+  background:
+    radial-gradient(900px 500px at 20% 10%, rgba(4,168,200,.18), transparent 60%),
+    radial-gradient(800px 500px at 80% 20%, rgba(52,199,89,.22), transparent 60%),
+    radial-gradient(600px 400px at 50% 90%, rgba(52,199,89,.12), transparent 60%);
+  animation:drift 36s ease-in-out infinite;
+}
+body::after{
+  animation-duration:54s;
+  animation-direction:reverse;
+  opacity:.6;
+}
+@keyframes drift{
+  0%{transform:translate(0,0)}
+  50%{transform:translate(-6%,-4%)}
+  100%{transform:translate(0,0)}
+}
+
+.vignette{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background:radial-gradient(circle at center, transparent 55%, rgba(0,0,0,.6));
+  z-index:-1;
+}
+
+.container{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:20px;
+  padding:36px;
+  text-align:center;
+}
+
+.brand{
+  display:flex;
+  gap:12px;
+  align-items:center;
+  font-weight:900;
+  font-size:2.3rem;
+  color:var(--green);
+}
+.brand i{
+  font-size:2.6rem;
+  filter:drop-shadow(0 0 18px rgba(52,199,89,.55));
+}
+
+.tagline{
+  font-size:1.05rem;
+  font-weight:800;
+  letter-spacing:.28em;
+  text-transform:uppercase;
+  color:#cfd8e3;
+  margin-top:-6px;
+}
+
+.search-wrap{
+  display:flex;
+  gap:12px;
+  margin-top:18px;
+}
+.search-wrap input{
+  height:54px;
+  padding:0 18px;
+  width:min(720px,92vw);
+  border-radius:14px;
+  border:1px solid var(--border);
+  background:var(--input-bg);
+  color:#fff;
+  font-size:17px;
+  outline:none;
+}
+.search-wrap input:focus{
+  box-shadow:0 0 0 3px rgba(52,199,89,.35);
+  border-color:transparent;
+}
+.search-wrap button{
+  width:56px;
+  height:54px;
+  border-radius:14px;
+  border:none;
+  cursor:pointer;
+  font-size:20px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:#fff;
+  background:var(--green);
+  box-shadow:0 0 22px rgba(52,199,89,.55);
+}
+
+.ai-status{
+  margin-top:6px;
+  font-size:.78rem;
+  color:var(--muted);
+  opacity:.75;
+  letter-spacing:.06em;
+}
+
+.status-badges{
+  display:flex;
+  gap:12px;
+  margin-top:24px;
+  flex-wrap:wrap;
+  justify-content:center;
+}
+
+.status-chip{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:8px 14px;
+  border-radius:999px;
+  font-size:.75rem;
+  font-weight:700;
+  letter-spacing:.06em;
+  background:rgba(52,199,89,.12);
+  border:1px solid rgba(52,199,89,.35);
+  color:var(--green);
+}
+</style>
 </head>
+
 <body>
-  <div class="container">
-    <div class="brand">
-      <i class="bi bi-shield-lock"></i>
-      <span>Darkelf Browser</span>
-    </div>
-    <div class="tagline">Cocoa • Private • Hardened</div>
-    <form class="search-wrap"
-      action="https://lite.duckduckgo.com/lite/"
-      method="get" role="search" aria-label="Search DuckDuckGo">
-      <input type="text" name="q" placeholder="Search DuckDuckGo" aria-label="Search query" />
-      <button type="submit" aria-label="Search">
-        <i class="bi bi-search"></i>
-      </button>
-    </form>
+
+<div class="vignette"></div>
+
+<div class="container">
+  <div class="brand">
+    <i class="bi bi-shield-lock"></i>
+    <span>Darkelf Browser</span>
+  </div>
+  <div class="tagline">Cocoa • Private • Hardened</div>
+
+  <form class="search-wrap" action="https://lite.duckduckgo.com/lite/" method="get">
+    <input type="text" name="q" placeholder="Search DuckDuckGo" autofocus/>
+    <button type="submit"><i class="bi bi-search"></i></button>
+  </form>
+
+  <div id="ai-status" class="ai-status">
+    Darkelf MiniAI Sentinel active — passive monitoring enabled
   </div>
 
-  <script>
-  (function() {
-      // Only run if in WKWebView (macOS)
-      if (!navigator.platform.toLowerCase().includes('mac')) return;
-      var form = document.querySelector('.search-wrap');
-      if (form) {
-          form.addEventListener('submit', function(ev) {
-              ev.preventDefault();
-              var q = form.querySelector('input[name="q"]').value;
-              if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.search) {
-                  window.webkit.messageHandlers.search.postMessage(q);
-              } else {
-                  // fallback: redirect to DDG Lite results page
-                  window.location.href = "https://lite.duckduckgo.com/lite/?q=" + encodeURIComponent(q);
-              }
-          });
-      }
-  })();
-  </script>
+  <div class="status-badges">
+    <div class="status-chip"><i class="bi bi-file-lock"></i> CSP Active</div>
+    <div class="status-chip"><i class="bi bi-fingerprint"></i> FP Defense</div>
+    <div class="status-chip"><i class="bi bi-shield-check"></i> Tracker Block</div>
+    <div class="status-chip"><i class="bi bi-incognito"></i> Zero Persistence</div>
+  </div>
+</div>
+
 </body>
 </html>
 """
-            
+
 # ADVANCED SPOOFING SCRIPTS
 USER_AGENT_SPOOF = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:78.0) Gecko/20100101 Firefox/78.0"
@@ -762,304 +854,6 @@ LETTERBOX_JS = r"""
 })();
 """
 
-# MINI AI (from PyWebView version, adapted)
-class DarkelfMiniAI(NSObject):
-    TRUSTED_DOMAINS = [
-        "duckduckgo.com",
-        "lite.duckduckgo.com",
-        "duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion",
-        "browserleaks.com",
-        "privacytools.io",
-        "coveryourtracks.eff.org"
-    ]
-    MALWARE_PATTERNS = [
-        r"(onerror\s*=|<script.*src=.*(\.php|\.exe|\.js)\??|<iframe.*src=.*hack)",
-        r"(base64,|eval\(|atob\()",
-        r"(document\.cookie|localStorage|sessionStorage)\s*=",
-        r"(window\.open\(|location\.replace\(|location\.assign\()",
-        r"(navigator\.sendBeacon|navigator\.clipboard|navigator\.mediaDevices)",
-        r"(fetch\(|XMLHttpRequest|ActiveXObject)"
-    ]
-    PHISHING_KEYWORDS = [
-        "login", "verify", "update account", "reset password",
-        "bank", "security alert", "recovery", "payment", "confirm", "restricted"
-    ]
-    SNIFFING_HEADER_PATTERNS = [
-        "x-forwarded-for", "via", "proxy-connection", "user-agent:curl", "user-agent:nmap"
-    ]
-    KNOWN_TOOL_SIGNATURES = [
-        "wireshark", "burpsuite", "mitmproxy", "fiddler", "nmap", "tcpdump", "ettercap"
-    ]
-    PANIC_LOCKOUT_SEC = 120
-
-    TRACKER_PATTERNS = [
-        r"(^|\.)google-analytics\.com$",
-        r"(^|\.)googletagmanager\.com$",
-        r"(^|\.)googleadservices\.com$",
-        r"(^|\.)doubleclick\.net$",
-        r"(^|\.)adservice\.google\.com$",
-        r"(^|\.)facebook\.net$",
-        r"(^|\.)connect\.facebook\.com$",
-        r"(^|\.)facebook\.com\/tr",            # Facebook Pixel endpoint
-        r"(^|\.)pixel\.facebook\.com",
-        r"(^|\.)ads\.twitter\.com",
-        r"(^|\.)analytics\.twitter\.com",
-        r"(^|\.)hotjar\.com",
-        r"(^|\.)mixpanel\.com",
-        r"(^|\.)segment\.io$",
-        r"(^|\.)amplitude\.com",
-        r"(^|\.)quantserve\.com",
-        r"(^|\.)scorecardresearch\.com",
-        r"(^|\.)cdn\.ampproject\.org",        # include some CDNs that host trackers
-        r"(^|\.)adroll\.com",
-        r"(^|\.)criteo\.com",
-        r"(^|\.)taboola\.com",
-        r"(^|\.)outbrain\.com",
-        r"(^|\.)sentry\.io",                  # error+telemetry endpoints (optional)
-        r"(^|\.)clarity\.microsoft\.com",
-        r"(^|\.)bing-analytics\.com",
-        r"\btrack(er|ing|ify|js)\b",          # generic 'track' or 'tracking' script names
-        r"\bpixel\b",
-        r"\bad(s|service|server)\b",
-    ]
-
-    def initWithBrowser_(self, browser):
-        self = objc.super(DarkelfMiniAI, self).init()
-        if self is None:
-            return None
-        self.browser = browser
-        self.panic_mode = False
-        self._panic_timer = None
-        return self
-
-    @objc.python_method
-    def inject(self, wkview):
-        self._inject_js(wkview, self._js_panic_bridge())
-        self._inject_js(wkview, self._js_phishing_malware_detector())
-        self._inject_js(wkview, self._js_sniffer_detector())
-        self._inject_js(wkview, NETLOG_JS)
-        self._inject_js(wkview, LETTERBOX_JS)
-
-    @objc.python_method
-    def _inject_js(self, wkview, js):
-        try:
-            from WebKit import WKUserScript
-            ucc = wkview.configuration().userContentController()
-            script = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
-                js, 1, False
-            )
-            ucc.addUserScript_(script)
-        except Exception as e:
-            print("[MiniAI] JS inject failed:", e)
-
-    @objc.python_method
-    def monitor_network(self, url, headers):
-        """Monitor outgoing requests for suspicious, sniffing, or tracking activity."""
-        if self.panic_mode:
-            return
-
-        # --- 1. Detect sniffing headers ---
-        for h, v in headers.items():
-            for patt in self.SNIFFING_HEADER_PATTERNS:
-                if patt in str(h).lower() or patt in str(v).lower():
-                    self.trigger_panic(f"Sniffing header detected: {h}: {v}")
-                    return
-
-        # --- 2. Detect known interception / hacking tools ---
-        url_l = (url or "").lower()
-        for sig in self.KNOWN_TOOL_SIGNATURES:
-            if sig in url_l or any(sig in str(v).lower() for v in headers.values()):
-                self.trigger_panic(f"Known tool detected: {sig}")
-                return
-
-        # --- 3. Detect trackers / analytics / ad networks ---
-        import re
-        matched_tracker = None
-        for patt in getattr(self, "TRACKER_PATTERNS", []):
-            if re.search(patt, url_l, re.IGNORECASE):
-                matched_tracker = patt
-                break
-
-        if matched_tracker:
-            # Increment counter safely
-            self.tracker_count = getattr(self, "tracker_count", 0) + 1
-            print(f"[Tracker Blocked] {url}  (pattern: {matched_tracker})")
-
-            # Optional: update UI label if available
-            if hasattr(self, "update_tracker_label"):
-                try:
-                    self.update_tracker_label()
-                except Exception as e:
-                    print("[Tracker UI] Failed to update label:", e)
-
-            # Optional: block request logic (uncomment if needed)
-            # self.trigger_panic(f"Tracker blocked: {url}")
-            return
-
-    def showPanicAlert_(self, reason):
-        try:
-            from AppKit import NSAlert
-            alert = NSAlert.alloc().init()
-            alert.setMessageText_("PANIC MODE: Suspicious Activity Detected!")
-            alert.setInformativeText_(f"Reason: {reason}\nBrowsing is temporarily locked.")
-            alert.runModal()
-        except Exception as e:
-            print(f"[MiniAI] Show Panic Alert failed: {e}")
-
-    def showReleaseAlert_(self, _):
-        try:
-            from AppKit import NSAlert
-            alert = NSAlert.alloc().init()
-            alert.setMessageText_("Panic mode released")
-            alert.setInformativeText_("Browsing restored.")
-            alert.runModal()
-        except Exception as e:
-            print(f"[MiniAI] Show Release Alert failed: {e}")
-
-    @objc.python_method
-    def trigger_panic(self, reason=""):
-        if self.panic_mode:
-            return
-        self.panic_mode = True
-
-        try:
-            self.browser.js_enabled = False
-            self.browser._rebuild_active_webview()
-        except Exception as e:
-            print("[MiniAI] JS disable/rebuild failed:", e)
-
-        try:
-            self.browser.actHome_(None)
-        except Exception as e:
-            print("[MiniAI] actHome_ failed:", e)
-
-        try:
-            if hasattr(self.browser, "tor_on") and self.browser.tor_on:
-                TOR.stop()
-                self.browser.tor_on = False
-        except Exception as e:
-            print("[MiniAI] Tor stop failed:", e)
-
-        try:
-            self.performSelectorOnMainThread_withObject_waitUntilDone_("showPanicAlert_", reason, False)
-        except Exception as e:
-            print(f"PANIC MODE ACTIVATED (no modal): {reason} [{e}]")
-
-        if self._panic_timer:
-            self._panic_timer.cancel()
-        import threading
-        self._panic_timer = threading.Timer(self.PANIC_LOCKOUT_SEC, lambda: self.performSelectorOnMainThread_withObject_waitUntilDone_("releasePanicMainThread_", None, False))
-        self._panic_timer.start()
-
-    def releasePanicMainThread_(self, _):
-        self._release_panic()
-
-    @objc.python_method
-    def _release_panic(self):
-        self.panic_mode = False
-        try:
-            self.browser.js_enabled = True
-            self.browser._rebuild_active_webview()
-        except Exception as e:
-            print("[MiniAI] JS enable/rebuild failed:", e)
-        try:
-            self.browser.actReload_(None)
-        except Exception as e:
-            print("[MiniAI] actReload_ failed:", e)
-        try:
-            self.performSelectorOnMainThread_withObject_waitUntilDone_("showReleaseAlert_", None, False)
-        except Exception as e:
-            print("[MiniAI] Release alert failed:", e)
-
-    @objc.python_method
-    def _js_panic_bridge(self):
-        return r"""
-        if (!window.__darkelf_panic_trigger) {
-          window.__darkelf_panic_trigger = function(reason) {
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.panic) {
-                window.webkit.messageHandlers.panic.postMessage(reason);
-            }
-          }
-        }
-        """
-
-    @objc.python_method
-    def _js_phishing_malware_detector(self):
-        trusted_domains_js = json.dumps(self.TRUSTED_DOMAINS)
-        js = f"""
-        (() => {{
-            var trusted = {trusted_domains_js};
-            if (trusted.some(domain => window.location.hostname.indexOf(domain) !== -1)) return;
-
-            const phishingWords = {repr(self.PHISHING_KEYWORDS)};
-            const malwarePatterns = [{','.join([repr(p) for p in self.MALWARE_PATTERNS])}].map(r => new RegExp(r, "i"));
-            let panic = false;
-            function scanForms() {{
-                const forms = document.querySelectorAll("form");
-                for (const f of forms) {{
-                    const txt = (f.textContent || "") + " " + (f.outerHTML || "");
-                    if (f.querySelector('input[type="password"]')) {{
-                        for (const w of phishingWords) {{
-                            if (txt.toLowerCase().includes(w)) {{
-                                window.__darkelf_panic_trigger && window.__darkelf_panic_trigger("Phishing form detected: " + w);
-                                panic = true; return;
-                            }}
-                        }}
-                    }}
-                }}
-            }}
-            function scanScripts() {{
-                const scripts = document.querySelectorAll("script");
-                for (const s of scripts) {{
-                    const code = s.textContent || s.src || "";
-                    for (const r of malwarePatterns) {{
-                        if (r.test(code)) {{
-                            window.__darkelf_panic_trigger && window.__darkelf_panic_trigger("Malware script detected.");
-                            panic = true; return;
-                        }}
-                    }}
-                }}
-            }}
-            function runScans() {{
-                if (panic) return;
-                scanForms(); scanScripts();
-            }}
-            runScans();
-            document.addEventListener("DOMContentLoaded", runScans);
-            setTimeout(runScans, 1500);
-        }})();
-        """
-        return js
-
-    @objc.python_method
-    def _js_sniffer_detector(self):
-        js = r"""
-        (() => {
-            function trigger(reason) {
-                window.__darkelf_panic_trigger && window.__darkelf_panic_trigger(reason);
-            }
-            if (window.RTCPeerConnection || window.webkitRTCPeerConnection) {
-                trigger("WebRTC detected (possible sniffing).");
-            }
-            if (window.Wireshark || window.BurpSuite || window.Fiddler) {
-                trigger("Known sniffing tool detected.");
-            }
-            let evalCount = 0;
-            const origEval = window.eval;
-            window.eval = function(code) {
-                evalCount++; if (evalCount > 3) trigger("Excessive eval() usage (possible malware).");
-                return origEval(code);
-            };
-            let funcCount = 0;
-            const OrigFunc = Function;
-            window.Function = function(...args) {
-                funcCount++; if (funcCount > 3) trigger("Excessive Function() usage (possible malware).");
-                return OrigFunc(...args);
-            };
-        })();
-        """
-        return js
-        
 TOR_AVAILABLE = True
 try:
     from stem.process import launch_tor_with_config
@@ -1116,7 +910,6 @@ def tracker_js(block_hosts: List[str]) -> str:
     hosts = json.dumps(block_hosts)
     return """(() => {
   const blockedHosts = new Set(%s);
-  const post = (n) => window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.tracker && window.webkit.messageHandlers.tracker.postMessage(n);
   let count = 0;
   function shouldBlock(u){
     try{ const h=new URL(u, location.href).hostname;
@@ -1126,12 +919,12 @@ def tracker_js(block_hosts: List[str]) -> str:
   const origFetch = window.fetch;
   window.fetch = async function(input, init){
     const url = (typeof input==='string') ? input : (input && input.url) || '';
-    if (shouldBlock(url)) { count++; post(count); return new Response('', {status: 204}); }
+    if (shouldBlock(url)) { count++; return new Response('', {status: 204}); }
     return origFetch.apply(this, arguments);
   };
   const open = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function(m,u){
-    if (shouldBlock(u)) { count++; post(count); this.abort(); return; }
+    if (shouldBlock(u)) { count++; this.abort(); return; }
     return open.apply(this, arguments);
   };
 })();""" % hosts
@@ -1159,38 +952,6 @@ class HoverButton(NSButton):
         try: self.setContentTintColor_(NSColor.whiteColor())
         except Exception: pass
 
-class BadgeView(NSView):
-    def init(self):
-        self = objc.super(BadgeView, self).initWithFrame_(((0,0),(18,18)))
-        if self is None: return None
-        self.count = 0
-        self.hidden = True
-        self.setWantsLayer_(True)
-        return self
-    def setCount_(self, n):
-        self.count = int(n)
-        self.hidden = (self.count <= 0)
-        self.setNeedsDisplay_(True)
-        self.displayIfNeeded()
-    def isHidden(self): return self.hidden
-    def drawRect_(self, rect):
-        if self.hidden: return
-        NSColor.colorWithCalibratedRed_green_blue_alpha_(0.2,1.0,0.5,1.0).set()
-        path = NSBezierPath.bezierPathWithOvalInRect_(((0,0),(18,18)))
-        path.fill()
-        NSColor.colorWithCalibratedRed_green_blue_alpha_(0.0,0.5,0.25,1.0).set()
-        path.setLineWidth_(1.0); path.stroke()
-        txt = str(self.count)
-        attrs = {
-            "NSFont": NSFont.systemFontOfSize_(10.0),
-            "NSForegroundColor": NSColor.blackColor()
-        }
-        s = NSAttributedString.alloc().initWithString_attributes_(txt, attrs)
-        size = s.size()
-        x = (18 - size.width)/2.0
-        y = (18 - size.height)/2.0 - 0.5
-        s.drawAtPoint_((x,y))
-
 # ================= Tabs =================
 @dataclass
 class Tab:
@@ -1200,20 +961,13 @@ class Tab:
     canvas_seed: int = None  # Unique canvas seed per tab
 
 # ================= Script Message Handler =================
-class TrackerHandler(objc.lookUpClass("NSObject")):
-    def initWithOwner_(self, owner):
-        self = objc.super(TrackerHandler, self).init()
-        if self is None: return None
-        self.owner = owner; return self
-    def userContentController_didReceiveScriptMessage_(self, controller, message):
-        try: self.owner.bump_tracker_count(int(message.body()))
-        except Exception: pass
-
 class SearchHandler(objc.lookUpClass("NSObject")):
     def initWithOwner_(self, owner):
         self = objc.super(SearchHandler, self).init()
         if self is None: return None
-        self.owner = owner; return self
+        self.owner = owner
+        return self
+        
     def userContentController_didReceiveScriptMessage_(self, controller, message):
         try:
             q = str(message.body())
@@ -1222,19 +976,63 @@ class SearchHandler(objc.lookUpClass("NSObject")):
         except Exception as e:
             print("SearchHandler error:", e)
             
-# Script Message Handler for MiniAI Panic ==========
-class MiniAIPanicHandler(objc.lookUpClass("NSObject")):
+class JSToggleHandler(objc.lookUpClass("NSObject")):
     def initWithOwner_(self, owner):
-        self = objc.super(MiniAIPanicHandler, self).init()
-        if self is None: return None
-        self.owner = owner; return self
+        self = objc.super(JSToggleHandler, self).init()
+        if self is None:
+            return None
+        self.owner = owner
+        return self
+
     def userContentController_didReceiveScriptMessage_(self, controller, message):
         try:
-            reason = str(message.body())
-            self.owner.mini_ai.trigger_panic(reason)
-        except Exception: pass
-        
-# BROWSER CONTROLLER PATCH ===============
+            # Toggle global JS state
+            self.owner.js_enabled = not getattr(self.owner, "js_enabled", True)
+
+            state = "ENABLED" if self.owner.js_enabled else "DISABLED"
+            print(f"[JS Toggle] JavaScript {state}")
+
+            # 🔥 Apply JS preference to active webview
+            wk = self.owner.tabs[self.owner.active].view
+            prefs = wk.configuration().preferences()
+            prefs.setJavaScriptEnabled_(self.owner.js_enabled)
+
+            # If on homepage, just update UI and DO NOT rebuild
+            try:
+                url = wk.URL()
+                if url and url.absoluteString() == HOME_URL:
+                    js_update = f"""
+                        if (window.DarkelfStatus && window.DarkelfStatus.update) {{
+                            window.DarkelfStatus.update({{js: {str(self.owner.js_enabled).lower()}}});
+                        }}
+                    """
+                    wk.evaluateJavaScript_completionHandler_(js_update, None)
+                    return
+            except Exception:
+                pass
+
+            # For external sites: reload instead of full rebuild (lighter + safer)
+            wk.reload()
+
+        except Exception as e:
+            print("[JSToggleHandler] error:", e)
+            
+class TorToggleHandler(NSObject):
+    def initWithOwner_(self, owner):
+        self = objc.super(TorToggleHandler, self).init()
+        if self is None:
+            return None
+        self.owner = owner
+        return self
+
+    def userContentController_didReceiveScriptMessage_(self, controller, message):
+        try:
+            # Call the SAME method your toolbar button uses
+            self.owner.actTor_(None)
+        except Exception as e:
+            print("[TorToggleHandler] error:", e)
+
+# BROWSER CONTROLLER ===============
 class Browser(NSObject):
     def init(self):
         self = objc.super(Browser, self).init()
@@ -1242,7 +1040,9 @@ class Browser(NSObject):
         
         self.csp_enabled = True
         self.js_enabled = True
+        self.tor_on = False
         self.window = self._make_window()
+        self.mini_ai = DarkelfMiniAISentinel()
         self.toolbar = self._make_toolbar()
         self.window.setToolbar_(self.toolbar)
         try: self.window.toolbar().setVisible_(True)
@@ -1253,7 +1053,6 @@ class Browser(NSObject):
         self.tab_close_btns: List[NSButton] = []
         self.active = -1
         self.tor_on = False
-        self._tracker_count = 0
 
         self._tab_neon_green = NSColor.colorWithCalibratedRed_green_blue_alpha_(52/255.0, 199/255.0, 89/255.0, 1.0)
         self._tab_neon_green_cg = (self._tab_neon_green.CGColor())
@@ -1275,15 +1074,6 @@ class Browser(NSObject):
         except Exception:
             pass
 
-        self.mini_ai = DarkelfMiniAI.alloc().initWithBrowser_(self)
-        self.tracker_count = 0
-        try:
-            if 0 <= self.active < len(self.tabs):
-                self.mini_ai.inject(self.tabs[self.active].view)
-            print("[Init] MiniAI tracker monitor initialized")
-        except Exception as e:
-            print("[Init] MiniAI inject failed:", e)
-
         self.window.makeKeyAndOrderFront_(None)
 
         # Resize listener
@@ -1297,6 +1087,9 @@ class Browser(NSObject):
         self.window.makeKeyAndOrderFront_(None)
         NSApp().activateIgnoringOtherApps_(True)
         return self
+        
+    def toggle_tor(self):
+        self.actTor_(None)
 
     # ---- SAFE COOKIE SCRUBBER (selector-based; fixes NSTimer segfault) ----
     def _start_cookie_scrubber(self):
@@ -1412,10 +1205,6 @@ class Browser(NSObject):
             cfg = NSImageSymbolConfiguration.configurationWithPointSize_weight_scale_(54.0, 2, 2)
             if img and hasattr(img, "imageByApplyingSymbolConfiguration_"):
                 img = img.imageByApplyingSymbolConfiguration_(cfg)
-        # Optionally fallback to prior config if needed (commented out unless fallback is desired)
-        # if not img:
-        #     cfg = NSImageSymbolConfiguration.configurationWithPointSize_weight_scale_(32.0, 1, 1)
-        #     img = img.imageByApplyingSymbolConfiguration_(cfg)
             if img:
                 try:
                     img.setTemplate_(True)
@@ -1433,185 +1222,7 @@ class Browser(NSObject):
         if hasattr(b, "setContentTintColor_"):
             b.setContentTintColor_(NSColor.whiteColor())
         return b
-        
-    @objc.python_method
-    def _show_quick_controls_popover(self, anchor_view):
-        from AppKit import (
-            NSPopover, NSView, NSStackView, NSTextField, NSSwitch,
-            NSColor, NSLayoutConstraint, NSImage, NSImageView,
-            NSImageSymbolConfiguration, NSViewController, NSFont
-        )
-
-        ACCENT = NSColor.colorWithCalibratedRed_green_blue_alpha_(52/255.0,199/255.0,89/255.0,1.0)
-
-        pop = NSPopover.alloc().init()
-        pop.setBehavior_(1)
-        pop.setAnimates_(True)
-
-        root = NSView.alloc().initWithFrame_(((0, 0), (260, 200)))
-        stack = NSStackView.alloc().init()
-        stack.setOrientation_(1)  # vertical
-        stack.setSpacing_(16.0)
-        stack.setTranslatesAutoresizingMaskIntoConstraints_(False)
-        root.addSubview_(stack)
-
-        NSLayoutConstraint.activateConstraints_([
-            stack.topAnchor().constraintEqualToAnchor_constant_(root.topAnchor(), 12),
-            stack.leadingAnchor().constraintEqualToAnchor_constant_(root.leadingAnchor(), 12),
-            stack.trailingAnchor().constraintEqualToAnchor_constant_(root.trailingAnchor(), -12),
-            stack.bottomAnchor().constraintEqualToAnchor_constant_(root.bottomAnchor(), -12),
-        ])
-
-        def get_icon(symbol_name):
-            icon = None
-            try:
-                icon = NSImage.imageWithSystemSymbolName_accessibilityDescription_(symbol_name, None)
-                if icon and hasattr(icon, "imageByApplyingSymbolConfiguration_"):
-                    cfg = NSImageSymbolConfiguration.configurationWithPointSize_weight_scale_(18.0, 2, 2)
-                    icon = icon.imageByApplyingSymbolConfiguration_(cfg)
-            except Exception:
-                try:
-                    icon = NSImage.imageWithSystemSymbolName_accessibilityDescription_(symbol_name, None)
-                except Exception:
-                    icon = None
-            return icon
-
-        from AppKit import NSLayoutAttributeCenterY  # constant, not an enum member
-
-        def make_row(symbol_name, title, initial_on=None, toggle_selector=None):
-            # icon
-            icon = get_icon(symbol_name)
-            iv = NSImageView.alloc().initWithFrame_(((0, 0), (18, 18)))
-            if icon:
-                iv.setImage_(icon)
-                iv.setContentTintColor_(NSColor.whiteColor())
-
-            # label
-            label = NSTextField.labelWithString_(title)
-            label.setTextColor_(NSColor.whiteColor())
-            label.setFont_(NSFont.systemFontOfSize_(15))
-            label.setLineBreakMode_(4)  # NSLineBreakByTruncatingTail
-
-            # horizontal stack
-            rowv = NSStackView.alloc().init()
-            rowv.setOrientation_(0)            # horizontal
-            rowv.setSpacing_(10)
-            rowv.setAlignment_(NSLayoutAttributeCenterY)  # ✅ correct vertical centering
-            rowv.setTranslatesAutoresizingMaskIntoConstraints_(False)
-
-            # Add views in order: icon → label
-            rowv.addArrangedSubview_(iv)
-            rowv.addArrangedSubview_(label)
-
-            # Make label flexible so it doesn't push the switch away
-            try:
-                # Lower compression resistance horizontally so label can truncate before pushing siblings
-                label.setContentCompressionResistancePriority_forOrientation_(250, 0)  # 0 = horizontal
-                # Lower hugging so label can expand/shrink as needed
-                label.setContentHuggingPriority_forOrientation_(249, 0)
-            except Exception:
-                pass
-
-            # Optional: add a switch
-            sw = None
-            if initial_on is not None and toggle_selector is not None:
-                sw = NSSwitch.alloc().init()
-                sw.setTarget_(self)
-                sw.setAction_(toggle_selector)
-                if hasattr(sw, "setState_"):
-                    sw.setState_(1 if initial_on else 0)
-                try:
-                    if hasattr(sw, "setControlTintColor_"):
-                        sw.setControlTintColor_(ACCENT)
-                    elif hasattr(sw, "setTintColor_"):
-                        sw.setTintColor_(ACCENT)
-                except Exception:
-                    pass
-
-                # Keep the switch from stretching
-                try:
-                    sw.setContentHuggingPriority_forOrientation_(751, 0)
-                    sw.setContentCompressionResistancePriority_forOrientation_(751, 0)
-                except Exception:
-                    pass
-
-                rowv.addArrangedSubview_(sw)
-
-            # Distribution hint (may be no-op on some macOS versions)
-            try:
-                rowv.setDistribution_(0)  # Fill
-            except Exception:
-                pass
-
-            return rowv, sw
-
-        # Tor row
-        tor_row, self._sw_tor = make_row("shield.lefthalf.filled", "Tor routing", bool(getattr(self, "tor_on", False)), "onToggleTor:")
-
-        # JS row
-        js_row, self._sw_js = make_row("bolt", "JavaScript", bool(getattr(self, "js_enabled", True)), "onToggleJS:")
-        
-        # CSP row
-        csp_enabled = bool(getattr(self, "csp_enabled", True))
-        csp_row, self._sw_csp = make_row(
-            "lock.shield",
-            "CSP",
-            csp_enabled,
-            "onToggleCSP:"
-        )
-
-        # Add rows to vertical stack
-        for rv in (tor_row, js_row, csp_row):
-            stack.addArrangedSubview_(rv)
-
-        vc = NSViewController.alloc().init()
-        vc.setView_(root)
-        pop.setContentViewController_(vc)
-        pop.showRelativeToRect_ofView_preferredEdge_(anchor_view.bounds(), anchor_view, 1)
-        self._quick_controls_popover = pop
-
-        # ✅ Force switch color update after popover is shown
-        try:
-            for sw in [self._sw_tor, self._sw_js]:
-                if sw:
-                    if hasattr(sw, "setControlTintColor_"):
-                        sw.setControlTintColor_(ACCENT)
-                    elif hasattr(sw, "setTintColor_"):
-                        sw.setTintColor_(ACCENT)
-        except Exception:
-            pass
-
-    # Action methods for the switches (selectors referenced above)
-    def onToggleTor_(self, sender):
-        # flip to the requested state by calling your existing actTor_
-        # actTor_ already handles enabling/disabling and UI, so we just call it
-        try:
-            self.actTor_(None)
-            # keep switch in sync with actual state after the toggle
-            if hasattr(self, "_sw_tor"):
-                self._sw_tor.setState_(1 if self.tor_on else 0)
-        except Exception as e:
-            print("Tor toggle error:", e)
-
-    def onToggleJS_(self, sender):
-        try:
-            self.actToggleJS_(None)
-            if hasattr(self, "_sw_js"):
-                self._sw_js.setState_(1 if self.js_enabled else 0)
-        except Exception as e:
-            print("JS toggle error:", e)
-            
-            
-    def onToggleCSP_(self, sender):
-        try:
-            self.csp_enabled = bool(sender.state())
-            print(f"[Privacy] CSP {'ENABLED' if self.csp_enabled else 'DISABLED'}")
-
-            # CSP is enforced via headers / injection on navigation
-            # You likely already reference this flag elsewhere
-        except Exception as e:
-            print("CSP toggle error:", e)
-            
+                    
     def _make_toolbar(self):
         from AppKit import NSColor, NSAppearance
         tb = NSToolbar.alloc().initWithIdentifier_("DarkelfToolbar")
@@ -1647,11 +1258,26 @@ class Browser(NSObject):
         self.btn_zoom_in  = big_btn("plus.magnifyingglass", "Zoom In")
         self.btn_zoom_out = big_btn("minus.magnifyingglass", "Zoom Out")
         self.btn_full   = big_btn("arrow.up.left.and.arrow.down.right", "Fullscreen")
-        self.btn_tor    = big_btn("shield.lefthalf.filled", "Tor On/Off")
-        self.btn_track  = big_btn("target", "Trackers Blocked")
         self.btn_js     = big_btn("bolt.slash", "Toggle JavaScript")
-        self.btn_more = big_btn("ellipsis.circle", "Quick Controls")
+        self.btn_tor = big_btn("network", "Toggle Tor")
+        
+        self.btn_tor = big_btn("network", "Toggle Tor")
 
+        # --- TOR BUTTON ICON SETUP ---
+        img_tor = NSImage.imageWithSystemSymbolName_accessibilityDescription_("network", None)
+        if img_tor:
+            img_tor.setTemplate_(True)
+            self.btn_tor.setImage_(img_tor)
+            self.btn_tor.setImagePosition_(2)  # Image only
+        self.btn_tor.setTitle_("")  # Remove text label
+        # Button tint with safety check
+        if hasattr(self, 'btn_tor') and self.btn_tor:
+            if hasattr(self.btn_tor, "setContentTintColor_"):
+                tint = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                    52/255.0, 199/255.0, 89/255.0, 1.0  # Neon green #34C759
+                ) if self.tor_on else NSColor.whiteColor()
+                self.btn_tor.setContentTintColor_(tint)
+        
         # JS button coloring
         img = NSImage.imageWithSystemSymbolName_accessibilityDescription_("bolt", None)
         if img:
@@ -1719,10 +1345,8 @@ class Browser(NSObject):
             (self.btn_zoom_in, 'actZoomIn:'),
             (self.btn_zoom_out, 'actZoomOut:'),
             (self.btn_full, 'actFull:'),
-            #(self.btn_tor, 'actTor:'),
-            #(self.btn_track, 'actTrackInfo:'),
-            #(self.btn_js, 'actToggleJS:'),
-            (self.btn_more, 'actQuickControls:'),
+            (self.btn_js, 'actToggleJS:'),
+            (self.btn_tor,'actTor:'),
             (self.btn_nuke, 'actNuke:'),
         ]:
             b.setTarget_(self); b.setAction_(sel)
@@ -1799,19 +1423,14 @@ class Browser(NSObject):
             "NSToolbarFlexibleSpaceItem",
             item('NewTab', self.btn_newtab),
             item('CloseTab', self.btn_close),
-            #item('Tor', self.btn_tor),
-            #item('JS', self.btn_js),
-            #item('Track', self.btn_track),
             item('ZoomIn', self.btn_zoom_in),
             item('ZoomOut', self.btn_zoom_out),
             item('Full', self.btn_full),
+            item('JS', self.btn_js),
             item('Nuke', self.btn_nuke),
-            item('More', self.btn_more),
+            item('Tor', self.btn_tor),
+            
         ]
-
-        # tracker badge overlay placeholder (keep your real BadgeView in prod)
-        class BadgeViewStub(NSObject): pass
-        self._track_badge = BadgeViewStub.alloc().init()
 
         owner = self
         class Delegate(NSObject):
@@ -2034,7 +1653,6 @@ class Browser(NSObject):
                 style.setAlignment_(1)  # LEFT
                 style.setFirstLineHeadIndent_(26.0)  # space for close dot
                 style.setHeadIndent_(26.0)
-                #style.setTailIndent_(-34.0)
                 style.setLineBreakMode_(4)  # truncating tail
 
                 font = NSFont.systemFontOfSize_(12.0)
@@ -2326,7 +1944,7 @@ class Browser(NSObject):
             else:
                 _add(r"(function(){ try{ if(window.WebGLRenderingContext){ var proto = window.WebGLRenderingContext.prototype; var orig = proto.getParameter; proto.getParameter = function(p){ if(p===0x1F00) return 'Intel Inc.'; if(p===0x1F01) return 'Intel(R) Iris(TM) Graphics 6100'; return orig.apply(this, arguments); }; } }catch(e){} })();")
                 
-                        # 3) Navigator / UA spoof
+            # 3) Navigator / UA spoof
             if 'FIREFOX_NAV_SPOOF_JS' in globals():
                 _add(FIREFOX_NAV_SPOOF_JS)
             else:
@@ -2392,7 +2010,7 @@ class Browser(NSObject):
             
         except Exception as e:
             print("[Inject] Core script injection failed:", e)
-
+            
     def _new_wk(self) -> WKWebView:
         cfg = WKWebViewConfiguration.alloc().init()
         try:
@@ -2406,12 +2024,12 @@ class Browser(NSObject):
             cfg.setMediaTypesRequiringUserActionForPlayback_(0)
         except Exception:
             pass
-        
+    
         try:
             cfg.setWebsiteDataStore_(WKWebsiteDataStore.nonPersistentDataStore())
         except Exception:
             pass
-        
+    
         prefs = WKPreferences.alloc().init()
         try:
             prefs.setJavaScriptEnabled_(bool(getattr(self, "js_enabled", True)))
@@ -2428,7 +2046,7 @@ class Browser(NSObject):
             pass
 
         ucc = WKUserContentController.alloc().init()
-                    
+                
         # =========================================================
         # ✅ SAFARI-STYLE DECLARATIVE CONTENT BLOCKING (AD BLOCKING)
         # =========================================================
@@ -2464,17 +2082,17 @@ class Browser(NSObject):
         except Exception as e:
             print("[Init] Failed to register netlog handler:", e)
 
-        # --- Finalize configuration ---
-        cfg.setUserContentController_(ucc)
-
-        # --- Create WebView ---
-        web = WKWebView.alloc().initWithFrame_configuration_(((0, 0), (1, 1)), cfg)
-
-        # ------------------------------------------------
-
         # --- Search Handler (already in your code) ---
         self._search_handler = getattr(self, "_search_handler", None) or SearchHandler.alloc().initWithOwner_(self)
         ucc.addScriptMessageHandler_name_(self._search_handler, "search")
+    
+        # --- JS Toggle Handler ---
+        self._js_handler = JSToggleHandler.alloc().initWithOwner_(self)
+        ucc.addScriptMessageHandler_name_(self._js_handler, "jsToggle")
+
+        # --- TOR Toggle Handler ---
+        self._tor_handler = TorToggleHandler.alloc().initWithOwner_(self)
+        ucc.addScriptMessageHandler_name_(self._tor_handler, "torToggle")
 
         # --- Canvas Fingerprint Seed ---
         seed = secrets.randbits(64)
@@ -2482,7 +2100,7 @@ class Browser(NSObject):
 
         # --- TOR LETTERBOX (document start, all frames) ---
         try:
-            letterbox_source = LETTERBOX_JS  # use module-level const; do NOT assign to     LETTERBOX_JS in this function
+            letterbox_source = LETTERBOX_JS
             letterbox_script = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
                 letterbox_source,
                 0,      # AtDocumentStart
@@ -2495,7 +2113,7 @@ class Browser(NSObject):
 
         # --- Core defense scripts (ensure this function writes to UCC, not webview) ---
         try:
-            self._inject_core_scripts(ucc)  # <— must accept UCC and call ucc.addUserScript_
+            self._inject_core_scripts(ucc)
             print("[Inject] Core defense scripts added to UCC.")
         except Exception as e:
             print("[Inject] core scripts error:", e)
@@ -2510,23 +2128,21 @@ class Browser(NSObject):
             except Exception:
                 pass
 
-        # --- Optional: content rules when JS disabled ---
-        #try:
-            #if not getattr(self, "js_enabled", True):
-               # from WebKit import WKContentRuleListStore
-                #store = WKContentRuleListStore.defaultStore()
-                #rule_text = '[{"trigger":{"url-filter":".*"},"action":{"type":"block","resource-type":["script"]}}]'
-                #def _cb(rule_list, err):
-                   # if rule_list and not err:
-                       # ucc.addContentRuleList_(rule_list)
-                #store.compileContentRuleListForIdentifier_source_completionHandler_(
-                   # "darkelf_block_scripts", rule_text, _cb
-            #)
-        #except Exception:
-           # pass
-
-        # --- Finish: attach controller & create webview ---
+        # --- Finalize configuration ---
         cfg.setUserContentController_(ucc)
+
+        # ============================================================
+        # ✅ APPLY TOR PROXY TO NEW WEBVIEW (if Tor is active)
+        # ============================================================
+        if getattr(self, "tor_on", False):
+            try:
+                print("[Tor] New tab inheriting Tor proxy state (system-level)")
+                # WKWebView automatically uses system proxy (already set in actTor_)
+                # No per-webview config needed; proxy is system-wide
+            except Exception as e:
+                print("[Tor] Proxy inheritance check failed:", e)
+
+        # --- Create WebView ---
         web = WKWebView.alloc().initWithFrame_configuration_(((0, 0), (100, 100)), cfg)
 
         # --- UA SPOOF (HTTP UA must match JS UA) ---
@@ -2536,497 +2152,6 @@ class Browser(NSObject):
             pass
 
         return web
-        # =========================================================
-        # Darkelf Native Ad & Tracker Blocking (WKContentRuleList)
-        # =========================================================
-        try:
-            from WebKit import WKContentRuleListStore
-
-            adblock_rules = r'''
-            [
-              // ===============================
-              // EasyList Core – Network Ads
-              // ===============================
-              {
-                "trigger": {
-                  "url-filter": ".*",
-                  "resource-type": [
-                    "image",
-                    "style-sheet",
-                    "script",
-                    "media",
-                    "raw",
-                    "font"
-                  ],
-                  "if-domain": [
-                    "doubleclick.net",
-                    "googlesyndication.com",
-                    "googleadservices.com",
-                    "adsystem.com",
-                    "adservice.google.com",
-                    "taboola.com",
-                    "outbrain.com",
-                    "criteo.com",
-                    "pubmatic.com",
-                    "openx.net",
-                    "rubiconproject.com",
-                    "adnxs.com",
-                    "scorecardresearch.com",
-                    "quantserve.com",
-                    "zedo.com",
-                    "revcontent.com",
-                    "uubooster.com"
-                  ]
-                },
-                "action": { "type": "block" }
-              },
-
-              // ===============================
-              // EasyList Core – Tracking Pixels
-              // ===============================
-              {
-                "trigger": {
-                  "url-filter": ".*(pixel|track|beacon|analytics).*",
-                  "resource-type": ["image", "script"]
-                },
-                "action": { "type": "block" }
-              },
-
-             // ===============================
-             // EasyList Core – Third-Party Iframes
-             // ===============================
-             {
-               "trigger": {
-                 "url-filter": ".*",
-                 "resource-type": ["document"],
-                 "load-type": ["third-party"]
-               },
-               "action": { "type": "block" }
-             },
-
-            // ===============================
-            // EasyList Core – Sponsored Scripts
-            // ===============================
-            {
-              "trigger": {
-                "url-filter": ".*(adserver|ads|sponsor|promoted).*",
-                "resource-type": ["script"]
-              },
-              "action": { "type": "block" }
-            }
-          ]
-          '''
-
-            store = WKContentRuleListStore.defaultStore()
-
-            def _adblock_ready(rule_list, error):
-                if rule_list and not error:
-                    ucc.addContentRuleList_(rule_list)
-                    print("[AdBlock] Native WebKit ad blocking enabled")
-                elif error:
-                    print("[AdBlock] Rule compilation error:", error)
-
-            store.compileContentRuleListForIdentifier_encodedContent_completionHandler_(
-                "darkelf_native_adblock",
-                adblock_rules,
-                _adblock_ready
-            )
-
-        except Exception as e:
-            print("[AdBlock] Failed to initialize native ad blocker:", e)
-
-            # --- REGISTER JS MESSAGE HANDLER FOR NETLOG ---
-        try:
-            # remove any stale handlers (avoid duplicates)
-            ucc.removeScriptMessageHandlerForName_("netlog")
-        except Exception:
-            pass
-
-        try:
-            # register our delegate (_NavDelegate) as JS message receiver
-            if hasattr(self, "_nav"):
-                ucc.addScriptMessageHandler_name_(self._nav, "netlog")
-                print("[Init] Netlog handler registered")
-            else:
-                print("[Init] _nav delegate not set yet — cannot add netlog handler.")
-        except Exception as e:
-            print("[Init] Failed to register netlog handler:", e)
-        # ------------------------------------------------
-
-        # --- Search Handler (already in your code) ---
-        self._search_handler = getattr(self, "_search_handler", None) or SearchHandler.alloc().initWithOwner_(self)
-        ucc.addScriptMessageHandler_name_(self._search_handler, "search")
-
-        # --- Canvas Fingerprint Seed ---
-        seed = secrets.randbits(64)
-        self.current_canvas_seed = seed
-
-        # --- Core defense scripts (ensure this function writes to UCC, not webview) ---
-        try:
-            self._inject_core_scripts(ucc)  # <— must accept UCC and call ucc.addUserScript_
-            print("[Inject] Core defense scripts added to UCC.")
-        except Exception as e:
-            print("[Inject] core scripts error:", e)
-
-        # --- Optional: JS killswitch stub when JS is logically OFF ---
-        if getattr(self, "js_enabled", True) is False:
-            print("[JS] Injecting JavaScript Killswitch user script (defensive stub)...")
-            js_killswitch = r"""(function(){ /* … your stub … */ })();"""
-            try:
-                ks = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(js_killswitch, 0, False)
-                ucc.addUserScript_(ks)
-            except Exception:
-                pass
-
-        # --- Optional: content rules when JS disabled ---
-        try:
-            if not getattr(self, "js_enabled", True):
-                from WebKit import WKContentRuleListStore
-                store = WKContentRuleListStore.defaultStore()
-                rule_text = '[{"trigger":{"url-filter":".*"},"action":{"type":"block","resource-type":["script"]}}]'
-                def _cb(rule_list, err):
-                    if rule_list and not err:
-                        ucc.addContentRuleList_(rule_list)
-                store.compileContentRuleListForIdentifier_source_completionHandler_(
-                    "darkelf_block_scripts", rule_text, _cb
-            )
-        except Exception:
-            pass
-
-        # --- Optional: JS killswitch stub ---
-        # This is only useful if JS engine is ON but you want to "soft-block" JS
-        # With engine OFF, this script will never execute.
-        if getattr(self, "js_enabled", True) is False:
-            print("[JS] Injecting JavaScript Killswitch user script (defensive stub)...")
-            js_killswitch = r"""
-            // Defensive: If JS engine is ON, block common APIs
-            (function(){
-                try { window.eval = function(){return null;}; } catch(e){}
-                try { window.Function = function(){throw new Error("JavaScript blocked by Darkelf");}; } catch(e){}
-                try { window.setTimeout = window.setInterval = window.requestAnimationFrame = function(){ return; }; } catch(e){}
-                try { document.write = function(){ return; }; } catch(e){}
-                try {
-                    var origSetAttr = Element.prototype.setAttribute;
-                    Element.prototype.setAttribute = function(name, value) {
-                        if (name && /^on/i.test(name)) return;
-                        return origSetAttr.apply(this, arguments);
-                    };
-                } catch(e){}
-                try {
-                    var origCreate = Document.prototype.createElement;
-                    Document.prototype.createElement = function(tag) {
-                        var el = origCreate.apply(this, arguments);
-                        try {
-                            if (String(tag).toLowerCase() === 'script') {
-                                Object.defineProperty(el, 'src', { set: function(){}, get: function(){return ''; } });
-                                el.type = 'darkelf/blocked';
-                                el.defer = true; el.noModule = true;
-                            }
-                        } catch(_){}
-                        return el;
-                    };
-                    var origAppend = Element.prototype.appendChild;
-                    Element.prototype.appendChild = function(node) {
-                        try { if (node && node.tagName === 'SCRIPT') return node; } catch(_){}
-                        return origAppend.apply(this, arguments);
-                    };
-                } catch(e){}
-            })();
-            """
-            try:
-                ks = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(js_killswitch, 0, False)
-                ucc.addUserScript_(ks)
-            except Exception as e:
-                pass
-
-        try:
-            if not getattr(self, "js_enabled", True):
-                from WebKit import WKContentRuleListStore
-                store = WKContentRuleListStore.defaultStore()
-                rule_text = '[{"trigger":{"url-filter":".*"},"action":{"type":"block","resource-type":["script"]}}]'
-                def _cb(rule_list, err):
-                    if rule_list and not err:
-                        ucc.addContentRuleList_(rule_list)
-                store.compileContentRuleListForIdentifier_source_completionHandler_(
-                    "darkelf_block_scripts", rule_text, _cb
-                )
-        except Exception as e:
-            pass
-
-        # --- Finish ---
-        cfg.setUserContentController_(ucc)
-        web = WKWebView.alloc().initWithFrame_configuration_(((0, 0), (100, 100)), cfg)
-
-        # --- UA SPOOF (ensure helper/secondary webviews also send spoofed HTTP UA) ---
-        try:
-            web.setCustomUserAgent_(USER_AGENT_SPOOF)
-        except Exception:
-            pass
-
-        return web
-
-        # --- Optional: JS killswitch stub ---
-        # This is only useful if JS engine is ON but you want to "soft-block" JS
-        # With engine OFF, this script will never execute.
-        if getattr(self, "js_enabled", True) is False:
-            print("[JS] Injecting JavaScript Killswitch user script (defensive stub)...")
-            js_killswitch = r"""
-            // Defensive: If JS engine is ON, block common APIs
-            (function(){
-                try { window.eval = function(){return null;}; } catch(e){}
-                try { window.Function = function(){throw new Error("JavaScript blocked by Darkelf");}; } catch(e){}
-                try { window.setTimeout = window.setInterval = window.requestAnimationFrame = function(){ return; }; } catch(e){}
-                try { document.write = function(){ return; }; } catch(e){}
-                try {
-                    var origSetAttr = Element.prototype.setAttribute;
-                    Element.prototype.setAttribute = function(name, value) {
-                        if (name && /^on/i.test(name)) return;
-                        return origSetAttr.apply(this, arguments);
-                    };
-                } catch(e){}
-                try {
-                    var origCreate = Document.prototype.createElement;
-                    Document.prototype.createElement = function(tag) {
-                        var el = origCreate.apply(this, arguments);
-                        try {
-                            if (String(tag).toLowerCase() === 'script') {
-                                Object.defineProperty(el, 'src', { set: function(){}, get: function(){return ''; } });
-                                el.type = 'darkelf/blocked';
-                                el.defer = true; el.noModule = true;
-                            }
-                        } catch(_){}
-                        return el;
-                    };
-                    var origAppend = Element.prototype.appendChild;
-                    Element.prototype.appendChild = function(node) {
-                        try { if (node && node.tagName === 'SCRIPT') return node; } catch(_){}
-                        return origAppend.apply(this, arguments);
-                    };
-                } catch(e){}
-            })();
-            """
-            try:
-                ks = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(js_killswitch, 0, False)
-                ucc.addUserScript_(ks)
-            except Exception as e:
-                pass
-
-        try:
-            if not getattr(self, "js_enabled", True):
-                from WebKit import WKContentRuleListStore
-                store = WKContentRuleListStore.defaultStore()
-                rule_text = '[{"trigger":{"url-filter":".*"},"action":{"type":"block","resource-type":["script"]}}]'
-                def _cb(rule_list, err):
-                    if rule_list and not err:
-                        ucc.addContentRuleList_(rule_list)
-                store.compileContentRuleListForIdentifier_source_completionHandler_(
-                    "darkelf_block_scripts", rule_text, _cb
-                )
-        except Exception as e:
-            pass
-
-        # --- Finish ---
-        cfg.setUserContentController_(ucc)
-        web = WKWebView.alloc().initWithFrame_configuration_(((0, 0), (100, 100)), cfg)
-
-        # --- UA SPOOF (ensure helper/secondary webviews also send spoofed HTTP UA) ---
-        try:
-            web.setCustomUserAgent_(USER_AGENT_SPOOF)
-        except Exception:
-            pass
-
-        return web
-
-        # 2. WebRTC lockdown except getUserMedia for YouTube (no IP leak, SDP scrub)
-        WEBRTC_DEFENSE_JS = r"""
-        (function(){
-          var isYoutube = /^(?:https?:\/\/)?(?:[^\/]+\.)?(youtube\.com|youtu\.be)\//i.test(location.href);
-          [
-            'RTCPeerConnection', 'webkitRTCPeerConnection', 'mozRTCPeerConnection',
-            'RTCDataChannel', 'RTCSessionDescription', 'RTCIceCandidate'
-          ].forEach(function(name){
-            try { window[name] = undefined; } catch(e){}
-            try { if(window.navigator) window.navigator[name] = undefined; } catch(e){}
-          });
-          try { window.sdp = undefined; } catch(e){}
-          try { if(window.sessionDescription) window.sessionDescription = undefined; } catch(e){}
-          try { if(window.RTCSessionDescription) window.RTCSessionDescription = undefined; } catch(e){}
-          Object.defineProperty(window, 'ondatachannel', {value: undefined, configurable:true});
-          Object.defineProperty(window, 'onsignalingstatechange', {value: undefined, configurable:true});
-          if (typeof console !== "undefined") {
-            var origLog = console.log;
-            var sdpPattern = /v=0|a=ice-|a=fingerprint|a=setup|a=candidate|s=-|m=audio|m=video|a=mid|a=sendrecv/;
-            console.log = function(){
-              var args = Array.from(arguments);
-              if(args.some(arg=>typeof arg==="string" && sdpPattern.test(arg))) return;
-              return origLog.apply(console, arguments);
-            };
-          }
-          // getUserMedia patch: block unless YouTube
-          if (navigator.mediaDevices) {
-            if (!isYoutube) {
-              navigator.mediaDevices.getUserMedia = function(){ return Promise.reject(new Error("Blocked by Darkelf")); };
-            }
-            navigator.mediaDevices.enumerateDevices = function(){ return Promise.resolve([]); };
-          }
-          ['getUserMedia','webkitGetUserMedia','mozGetUserMedia','msGetUserMedia'].forEach(function(name){
-            if (!isYoutube) try { navigator[name] = undefined; } catch(e){}
-          });
-          window.__darkelf_webrtc_defended__ = true;
-        })();
-        """
-
-        # 3. WebGL vendor/renderer spoofing (looks like Windows)
-        WEBGL_DEFENSE_JS = r"""
-        (function(){
-          var spoof_vendor = "Intel Inc.";
-          var spoof_renderer = "Intel(R) Iris(TM) Graphics 6100";
-          function patchGL(ctxProto) {
-            if (!ctxProto) return;
-            var origGetParameter = ctxProto.getParameter;
-            ctxProto.getParameter = function(param) {
-              if (param === 0x1F00) return spoof_vendor; // VENDOR
-              if (param === 0x1F01) return spoof_renderer; // RENDERER
-              if (param === 0x9245) return spoof_vendor; // UNMASKED_VENDOR_WEBGL
-              if (param === 0x9246) return spoof_renderer; // UNMASKED_RENDERER_WEBGL
-              return origGetParameter.apply(this, arguments);
-            };
-          }
-          patchGL(window.WebGLRenderingContext && window.WebGLRenderingContext.prototype);
-          patchGL(window.WebGL2RenderingContext && window.WebGL2RenderingContext.prototype);
-        })();
-        """
-
-        # 4. Firefox-like window & navigator spoofing
-        FIREFOX_NAV_SPOOF_JS = r"""
-        (function(){
-          Object.defineProperty(navigator, 'platform', {get: () => "MacIntel", configurable: true});
-          Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 4, configurable: true});
-          Object.defineProperty(navigator, 'deviceMemory', {get: () => 4, configurable: true});
-          Object.defineProperty(navigator, 'product', {get: () => "Gecko", configurable: true});
-          Object.defineProperty(navigator, 'appVersion', {get: () => "5.0 (Macintosh)", configurable: true});
-          Object.defineProperty(navigator, 'appName', {get: () => "Netscape", configurable: true});
-          Object.defineProperty(navigator, 'buildID', {get: () => "20201001000000", configurable: true});
-          Object.defineProperty(navigator, 'oscpu', {get: () => "Intel Mac OS X 10.15", configurable: true});
-          Object.defineProperty(navigator, 'vendor', {get: () => "", configurable: true});
-          Object.defineProperty(navigator, 'userAgent', {get: () => "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:102.0) Gecko/20100101 Firefox/78.0", configurable: true});
-        })();
-        """
-                
-        # 5. Canvas fingerprint: 100% unique, deterministic per tab
-        CANVAS_DEFENSE_JS = f"""
-        (function(){{
-          var SEED = {seed};
-          function rnd() {{
-            SEED = (SEED * 1664525 + 1013904223) >>> 0;
-            return SEED / 4294967296;
-          }}
-          function addNoise(data) {{
-            for (var i = 0; i < data.length; i++) {{
-              data[i] = Math.min(255, Math.max(0, data[i] + Math.floor(rnd()*32 - 16)));
-            }}
-          }}
-          var origToDataURL = HTMLCanvasElement.prototype.toDataURL;
-          HTMLCanvasElement.prototype.toDataURL = function() {{
-            try {{
-              var ctx = this.getContext('2d');
-              var w = this.width, h = this.height;
-              if (ctx && w > 0 && h > 0) {{
-                var imageData = ctx.getImageData(0, 0, w, h);
-                addNoise(imageData.data);
-                ctx.putImageData(imageData, 0, 0);
-                var result = origToDataURL.apply(this, arguments);
-                ctx.putImageData(imageData, 0, 0);
-                return result;
-              }}
-            }} catch(e) {{}}
-            return origToDataURL.apply(this, arguments);
-          }};
-          var origToBlob = HTMLCanvasElement.prototype.toBlob;
-          HTMLCanvasElement.prototype.toBlob = function(callback, type, quality) {{
-            try {{
-              var ctx = this.getContext('2d');
-              var w = this.width, h = this.height;
-              if (ctx && w > 0 && h > 0) {{
-                var imageData = ctx.getImageData(0, 0, w, h);
-                addNoise(imageData.data);
-                ctx.putImageData(imageData, 0, 0);
-                origToBlob.call(this, function(blob) {{
-                  ctx.putImageData(imageData, 0, 0);
-                  callback(blob);
-                }}, type, quality);
-                return;
-              }}
-            }} catch(e) {{}}
-            origToBlob.apply(this, arguments);
-          }};
-          var origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
-          CanvasRenderingContext2D.prototype.getImageData = function(x, y, w, h) {{
-            var imageData = origGetImageData.call(this, x, y, w, h);
-            addNoise(imageData.data);
-            return imageData;
-          }};
-          window.__darkelf_canvas_seed__ = {seed};
-          window.__darkelf_canvas_defended__ = true;
-          if (!document.getElementById('__darkelf_canvas_banner')) {{
-            var div = document.createElement('div');
-            div.id = '__darkelf_canvas_banner';
-            div.textContent = 'Canvas Seed: ' + {seed};
-            div.style = 'position:fixed;top:0;left:0;right:0;background:#121722;color:#34C759;font:14px system-ui;text-align:center;padding:2px 0;z-index:2147483647;';
-            document.body.appendChild(div);
-            setTimeout(function(){{ try{{ div.remove(); }}catch(e){{}} }}, 2500);
-          }}
-        }})();
-        """
-
-        # --- Inject all scripts ---
-        for js in [
-            USER_AGENT_SPOOF_JS,
-            TIMEZONE_LOCALE_DEFENSE_JS,
-            FONTS_DEFENSE_JS,
-            FIREFOX_NAV_SPOOF_JS,
-            MEDIA_ENUM_DEFENSE_JS,
-            WEBRTC_DEFENSE_JS,
-            CANVAS_DEFENSE_JS,
-            WEBGL_DEFENSE_JS,
-            AUDIO_DEFENSE_JS,
-            BATTERY_DEFENSE_JS,
-            CLIENT_HINTS_DEFENSE_JS,
-            PERFORMANCE_DEFENSE_JS,
-            LETTERBOX_JS
-        ]:
-            script = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
-                js, 0, False
-            )
-            ucc.addUserScript_(script)
-
-        # === TRACKER BLOCKER ===
-        if self.js_enabled:
-            js = tracker_js(TRACKER_LIST)
-            script = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
-                js, 0, False
-            )
-            ucc.addUserScript_(script)
-            self._tracker_handler = getattr(self, "_tracker_handler", None) or TrackerHandler.alloc().initWithOwner_(self)
-            ucc.addScriptMessageHandler_name_(self._tracker_handler, "tracker")
-
-        # === MINI AI SCRIPTS ===
-        self._mini_ai_handler = getattr(self, "_mini_ai_handler", None) or MiniAIPanicHandler.alloc().initWithOwner_(self)
-        ucc.addScriptMessageHandler_name_(self._mini_ai_handler, "panic")
-        cfg.setUserContentController_(ucc)
-
-        wk = WKWebView.alloc().initWithFrame_configuration_(NSMakeRect(0,0,100,100), cfg)
-        wk.setAutoresizingMask_(18)
-
-        # --- UA SPOOF ---
-        try: wk.setCustomUserAgent_(USER_AGENT_SPOOF)
-        except Exception: pass
-
-        # --- Inject MiniAI JS (phish/malware/sniffer/bridge) ---
-        try: self.mini_ai.inject(wk)
-        except Exception: pass
-
-        return wk
         
     def _mount_webview(self, wk):
         """Mount the webview BELOW the tabbar so tabs never get covered."""
@@ -3052,7 +2177,7 @@ class Browser(NSObject):
             try:
                 ucc_old = old.configuration().userContentController()
                 ucc_old.removeAllUserScripts()
-                for name in ["tracker", "panic", "search"]:
+                for name in ["search"]:
                     try: ucc_old.removeScriptMessageHandlerForName_(name)
                     except Exception: pass
             except Exception:
@@ -3064,12 +2189,6 @@ class Browser(NSObject):
             except Exception:
                 pass
             self.tabs[self.active].view = None
-
-            try:
-                if hasattr(self, "_track_badge") and self._track_badge.superview() is not None:
-                    self._track_badge.removeFromSuperview()
-            except Exception:
-                pass
 
             # --- Determine which URL to reload ---
             url = ""
@@ -3212,7 +2331,7 @@ class Browser(NSObject):
                    # If we're on the internal homepage or truly blank, render HOMEPAGE_HTML
                 if url in (None, "", "about:home", "about://home", "about:blank", "about:blank#blocked"):
                     try:
-                        self.tabs[self.active].view.loadHTMLString_baseURL_(HOMEPAGE_HTML, NSURLWithString_(HOME_URL)
+                        self.tabs[self.active].view.loadHTMLString_baseURL_(HOMEPAGE_HTML, NSURL.URLWithString_(HOME_URL)
                         )
                         self.tabs[self.active].url  = HOME_URL
                         self.tabs[self.active].host = "home"
@@ -3229,7 +2348,7 @@ class Browser(NSObject):
 
     def _add_tab(self, url: str = "", home: bool = False):
         self._nav = _NavDelegate.alloc().initWithOwner_(self)
-        wk = self._new_wk()
+        wk = self._new_wk()  # ← Tor state already applied in _new_wk()
         wk.setNavigationDelegate_(self._nav)
 
         # Hide current webview but DO NOT touch tabbar
@@ -3250,7 +2369,7 @@ class Browser(NSObject):
         )
         self.tabs.append(tab)
         self.active = len(self.tabs) - 1
-        
+    
         if home:
             try:
                 self.addr.setStringValue_("")
@@ -3283,6 +2402,16 @@ class Browser(NSObject):
         self._update_tab_buttons()
         self._style_tabs()
         self._sync_addr()
+    
+        # ✅ SYNC TOR BUTTON TINT (after tab is created)
+        try:
+            if hasattr(self, 'btn_tor') and self.btn_tor:
+                tint = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                    52/255.0, 199/255.0, 89/255.0, 1.0
+                ) if self.tor_on else NSColor.whiteColor()
+                self.btn_tor.setContentTintColor_(tint)
+        except Exception:
+            pass
         
     def _teardown_webview(self, wk):
         if not wk:
@@ -3338,9 +2467,11 @@ class Browser(NSObject):
             if ucc:
                 try: ucc.removeAllUserScripts()
                 except Exception: pass
-                for name in ("tracker","netlog","search","mini_ai"):
-                    try: ucc.removeScriptMessageHandlerForName_(name)
-                    except Exception: pass
+                for name in ("netlog","search","mini_ai","jsToggle"):
+                    try:
+                        ucc.removeScriptMessageHandlerForName_(name)
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -3390,7 +2521,7 @@ class Browser(NSObject):
         except Exception: return
         if not (0 <= idx < len(self.tabs)): return
 
-        # Teardown the target tab’s webview whether it’s active or not
+        # Teardown the target tab's webview whether it's active or not
         try: self._teardown_webview(self.tabs[idx].view)
         except Exception: pass
 
@@ -3494,7 +2625,7 @@ class Browser(NSObject):
                 # When enabling Tor, do NOT restore any URL → force homepage
                 self._pendingRefreshURL = None
             else:
-                # When disabling Tor, it’s fine to restore what you were viewing
+                # When disabling Tor, it's fine to restore what you were viewing
                 self._pendingRefreshURL = current_url
     
             self._tor_refresh_timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
@@ -3574,7 +2705,7 @@ class Browser(NSObject):
         except Exception as e:
             print("[Tor] _refreshAfterTor_ failed:", e)
             try:
-                # Fail-safe: go to homepage, don’t reload previous request
+                # Fail-safe: go to homepage, don't reload previous request
                 self.tabs[self.active].view.loadHTMLString_baseURL_(HOMEPAGE_HTML, None)
                 self.tabs[self.active].url  = "about:home"
                 self.tabs[self.active].host = "home"
@@ -3626,8 +2757,6 @@ class Browser(NSObject):
         except Exception as e:
             print("[Alert tint] failed:", e)
 
-    def actTrackInfo_(self, _):
-        print(f"[Trackers] Blocked so far: {self._tracker_count}")
     def actToggleJS_(self, _):
         # Flip state
         self.js_enabled = not bool(getattr(self, "js_enabled", True))
@@ -3658,13 +2787,17 @@ class Browser(NSObject):
             cfg = wk.configuration() if hasattr(wk, "configuration") else None
             prefs = cfg.preferences() if cfg and hasattr(cfg, "preferences") else None
             if prefs:
+                current_js_state = bool(getattr(self, "js_enabled", True))
                 try:
-                    prefs.setJavaScriptEnabled_(bool(getattr(self, "js_enabled", True)))
-                except Exception:
+                    prefs.setJavaScriptEnabled_(current_js_state)
+                    print(f"[JS Toggle] Preference set to: {current_js_state}")
+                except Exception as e:
+                    print(f"[JS Toggle] setJavaScriptEnabled_ failed: {e}")
                     try:
-                        prefs.javaScriptEnabled = bool(getattr(self, "js_enabled", True))
-                    except Exception:
-                        pass
+                        prefs.javaScriptEnabled = current_js_state
+                        print(f"[JS Toggle] Property assignment succeeded")
+                    except Exception as e2:
+                        print(f"[JS Toggle] Property assignment also failed: {e2}")
 
             # Figure out current URL
             current_url = ""
@@ -3711,12 +2844,6 @@ class Browser(NSObject):
         except Exception:
             pass
 
-    def actQuickControls_(self, _):
-        try:
-            self._show_quick_controls_popover(self.btn_more)
-        except Exception as e:
-            print("Quick Controls popover error:", e)
-
     def actGo_(self, sender):
         try:
             text = str(sender.stringValue()).strip()
@@ -3762,15 +2889,6 @@ class Browser(NSObject):
             alert.runModal()
         except Exception:
             print("Blocked: " + msg)
-            
-    def _show_tor_ready_prompt(self):
-        try:
-            alert = NSAlert.alloc().init()
-            alert.setMessageText_("Tor is active")
-            alert.setInformativeText_("Traffic will now route through Tor for all clearnet browsing.")
-            alert.runModal()
-        except Exception as e:
-            print("[Tor] Prompt failed:", e)
 
     def actNuke_(self, sender):
 
@@ -3835,30 +2953,6 @@ class Browser(NSObject):
         except Exception:
             resp = alert.runModal()
             on_response(resp)
-            
-    def bump_tracker_count(self, n):
-        self._tracker_count = int(n)
-        try:
-            self.btn_track.setToolTip_(f"Trackers blocked: {n}")
-            v = self.btn_track
-            # Attach the working BadgeView
-            if self._track_badge not in v.subviews():
-                self._track_badge.setFrame_(((v.frame().size.width-14, v.frame().size.height-14),(18,18)))
-                v.addSubview_(self._track_badge)
-            else:
-                self._track_badge.setFrame_(((v.frame().size.width-14, v.frame().size.height-14),(18,18)))
-            self._track_badge.setCount_(n)
-            if self._track_badge.isHidden() and n>0: self._track_badge.hidden=False
-            self._track_badge.setNeedsDisplay_(True); self._track_badge.displayIfNeeded()
-        except Exception: pass
-        
-    def update_tracker_label(self):
-        """Update the tracker counter label in the toolbar/UI."""
-        try:
-            text = f"Trackers blocked: {getattr(self, 'tracker_count', 0)}"
-            self.tracker_label.setStringValue_(text)
-        except Exception:
-            print("[UI] Tracker label not found or not initialized.")
 
     # ========== Storage Cleanup ==========
     def _storage_cleanup(self):
@@ -3948,7 +3042,7 @@ class Browser(NSObject):
         except Exception as e:
             print("[Browser] Failed to stop cookie scrubber in __del__:", e)
     
-            # Invalidate Tor refresh timer
+        # Invalidate Tor refresh timer
         try:
             if hasattr(self, "_tor_refresh_timer") and self._tor_refresh_timer:
                 self._tor_refresh_timer.invalidate()
@@ -3970,7 +3064,7 @@ class Browser(NSObject):
                     wk = getattr(tab, "view", None)
                     if wk:
                         ucc = wk.configuration().userContentController()
-                        for name in ("tracker", "netlog", "search", "mini_ai", "panic"):
+                        for name in ("netlog", "search", "mini_ai"):
                             try:
                                 ucc.removeScriptMessageHandlerForName_(name)
                             except Exception:
