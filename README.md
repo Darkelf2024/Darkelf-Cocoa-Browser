@@ -172,13 +172,16 @@ python3 "Darkelf Cocoa.py"
 
 ## 🧠 Keyboard Shortcuts
 
+## ⌨️ Keyboard Shortcuts
+
 | Action | Shortcut |
-|--------|-----------|
-| New Tab | ⌘ + T |
-| Close Tab | ⌘ + W |
-| Reload | ⌘ + R |
-| Clear Data | ⌘ + Shift + Del |
-| Focus Address Bar | ⌘ + L |
+|--------|----------|
+| New Tab | `⌘ T` |
+| Close Tab | `⌘ W` |
+| Reload Page | `⌘ R` |
+| Focus Address Bar | `⌘ L` |
+| Snapshot Page | `⌘ S` |
+| Instant Exit | `⌘ ⇧ X` |
 
 ---
 
