@@ -566,7 +566,7 @@ class ContentRuleManager:
 
         cls._loaded = True
         store = WKContentRuleListStore.defaultStore()
-        identifier = "darkelf_builtin_rules_v5_comprehensive"  # Updated version
+        identifier = "darkelf_builtin_rules_v6_comprehensive"  # Updated version
 
         def _lookup(rule_list, error):
             if rule_list:
@@ -1055,6 +1055,25 @@ class ContentRuleManager:
           }
         ]
         """
+            
+        # ✅ ADD THIS: Count and log rules
+        try:
+            import json
+            rules = json.loads(rules_json)
+            print(f"[ContentRules] Loaded {len(rules)} blocking rules")
+        
+            # Print first 5 domains for verification
+            domains = []
+            for rule in rules[:5]:
+                try:
+                    domains.append(rule['trigger']['url-filter'])
+                except:
+                    pass
+            print(f"[ContentRules] Sample domains: {domains}")
+        except Exception as e:
+            print(f"[ContentRules] Parse error: {e}")
+    
+        return rules_json
         
 # ---- Darkelf Diagnostics / Kill-Switches ----
 DARKELF_DISABLE_COOKIE_SCRUBBER = False
@@ -1395,9 +1414,6 @@ try {Object.defineProperty(Intl.DateTimeFormat.prototype, 'resolvedOptions', {va
 
 FONTS_DEFENSE_JS = r'''
 (function() {if (navigator.fonts) { navigator.fonts.query = function() { return Promise.resolve([]); }; } var style = document.createElement('style'); style.textContent = '* { font-family: "Arial", sans-serif !important; }'; document.head.appendChild(style);})();
-'''
-
-NAV_SPOOF_JS = r'''
 '''
 
 MEDIA_ENUM_DEFENSE_JS = r'''
@@ -2461,7 +2477,6 @@ class Browser(NSObject):
             _add(CANVAS_DEFENSE_JS)
             _add(TIMEZONE_LOCALE_DEFENSE_JS)
             _add(FONTS_DEFENSE_JS)
-            _add(NAV_SPOOF_JS)
             _add(MEDIA_ENUM_DEFENSE_JS)
             _add(AUDIO_DEFENSE_JS)
             _add(BATTERY_DEFENSE_JS)
@@ -2563,15 +2578,15 @@ class Browser(NSObject):
             cfg.setMediaTypesRequiringUserActionForPlayback_(0)
         except Exception:
             pass
-    
+
         try:
             cfg.setWebsiteDataStore_(WKWebsiteDataStore.nonPersistentDataStore())
         except Exception:
             pass
-    
+
         # ✅ FIXED: Determine JS state ONCE at the top
         js_should_be_enabled = True if is_home else bool(getattr(self, "js_enabled", True))
-    
+
         prefs = WKPreferences.alloc().init()
         try:
             prefs.setJavaScriptEnabled_(js_should_be_enabled)
@@ -2585,135 +2600,84 @@ class Browser(NSObject):
             cfg.setLimitsNavigationsToAppBoundDomains_(False)
             print("[Debug] App-bound domain restriction OFF")
         except Exception:
-                pass
+            pass
 
         ucc = WKUserContentController.alloc().init()
-        
+    
+        # ✅ FIXED: Use ContentRuleManager's 70+ rules instead of inline 3 rules
         try:
             from WebKit import WKContentRuleListStore
-
-            adblock_rules = r'''
-            [
-              {
-                "trigger": {
-                  "url-filter": ".*",
-                  "resource-type": [
-                    "image",
-                    "style-sheet",
-                    "script",
-                    "media",
-                    "raw",
-                    "font"
-                  ],
-                  "if-domain": [
-                    "doubleclick.net",
-                    "googlesyndication.com",
-                    "googleadservices.com",
-                    "adsystem.com",
-                    "adservice.google.com",
-                    "taboola.com",
-                    "outbrain.com",
-                    "criteo.com",
-                    "pubmatic.com",
-                    "openx.net",
-                    "rubiconproject.com",
-                    "adnxs.com",
-                    "scorecardresearch.com",
-                    "quantserve.com",
-                    "zedo.com",
-                    "revcontent.com",
-                    "uubooster.com"
-                  ]
-                },
-                "action": { "type": "block" }
-              },
-              {
-                "trigger": {
-                  "url-filter": ".*(pixel|track|beacon|analytics).*",
-                  "resource-type": ["image", "script"]
-                },
-                "action": { "type": "block" }
-              },
-            {
-              "trigger": {
-                "url-filter": ".*(adserver|ads|sponsor|promoted).*",
-                "resource-type": ["script"]
-              },
-              "action": { "type": "block" }
-            }
-          ]
-          '''
-            
+        
             store = WKContentRuleListStore.defaultStore()
 
             def _adblock_ready(rule_list, error):
                 if rule_list and not error:
                     ucc.addContentRuleList_(rule_list)
-                    print("[AdBlock] Native WebKit ad blocking enabled")
+                    print("[AdBlock] ✅ Native WebKit ad blocking enabled")
+                    print(f"[AdBlock] Rule list: {rule_list.identifier()}")  # ✅ Fixed f-string
                 elif error:
-                    print("[AdBlock] Rule compilation error:", error)
-                    
-            rules = ContentRuleManager._load_json()
-
-            if hasattr(
-                store,
-                "compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler_"
-            ):
+                    print(f"[AdBlock] ❌ Rule compilation error: {error}")
+        
+            # ✅ Get the comprehensive 70+ rule JSON from ContentRuleManager
+            rules_json = ContentRuleManager._load_json()
+        
+            # ✅ Compile and load the rules
+            if hasattr(store, "compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler_"):
                 try:
                     store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler_(
-                        "darkelf_native_adblock",
-                        rules,
+                        "darkelf_comprehensive_adblock_v6",  # ✅ Updated identifier
+                        rules_json,  # ✅ Now using the 70+ rules
                         _adblock_ready
                     )
                 except Exception as e:
-                    print("[AdBlock] Native adblock skipped:", e)
+                    print(f"[AdBlock] ❌ Compilation failed: {e}")
             else:
-                print("[AdBlock] Native WebKit content blocking unavailable — using injector")
+                print("[AdBlock] ⚠️  Native WebKit content blocking unavailable")
 
         except Exception as e:
-            print("[AdBlock] Failed to initialize native ad blocker:", e)
+            print(f"[AdBlock] ❌ Failed to initialize: {e}")
 
+        # ✅ Continue with netlog handler registration
         try:
             ucc.removeScriptMessageHandlerForName_("netlog")
         except Exception:
             pass
-            
-        # ✅ ADD THIS BLOCK:
+        
         try:
             if hasattr(self, "_nav"):
                 ucc.addScriptMessageHandler_name_(self._nav, "netlog")
                 print("[Init] Netlog handler registered")
             else:
-                print("[Init] _nav delegate not set yet — cannot add netlog handler.")
+                print("[Init] ⚠️  _nav delegate not set yet — cannot add netlog handler.")
         except Exception as e:
-            print("[Init] Failed to register netlog handler:", e)
-            
+            print(f"[Init] ❌ Failed to register netlog handler: {e}")
+        
         self._search_handler = getattr(self, "_search_handler", None) or SearchHandler.alloc().initWithOwner_(self)
         ucc.addScriptMessageHandler_name_(self._search_handler, "search")
-        
+    
         seed = secrets.randbits(64)
         self.current_canvas_seed = seed
 
         # =========================================================
-        # ✅ FIXED: Script Injection Logic
+        # ✅ Script Injection Logic
         # =========================================================
-    
+
         # CASE 1: Homepage (always inject, JS always ON)
         if is_home:
             try:
                 self._inject_core_scripts(ucc)
                 print("[Inject] ✅ Core defense scripts added (HOMEPAGE)")
             except Exception as e:
-                print("[Inject] Homepage scripts error:", e)
-    
+                print(f"[Inject] ❌ Homepage scripts error: {e}")
+
         # CASE 2: External site with JS ENABLED
         elif js_should_be_enabled:
             try:
                 self._inject_core_scripts(ucc)
                 print("[Inject] ✅ Core defense scripts added (JS ENABLED)")
             except Exception as e:
-                print("[Inject] External site scripts error:", e)
-    
+                print(f"[Inject] ❌ External site scripts error: {e}")
+
         # CASE 3: External site with JS DISABLED
         else:
             print("[Inject] ⛔ SKIPPED core scripts (JS DISABLED globally)")
@@ -2722,7 +2686,7 @@ class Browser(NSObject):
             js_killswitch = r"""
             (function(){
                 console.log('[Darkelf] JavaScript execution blocked by killswitch');
-            
+        
                 // Block eval and Function constructor
                 try { 
                     window.eval = function(){ 
@@ -2730,13 +2694,13 @@ class Browser(NSObject):
                         return null; 
                     }; 
                 } catch(e){}
-            
+        
                 try { 
                     window.Function = function(){ 
                         throw new Error("JavaScript blocked by Darkelf"); 
                     }; 
                 } catch(e){}
-            
+        
                 // Block timers
                 try { 
                     window.setTimeout = function(){ 
@@ -2752,14 +2716,14 @@ class Browser(NSObject):
                         return 0; 
                     }; 
                 } catch(e){}
-            
+        
                 // Block document.write
                 try { 
                     document.write = function(){ 
                         console.warn('[Darkelf] document.write() blocked'); 
                     }; 
                 } catch(e){}
-            
+        
                 // Block inline event handlers
                 try {
                     var origSetAttr = Element.prototype.setAttribute;
@@ -2771,7 +2735,7 @@ class Browser(NSObject):
                         return origSetAttr.apply(this, arguments);
                     };
                 } catch(e){}
-            
+        
                 // Block dynamic script creation
                 try {
                     var origCreate = Document.prototype.createElement;
@@ -2791,7 +2755,7 @@ class Browser(NSObject):
                         } catch(_){}
                         return el;
                     };
-                
+            
                     var origAppend = Element.prototype.appendChild;
                     Element.prototype.appendChild = function(node) {
                         try { 
@@ -2803,11 +2767,11 @@ class Browser(NSObject):
                         return origAppend.apply(this, arguments);
                     };
                 } catch(e){}
-            
+        
                 console.log('[Darkelf] Killswitch active — JS blocked');
             })();
             """
-        
+    
             try:
                 ks = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
                     js_killswitch,
@@ -2817,12 +2781,12 @@ class Browser(NSObject):
                 ucc.addUserScript_(ks)
                 print("[JS] ⛔ Killswitch injected")
             except Exception as e:
-                print("[JS] Killswitch injection failed:", e)
-        
+                print(f"[JS] ❌ Killswitch injection failed: {e}")
+    
             # ✅ Add native content blocker for ALL <script> resources
             try:
                 store = WKContentRuleListStore.defaultStore()
-            
+        
                 # Block ALL script resources (network + inline)
                 block_scripts_rule = json.dumps([{
                     "trigger": {
@@ -2833,21 +2797,21 @@ class Browser(NSObject):
                         "type": "block"
                     }
                 }])
-            
+        
                 def _script_block_ready(rule_list, err):
                     if rule_list and not err:
                         ucc.addContentRuleList_(rule_list)
                         print("[JS] ⛔ Native script blocking enabled")
                     elif err:
-                        print(f"[JS] Native script blocking failed: {err}")
-            
+                        print(f"[JS] ❌ Native script blocking failed: {err}")
+        
                 store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler_(
                     "darkelf_block_all_scripts",
                     block_scripts_rule,
                     _script_block_ready
                 )
             except Exception as e:
-                print(f"[JS] Native script blocking error: {e}")
+                print(f"[JS] ❌ Native script blocking error: {e}")
 
         # =========================================================
         # Finalize Configuration
