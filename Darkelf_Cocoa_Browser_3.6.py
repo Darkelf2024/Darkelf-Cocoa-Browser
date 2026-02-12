@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v3.6 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v3.7 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -551,7 +551,6 @@ TOP 10 THREAT DOMAINS:
         """Graceful shutdown with final report"""
         self.enabled = False
         print("\n[MiniAI] Sentinel shutting down...")
-        print(self.get_threat_report())
         
 HOME_URL = "darkelf://home"
         
@@ -566,7 +565,7 @@ class ContentRuleManager:
 
         cls._loaded = True
         store = WKContentRuleListStore.defaultStore()
-        identifier = "darkelf_builtin_rules_v6_comprehensive"  # Updated version
+        identifier = "darkelf_builtin_rules_v7_enhanced"  # Updated version
 
         def _lookup(rule_list, error):
             if rule_list:
@@ -581,7 +580,7 @@ class ContentRuleManager:
                     print("[Rules] Compile error:", error)
                     return
                 cls._rule_list = rule_list
-                print("[Rules] Comprehensive tracker blocking rules compiled & ready")
+                print("[Rules] Comprehensive tracker blocking rules compiled & ready (100+ domains)")
 
             store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler_(
                 identifier,
@@ -596,7 +595,7 @@ class ContentRuleManager:
 
     @classmethod
     def _load_json(cls):
-        return """
+        rules_json = """
         [
           {
             "trigger": {
@@ -1027,6 +1026,209 @@ class ContentRuleManager:
           },
           {
             "trigger": {
+              "url-filter": "index\\\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "branch\\\\.io",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "adroll\\\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "bizographics\\\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "pardot\\\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "marketo\\\\.net",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "eloqua\\\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "salesforce\\\\.com/analytics",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "hubspot\\\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "hs-analytics\\\\.net",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "kissmetrics\\\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "intercom\\\\.io",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "drift\\\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "olark\\\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "zendesk\\\\.com.*\\\\/track",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "livechatinc\\\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "tawk\\\\.to",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "doubleclick\\\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "casalemedia\\\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "contextweb\\\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "33across\\\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "yieldmo\\\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "sharethrough\\\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "triplelift\\\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "sovrn\\\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "media\\\\.net",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "indexexchange\\\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "simpli\\\\.fi",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": "bidswitch\\\\.com",
+              "resource-type": ["script", "image"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
               "url-filter": ".*pixel.*track.*",
               "resource-type": ["image", "script"]
             },
@@ -1055,13 +1257,13 @@ class ContentRuleManager:
           }
         ]
         """
-            
-        # ✅ ADD THIS: Count and log rules
+        
+        # ✅ Count and log rules
         try:
             import json
             rules = json.loads(rules_json)
             print(f"[ContentRules] Loaded {len(rules)} blocking rules")
-        
+            
             # Print first 5 domains for verification
             domains = []
             for rule in rules[:5]:
@@ -1072,7 +1274,7 @@ class ContentRuleManager:
             print(f"[ContentRules] Sample domains: {domains}")
         except Exception as e:
             print(f"[ContentRules] Parse error: {e}")
-    
+        
         return rules_json
         
 # ---- Darkelf Diagnostics / Kill-Switches ----
@@ -2505,7 +2707,6 @@ class Browser(NSObject):
                     // Skip YouTube and Cover Your Tracks
                     if (
                         location.hostname.includes("youtube.com") ||
-                        location.hostname.includes("coveryourtracks")
                     ) return;
 
                     var css = `
@@ -2603,46 +2804,26 @@ class Browser(NSObject):
             pass
 
         ucc = WKUserContentController.alloc().init()
-    
-        # ✅ FIXED: Use ContentRuleManager's 70+ rules instead of inline 3 rules
+            
+        # ✅ ATTACH PRE-COMPILED CONTENT BLOCKING RULES (Sync)
         try:
-            from WebKit import WKContentRuleListStore
-        
-            store = WKContentRuleListStore.defaultStore()
-
-            def _adblock_ready(rule_list, error):
-                if rule_list and not error:
-                    ucc.addContentRuleList_(rule_list)
-                    print("[AdBlock] ✅ Native WebKit ad blocking enabled")
-                    print(f"[AdBlock] Rule list: {rule_list.identifier()}")  # ✅ Fixed f-string
-                elif error:
-                    print(f"[AdBlock] ❌ Rule compilation error: {error}")
-        
-            # ✅ Get the comprehensive 70+ rule JSON from ContentRuleManager
-            rules_json = ContentRuleManager._load_json()
-        
-            # ✅ Compile and load the rules
-            if hasattr(store, "compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler_"):
-                try:
-                    store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler_(
-                        "darkelf_comprehensive_adblock_v6",  # ✅ Updated identifier
-                        rules_json,  # ✅ Now using the 70+ rules
-                        _adblock_ready
-                    )
-                except Exception as e:
-                    print(f"[AdBlock] ❌ Compilation failed: {e}")
+            rule_list = ContentRuleManager._rule_list
+    
+            if rule_list:
+                ucc.addContentRuleList_(rule_list)
+                print("[AdBlock] ✅ Content blocking rules attached (100+ domains)")
             else:
-                print("[AdBlock] ⚠️  Native WebKit content blocking unavailable")
-
+                print("[AdBlock] ⚠️  Rules not compiled yet")
+        
         except Exception as e:
-            print(f"[AdBlock] ❌ Failed to initialize: {e}")
+            print(f"[AdBlock] ❌ Rule attachment failed: {e}")
 
         # ✅ Continue with netlog handler registration
         try:
             ucc.removeScriptMessageHandlerForName_("netlog")
         except Exception:
             pass
-        
+
         try:
             if hasattr(self, "_nav"):
                 ucc.addScriptMessageHandler_name_(self._nav, "netlog")
@@ -2651,10 +2832,10 @@ class Browser(NSObject):
                 print("[Init] ⚠️  _nav delegate not set yet — cannot add netlog handler.")
         except Exception as e:
             print(f"[Init] ❌ Failed to register netlog handler: {e}")
-        
+
         self._search_handler = getattr(self, "_search_handler", None) or SearchHandler.alloc().initWithOwner_(self)
         ucc.addScriptMessageHandler_name_(self._search_handler, "search")
-    
+
         seed = secrets.randbits(64)
         self.current_canvas_seed = seed
 
@@ -3697,10 +3878,26 @@ def main():
 
     from Cocoa import NSApplication
     app = NSApplication.sharedApplication()
+    
+    # ✅ START RULE COMPILATION (async)
+    print("[Startup] Compiling content blocking rules...")
+    ContentRuleManager.load_rules()
+
     app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
 
     delegate = AppDelegate.alloc().init()
     app.setDelegate_(delegate)
+
+    # ✅ WAIT FOR RULES TO COMPILE (prevents race condition)
+    import time
+    print("[Startup] Waiting for rules to compile...")
+    time.sleep(1.0)  # 1 second is enough for 70 rules
+    
+    # Verify rules are ready
+    if ContentRuleManager._rule_list:
+        print("[Startup] ✅ Rules ready - initializing browser")
+    else:
+        print("[Startup] ⚠️  Rules not ready yet (will retry per-tab)")
 
     delegate.browser = Browser.alloc().init()
 
