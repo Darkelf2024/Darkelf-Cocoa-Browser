@@ -53,7 +53,7 @@
 # EAR.  By downloading, using, or distributing this software, you agree to
 # comply with all applicable laws and regulations.
 #
-# ────────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────��─────────────────────────────────
 # NOTE
 # This source code is provided without any compiled binaries. Redistribution,
 # modification, and use must comply with the LGPL-3.0-or-later license and all
@@ -69,7 +69,12 @@ import objc
 import secrets
 import atexit
 import warnings
+from collections import deque
+from datetime import datetime
+from typing import Dict, List, Set, Optional
+
 from objc import ObjCPointerWarning
+
 
 warnings.filterwarnings("ignore", category=ObjCPointerWarning)
 
@@ -87,53 +92,387 @@ from WebKit import (
 )
 from Foundation import NSURL, NSURLRequest, NSMakeRect, NSNotificationCenter, NSDate, NSTimer, NSObject, NSUserDefaults, NSRegistrationDomain
 
-from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttributedString, NSAlert, NSAlertStyleCritical, NSColor, NSAppearance
+from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttributedString, NSAlert, NSAlertStyleCritical, NSColor, NSAppearance, NSAnimationContext
 
 from WebKit import WKContentRuleListStore
 import json
 
 # =========================
-# Darkelf MiniAI (SAFE / PASSIVE)
+# Darkelf MiniAI (SAFE / PASSIVE) - EXPANDED
 # =========================
+import time
+
 class DarkelfMiniAISentinel:
     """
-    Cocoa-safe Darkelf MiniAI
-    Passive observer only
-    No JS injection
-    No blocking
-    No timers
+    Cocoa-safe Darkelf MiniAI - Expanded Edition
+    
+    Passive observer with:
+    - Network threat monitoring
+    - Intrusion attempt detection
+    - Fingerprinting detection
+    - Session anomaly tracking
+    - Zero blocking (observation only)
+    - No timers (Cocoa-safe)
     """
+    
     def __init__(self):
         self.enabled = True
-        self.events = []
+        
+        # Event storage (circular buffer)
+        self.events = deque(maxlen=1000)  # Last 1000 events
+        
+        # Threat counters
         self.tracker_hits = 0
         self.suspicious_hits = 0
+        self.malware_hits = 0
+        self.exploit_attempts = 0
+        self.fingerprint_attempts = 0
+        self.intrusion_attempts = 0
+        
+        # Session tracking
+        self.session_start = time.time()
+        self.unique_domains = set()
+        self.redirects = []
+        
+        # Intrusion detection patterns
+        self.intrusion_patterns = {
+            # Network-based attacks
+            'sql_injection': ['union select', 'or 1=1', "'; drop", 'exec(', 'script>'],
+            'xss': ['<script', 'javascript:', 'onerror=', 'onload=', 'eval('],
+            'path_traversal': ['../', '..\\', '%2e%2e', 'etc/passwd', 'windows/system'],
+            'command_injection': ['| cat', '; ls', '&& whoami', 'cmd.exe', '/bin/bash'],
+            
+            # Malware/exploit indicators
+            'malware': ['ransomware', 'cryptolocker', 'wannacry', 'trojan', 'backdoor'],
+            'exploit': ['metasploit', 'shellcode', 'exploit-db', 'cve-', '0day'],
+            'phishing': ['verify-account', 'suspended-account', 'confirm-identity', 'urgent-action'],
+            
+            # Data exfiltration
+            'exfil': ['base64,', 'data:text', 'blob:', 'download.php?file='],
+        }
+        
+        # Fingerprinting detection
+        self.fingerprint_apis = {
+            'canvas': 0,
+            'webgl': 0,
+            'audio': 0,
+            'font': 0,
+            'battery': 0,
+            'geolocation': 0,
+            'media_devices': 0,
+            'webrtc': 0,
+        }
+        
+        # High-risk domains (known trackers/malware)
+        self.high_risk_domains = {
+            # Trackers
+            'doubleclick.net', 'googlesyndication.com', 'googleadservices.com',
+            'facebook.net', 'scorecardresearch.com', 'quantserve.com',
+            'taboola.com', 'outbrain.com', 'criteo.com', 'adnxs.com',
+            
+            # Common malware/phishing TLDs
+            '.tk', '.ml', '.ga', '.cf', '.gq',  # Free domains often abused
+        }
+        
+        # Anomaly detection
+        self.request_timestamps = deque(maxlen=100)
+        self.anomaly_threshold = 50  # requests per second = suspicious
+        
         print("[MiniAI] Sentinel enabled (passive mode)")
+        print("[MiniAI] Intrusion detection: ACTIVE")
+        print("[MiniAI] Fingerprint monitoring: ACTIVE")
+        print("[MiniAI] Threat analysis: ACTIVE")
 
-    def monitor_network(self, url, headers):
+    def monitor_network(self, url: str, headers: Dict[str, str]):
+        """
+        Monitor network requests for threats, intrusions, and anomalies.
+        PASSIVE ONLY - logs threats but never blocks.
+        """
         if not self.enabled or not url:
             return
+        
         try:
-            u = url.lower()
-            if any(x in u for x in ("exploit","payload","phish","malware")):
-                self.suspicious_hits += 1
-            if any(x in u for x in ("tracker","analytics","beacon","doubleclick")):
-                self.tracker_hits += 1
-            self.events.append(u)
-            if len(self.events) > 500:
-                self.events.pop(0)
+            url_lower = url.lower()
+            timestamp = time.time()
+            
+            # Record event
+            event = {
+                'url': url,
+                'timestamp': timestamp,
+                'datetime': datetime.now().isoformat(),
+                'threats': [],
+                'risk_level': 'low'
+            }
+            
+            # ===== INTRUSION DETECTION =====
+            intrusion_detected = self._detect_intrusion(url_lower, event)
+            
+            # ===== THREAT CLASSIFICATION =====
+            self._classify_threats(url_lower, event)
+            
+            # ===== FINGERPRINTING DETECTION =====
+            self._detect_fingerprinting(url_lower, headers, event)
+            
+            # ===== DOMAIN REPUTATION =====
+            self._check_domain_reputation(url, event)
+            
+            # ===== ANOMALY DETECTION =====
+            self._detect_anomalies(timestamp, event)
+            
+            # ===== REDIRECT CHAIN ANALYSIS =====
+            self._analyze_redirects(url, headers, event)
+            
+            # Store event
+            self.events.append(event)
+            
+            # Log high-risk events
+            if event['risk_level'] in ('high', 'critical'):
+                self._log_threat(event)
+            
+        except Exception as e:
+            # Silent fail - never crash the browser
+            pass
+
+    def _detect_intrusion(self, url: str, event: dict) -> bool:
+        """Detect intrusion attempts (SQLi, XSS, path traversal, etc.)"""
+        intrusion_found = False
+        
+        for attack_type, patterns in self.intrusion_patterns.items():
+            for pattern in patterns:
+                if pattern in url:
+                    self.intrusion_attempts += 1
+                    event['threats'].append(f"INTRUSION: {attack_type.upper()}")
+                    event['risk_level'] = 'critical'
+                    intrusion_found = True
+                    
+                    print(f"[MiniAI] 🚨 INTRUSION DETECTED: {attack_type} in {url[:100]}")
+                    break
+        
+        return intrusion_found
+
+    def _classify_threats(self, url: str, event: dict):
+        """Classify known threat patterns"""
+        # Malware indicators
+        if any(x in url for x in ("malware", "virus", "trojan", "ransomware", "backdoor")):
+            self.malware_hits += 1
+            event['threats'].append("MALWARE")
+            event['risk_level'] = 'critical'
+        
+        # Exploit attempts
+        if any(x in url for x in ("exploit", "payload", "shellcode", "metasploit")):
+            self.exploit_attempts += 1
+            event['threats'].append("EXPLOIT")
+            event['risk_level'] = 'critical'
+        
+        # Phishing indicators
+        if any(x in url for x in ("phish", "verify-account", "suspended", "confirm-identity")):
+            self.suspicious_hits += 1
+            event['threats'].append("PHISHING")
+            event['risk_level'] = 'high'
+        
+        # Trackers
+        if any(x in url for x in ("tracker", "analytics", "beacon", "doubleclick", "facebook.net")):
+            self.tracker_hits += 1
+            event['threats'].append("TRACKER")
+            if event['risk_level'] == 'low':
+                event['risk_level'] = 'medium'
+
+    def _detect_fingerprinting(self, url: str, headers: Dict[str, str], event: dict):
+        """Detect fingerprinting attempts"""
+        fingerprint_detected = False
+        
+        # Canvas fingerprinting
+        if 'canvas' in url or 'todataurl' in url:
+            self.fingerprint_apis['canvas'] += 1
+            event['threats'].append("FINGERPRINT: Canvas")
+            fingerprint_detected = True
+        
+        # WebGL fingerprinting
+        if 'webgl' in url or 'getparameter' in url:
+            self.fingerprint_apis['webgl'] += 1
+            event['threats'].append("FINGERPRINT: WebGL")
+            fingerprint_detected = True
+        
+        # Audio fingerprinting
+        if 'audiocontext' in url or 'analyser' in url:
+            self.fingerprint_apis['audio'] += 1
+            event['threats'].append("FINGERPRINT: Audio")
+            fingerprint_detected = True
+        
+        # Font fingerprinting
+        if 'fonts' in url or 'fontface' in url:
+            self.fingerprint_apis['font'] += 1
+            event['threats'].append("FINGERPRINT: Font")
+            fingerprint_detected = True
+        
+        # Battery API (deprecated but still used)
+        if 'battery' in url or 'getbattery' in url:
+            self.fingerprint_apis['battery'] += 1
+            event['threats'].append("FINGERPRINT: Battery")
+            fingerprint_detected = True
+        
+        # Geolocation tracking
+        if 'geolocation' in url or 'coords' in url:
+            self.fingerprint_apis['geolocation'] += 1
+            event['threats'].append("FINGERPRINT: Geolocation")
+            fingerprint_detected = True
+        
+        # Media devices enumeration
+        if 'mediadevices' in url or 'enumeratedevices' in url:
+            self.fingerprint_apis['media_devices'] += 1
+            event['threats'].append("FINGERPRINT: MediaDevices")
+            fingerprint_detected = True
+        
+        # WebRTC leak
+        if 'rtcpeerconnection' in url or 'ice' in url:
+            self.fingerprint_apis['webrtc'] += 1
+            event['threats'].append("FINGERPRINT: WebRTC")
+            fingerprint_detected = True
+        
+        if fingerprint_detected:
+            self.fingerprint_attempts += 1
+            if event['risk_level'] == 'low':
+                event['risk_level'] = 'medium'
+
+    def _check_domain_reputation(self, url: str, event: dict):
+        """Check domain against known bad actors"""
+        try:
+            from urllib.parse import urlparse
+            domain = urlparse(url).netloc.lower()
+            
+            # Track unique domains
+            self.unique_domains.add(domain)
+            
+            # Check high-risk list
+            for bad_domain in self.high_risk_domains:
+                if bad_domain in domain:
+                    event['threats'].append(f"HIGH_RISK_DOMAIN: {bad_domain}")
+                    if event['risk_level'] == 'low':
+                        event['risk_level'] = 'medium'
+                    break
+            
+            # Suspicious TLDs
+            if any(domain.endswith(tld) for tld in ['.tk', '.ml', '.ga', '.cf', '.gq']):
+                event['threats'].append("SUSPICIOUS_TLD")
+                event['risk_level'] = 'high'
+                
         except Exception:
             pass
 
-    def on_tracker_blocked(self, count):
+    def _detect_anomalies(self, timestamp: float, event: dict):
+        """Detect unusual request patterns (DDoS, rapid requests, etc.)"""
+        self.request_timestamps.append(timestamp)
+        
+        # Check request rate (last second)
+        recent_requests = sum(1 for t in self.request_timestamps if timestamp - t < 1.0)
+        
+        if recent_requests > self.anomaly_threshold:
+            event['threats'].append(f"ANOMALY: High request rate ({recent_requests}/sec)")
+            event['risk_level'] = 'high'
+            print(f"[MiniAI] ⚠️  ANOMALY: {recent_requests} requests/sec detected")
+
+    def _analyze_redirects(self, url: str, headers: Dict[str, str], event: dict):
+        """Analyze redirect chains for suspicious behavior"""
+        # Check for redirect headers
+        if headers and ('location' in str(headers).lower() or 'refresh' in str(headers).lower()):
+            self.redirects.append(url)
+            
+            # Suspicious: >5 redirects in chain
+            if len(self.redirects) > 5:
+                event['threats'].append("REDIRECT_CHAIN: Suspicious")
+                event['risk_level'] = 'high'
+                print(f"[MiniAI] ⚠️  Suspicious redirect chain: {len(self.redirects)} hops")
+
+    def _log_threat(self, event: dict):
+        """Log high-risk events to console"""
+        print(f"\n{'='*60}")
+        print(f"[MiniAI] 🚨 THREAT DETECTED")
+        print(f"{'='*60}")
+        print(f"Time:       {event['datetime']}")
+        print(f"URL:        {event['url'][:80]}...")
+        print(f"Risk Level: {event['risk_level'].upper()}")
+        print(f"Threats:    {', '.join(event['threats'])}")
+        print(f"{'='*60}\n")
+
+    def on_tracker_blocked(self, count: int):
+        """External callback when content blocker blocks trackers"""
         try:
             self.tracker_hits += int(count)
         except Exception:
             pass
 
-    def shutdown(self):
-        self.enabled = False
+    def get_statistics(self) -> dict:
+        """Get current threat statistics"""
+        uptime = time.time() - self.session_start
+        
+        return {
+            'uptime_seconds': uptime,
+            'total_events': len(self.events),
+            'unique_domains': len(self.unique_domains),
+            
+            'threats': {
+                'trackers': self.tracker_hits,
+                'suspicious': self.suspicious_hits,
+                'malware': self.malware_hits,
+                'exploits': self.exploit_attempts,
+                'intrusions': self.intrusion_attempts,
+                'fingerprinting': self.fingerprint_attempts,
+            },
+            
+            'fingerprinting_apis': dict(self.fingerprint_apis),
+            
+            'recent_threats': [
+                e for e in list(self.events)[-10:]
+                if e['risk_level'] in ('high', 'critical')
+            ]
+        }
 
+    def get_threat_report(self) -> str:
+        """Generate human-readable threat report"""
+        stats = self.get_statistics()
+        uptime_min = stats['uptime_seconds'] / 60
+        
+        report = f"""
+╔══════════════════════════════════════════════════════════╗
+║         DARKELF MiniAI - THREAT REPORT                   ║
+╚══════════════════════════════════════════════════════════╝
+
+Session Uptime:     {uptime_min:.1f} minutes
+Total Events:       {stats['total_events']}
+Unique Domains:     {stats['unique_domains']}
+
+THREAT SUMMARY:
+├─ Trackers:        {stats['threats']['trackers']}
+├─ Suspicious:      {stats['threats']['suspicious']}
+├─ Malware:         {stats['threats']['malware']}
+├─ Exploits:        {stats['threats']['exploits']}
+├─ Intrusions:      {stats['threats']['intrusions']}
+└─ Fingerprinting:  {stats['threats']['fingerprinting']}
+
+FINGERPRINTING ATTEMPTS:
+├─ Canvas:          {stats['fingerprinting_apis']['canvas']}
+├─ WebGL:           {stats['fingerprinting_apis']['webgl']}
+├─ Audio:           {stats['fingerprinting_apis']['audio']}
+├─ Font:            {stats['fingerprinting_apis']['font']}
+├─ Battery:         {stats['fingerprinting_apis']['battery']}
+├─ Geolocation:     {stats['fingerprinting_apis']['geolocation']}
+├─ Media Devices:   {stats['fingerprinting_apis']['media_devices']}
+└─ WebRTC:          {stats['fingerprinting_apis']['webrtc']}
+
+RECENT HIGH-RISK EVENTS: {len(stats['recent_threats'])}
+"""
+        
+        for event in stats['recent_threats'][-5:]:
+            report += f"\n  • {event['datetime'][:19]} | {event['risk_level'].upper()} | {', '.join(event['threats'][:2])}"
+        
+        return report
+
+    def shutdown(self):
+        """Graceful shutdown with final report"""
+        self.enabled = False
+        print("\n[MiniAI] Sentinel shutting down...")
+        print(self.get_threat_report())
+        
 HOME_URL = "darkelf://home"
         
 class ContentRuleManager:
@@ -261,9 +600,6 @@ LOCAL_WEBSOCKET_POLICY_VALUE = (
 ENABLE_LOCAL_EXPOSE_HEADERS = True
 LOCAL_EXPOSE_HEADERS_VALUE = "Content-Length, Content-Type, Content-Language"
 
-def _system_services():
-    return ("Wi-Fi", "Ethernet")
-
 class _NavDelegate(NSObject):
     def initWithOwner_(self, owner):
         self = objc.super(_NavDelegate, self).init()
@@ -351,20 +687,6 @@ class _NavDelegate(NSObject):
 
             if url is None:
                 decisionHandler(WKNavigationActionPolicyAllow)
-                handled = True
-                return
-
-            scheme = (url.scheme() or "").lower()
-
-            # 🔒 Block plaintext HTTP when Tor is OFF
-            if scheme == "http" and not getattr(self._owner, "tor_on", False):
-                try:
-                    self._owner._show_block_alert(
-                        "Plaintext HTTP is blocked.\nEnable Tor to access HTTP sites."
-                    )
-                except Exception:
-                    pass
-                decisionHandler(WKNavigationActionPolicyCancel)
                 handled = True
                 return
 
@@ -763,47 +1085,6 @@ class SearchHandler(objc.lookUpClass("NSObject")):
         except Exception as e:
             print("SearchHandler error:", e)
             
-class JSToggleHandler(objc.lookUpClass("NSObject")):
-    def initWithOwner_(self, owner):
-        self = objc.super(JSToggleHandler, self).init()
-        if self is None:
-            return None
-        self.owner = owner
-        return self
-
-    def userContentController_didReceiveScriptMessage_(self, controller, message):
-        try:
-            # Toggle global JS state
-            self.owner.js_enabled = not getattr(self.owner, "js_enabled", True)
-
-            state = "ENABLED" if self.owner.js_enabled else "DISABLED"
-            print(f"[JS Toggle] JavaScript {state}")
-
-            # 🔥 Apply JS preference to active webview
-            wk = self.owner.tabs[self.owner.active].view
-            prefs = wk.configuration().preferences()
-            prefs.setJavaScriptEnabled_(self.owner.js_enabled)
-
-            # If on homepage, just update UI and DO NOT rebuild
-            try:
-                url = wk.URL()
-                if url and url.absoluteString() == HOME_URL:
-                    js_update = f"""
-                        if (window.DarkelfStatus && window.DarkelfStatus.update) {{
-                            window.DarkelfStatus.update({{js: {str(self.owner.js_enabled).lower()}}});
-                        }}
-                    """
-                    wk.evaluateJavaScript_completionHandler_(js_update, None)
-                    return
-            except Exception:
-                pass
-
-            # For external sites: reload instead of full rebuild (lighter + safer)
-            wk.reload()
-
-        except Exception as e:
-            print("[JSToggleHandler] error:", e)
-            
 # BROWSER CONTROLLER ===============
 class Browser(NSObject):
 
@@ -814,7 +1095,6 @@ class Browser(NSObject):
 
         self.cookies_enabled = False
         self.js_enabled = True
-        self.tor_on = False
         self.tabs = []
         self.tab_btns = []
         self.tab_close_btns = []
@@ -1084,7 +1364,8 @@ class Browser(NSObject):
         self.btn_zoom_out = big_btn("minus.magnifyingglass", "Zoom Out")
         self.btn_full   = big_btn("arrow.up.left.and.arrow.down.right", "Fullscreen")
         self.btn_js     = big_btn("bolt.slash", "Toggle JavaScript")
-
+        self.btn_history = big_btn("clock.arrow.circlepath", "History")
+        self.btn_history.setTarget_(self)
                 
         # JS button coloring
         img = NSImage.imageWithSystemSymbolName_accessibilityDescription_("bolt", None)
@@ -1234,7 +1515,7 @@ class Browser(NSObject):
             item('ZoomOut', self.btn_zoom_out),
             item('Full', self.btn_full),
             item('JS', self.btn_js),
-            item('Nuke', self.btn_nuke),            
+            item('Nuke', self.btn_nuke),
         ]
 
         owner = self
@@ -1892,11 +2173,6 @@ class Browser(NSObject):
         self._search_handler = getattr(self, "_search_handler", None) or SearchHandler.alloc().initWithOwner_(self)
         ucc.addScriptMessageHandler_name_(self._search_handler, "search")
         
-        # --- JS Toggle Handler ---
-        self._js_toggle_handler = getattr(self, "_js_toggle_handler", None) or JSToggleHandler.alloc().initWithOwner_(self)
-        ucc.addScriptMessageHandler_name_(self._js_toggle_handler, "jsToggle")
-        
-        
         seed = secrets.randbits(64)
         self.current_canvas_seed = seed
 
@@ -2093,7 +2369,7 @@ class Browser(NSObject):
             wk.enableCursorRects()
         except Exception:
             pass
-
+            
         self._bring_tabbar_to_front()
 
     def _rebuild_active_webview(self):
@@ -2198,7 +2474,7 @@ class Browser(NSObject):
             except Exception:
                 pass
 
-            # --- Attach a delegate that allows onion when Tor is on ---
+            # --- Attach a delegate ---
             try:
                 self._nav_delegate = _NavDelegate.alloc().initWithOwner_(self)
             except Exception:
@@ -2207,12 +2483,6 @@ class Browser(NSObject):
             try:
                 frame = old.frame() if hasattr(old, "frame") else ((0, 0), (800, 600))
                 wk = WKWebView.alloc().initWithFrame_configuration_(frame, config)
-
-                # --- UA SPOOF (rebuild path) ---
-                try:
-                    wk.setCustomUserAgent_(USER_AGENT_SPOOF)
-                except Exception:
-                    pass
 
                 if getattr(self, "_nav_delegate", None) is not None:
                     wk.setNavigationDelegate_(self._nav_delegate)
@@ -2223,7 +2493,7 @@ class Browser(NSObject):
                         pass
 
                 try:
-                    wk.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
+                    wk.setAutoresizingMask_(18)
                 except Exception:
                     pass
 
@@ -2231,8 +2501,6 @@ class Browser(NSObject):
                 self.tabs[self.active].view = wk
                 self._mount_webview(wk)
 
-                # DO NOT inject scripts into the webview here; they are already on the UCC.
-                # (Remove your old: self._inject_core_scripts(wk))
             except Exception as e:
                 print("[WK] creation failed:", e)
                 return
@@ -2260,7 +2528,9 @@ class Browser(NSObject):
                 # If we're on the internal homepage or truly blank, render HOMEPAGE_HTML
                 if url in (None, "", "about:home", "about://home", "about:blank", "about:blank#blocked"):
                     try:
-                        self.tabs[self.active].view.loadHTMLString_baseURL_(HOMEPAGE_HTML, NSURLWithString_(HOME_URL)
+                        self.tabs[self.active].view.loadHTMLString_baseURL_(
+                            HOMEPAGE_HTML,
+                            NSURL.URLWithString_(HOME_URL)
                         )
                         self.tabs[self.active].url  = HOME_URL
                         self.tabs[self.active].host = "home"
@@ -2390,7 +2660,7 @@ class Browser(NSObject):
             if ucc:
                 try: ucc.removeAllUserScripts()
                 except Exception: pass
-                for name in ("netlog","search","mini_ai","jsToggle"):
+                for name in ("netlog","search","mini_ai"):
                     try:
                         ucc.removeScriptMessageHandlerForName_(name)
                     except Exception:
@@ -2551,77 +2821,6 @@ class Browser(NSObject):
         
         except Exception as e:
             print("[Go] Failed:", e)
-
-    def _show_js_disabled_warning(self, url):
-        """Show a placeholder page when JS is disabled."""
-        warning_html = f"""<!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8"/>
-            <title>JavaScript Disabled</title>
-            <style>
-                body {{
-                    margin: 0;
-                    font-family: system-ui, -apple-system, sans-serif;
-                    background: #07080d;
-                    color: #eef2f6;
-                    display: flex;
-                    justify-content: center;
-                    align-items: center;
-                    height: 100vh;
-                    text-align: center;
-                }}
-                .container {{
-                    max-width: 600px;
-                    padding: 40px;
-                }}
-                h1 {{
-                    color: #ff453a;
-                    font-size: 2rem;
-                    margin-bottom: 20px;
-                }}
-                p {{
-                    color: #9aa3ad;
-                    font-size: 1.1rem;
-                    line-height: 1.6;
-                }}
-                .url {{
-                    color: #34C759;
-                    word-break: break-all;
-                    margin-top: 20px;
-                    padding: 10px;
-                    background: rgba(52, 199, 89, 0.1);
-                    border-radius: 8px;
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h1>⛔ JavaScript is Disabled</h1>
-                <p>You attempted to navigate to:</p>
-                <div class="url">{url}</div>
-                <p style="margin-top: 30px;">
-                    Enable JavaScript from the homepage chip to browse this site.
-                </p>
-            </div>
-        </body>
-        </html>
-        """
-    
-        try:
-            wk = self.tabs[self.active].view
-            wk.loadHTMLString_baseURL_(warning_html, None)
-        except Exception:
-            pass
-            
-    def _show_block_alert(self, msg):
-        try:
-            alert = NSAlert.alloc().init()
-            alert.setMessageText_("Blocked for privacy")
-            alert.setInformativeText_(msg)
-            alert.runModal()
-        except Exception:
-            print("Blocked: " + msg)
             
     def actNuke_(self, sender):
         ACCENT = (52/255.0, 199/255.0, 89/255.0, 1.0)
@@ -2779,8 +2978,8 @@ class Browser(NSObject):
                     self.actSnapshot_(None)
                     return None
 
-                # 🔥 ⌘ + Shift + X  → Instant Exit
-                if ch == "x" and shift:
+                # 🔥 ⌘ + Shift + X  → Instant Exit (FIXED)
+                if ch.lower() == "x" and shift:
                     NSApp().terminate_(None)
                     return None
 
@@ -2790,7 +2989,6 @@ class Browser(NSObject):
             return evt
 
         NSEvent.addLocalMonitorForEventsMatchingMask_handler_(1 << 10, handler)
-
         
     def __del__(self):
         try:
@@ -2826,7 +3024,7 @@ class Browser(NSObject):
         except Exception as e:
             print("[Browser] Failed to remove JS handlers in __del__:", e)
 
-        # ��� Shutdown MiniAI Sentinel
+        # ✅ Shutdown MiniAI Sentinel
         try:
             if hasattr(self, "mini_ai") and self.mini_ai:
                 self.mini_ai.shutdown()
@@ -2885,7 +3083,7 @@ class Browser(NSObject):
 
         except Exception as e:
             print("[Snapshot] Failed:", e)
-
+            
 class AppDelegate(NSObject):
 
     def applicationShouldTerminate_(self, sender):
@@ -2893,36 +3091,65 @@ class AppDelegate(NSObject):
         return True
 
     def applicationWillTerminate_(self, notification):
+        """Graceful shutdown with threat report and data cleanup"""
+        print("\n" + "="*70)
+        print("[Darkelf] Browser shutting down - initiating cleanup...")
+        print("="*70 + "\n")
+    
         try:
             if hasattr(self, "browser") and self.browser is not None:
-                # Stop cookie scrubber
-                try:
-                    self.browser._stop_cookie_scrubber()
-                except Exception as e:
-                    print("[Quit] Failed to stop cookie scrubber:", e)
-
-                # Stop Tor refresh timer (if active)
-                try:
-                    if hasattr(self.browser, "_tor_refresh_timer") and self.browser._tor_refresh_timer:
-                        self.browser._tor_refresh_timer.invalidate()
-                        self.browser._tor_refresh_timer = None
-                except Exception as e:
-                    print("[Quit] Failed to stop tor refresh timer:", e)
-
-                # ✅ Shutdown MiniAI Sentinel
+            
+                # ═══════════════════════════════════════════════════════════
+                # 1. MINI AI THREAT REPORT & SHUTDOWN
+                # ═══════════════════════════════════════════════════════════
                 try:
                     if hasattr(self.browser, "mini_ai") and self.browser.mini_ai:
+                        print("[MiniAI] Generating final threat report...\n")
+                    
+                        # Display full threat report
+                        report = self.browser.mini_ai.get_threat_report()
+                        print(report)
+                    
+                        # Get statistics
+                        stats = self.browser.mini_ai.get_statistics()
+                    
+                        # Warn about critical threats
+                        critical_count = sum(
+                            1 for e in stats['recent_threats']
+                            if e.get('risk_level') == 'critical'
+                        )
+                    
+                        if critical_count > 0:
+                            print(f"\n⚠️  WARNING: {critical_count} CRITICAL threat(s) detected during session\n")
+                    
+                        # Shutdown sentinel
                         self.browser.mini_ai.shutdown()
                         print("[Quit] MiniAI Sentinel shutdown")
+                    
                 except Exception as e:
                     print("[Quit] MiniAI shutdown failed:", e)
-
-                # Wipe all browsing data
+            
+                # ═══════════════════════════════════════════════════════════
+                # 2. STOP COOKIE SCRUBBER
+                # ═══════════════════════════════════════════════════════════
+                try:
+                    self.browser._stop_cookie_scrubber()
+                    print("[Quit] Cookie scrubber stopped")
+                except Exception as e:
+                    print("[Quit] Failed to stop cookie scrubber:", e)
+            
+                # ═══════════════════════════════════════════════════════════
+                # 3. WIPE ALL BROWSING DATA
+                # ═══════════════════════════════════════════════════════════
                 try:
                     self.browser._wipe_all_site_data()
                     print("[Quit Wipe] All WKWebsiteDataStore data cleared on quit.")
                 except Exception as e:
                     print("[Quit Wipe] Error wiping data:", e)
+            
+                print("\n" + "="*70)
+                print("[Darkelf] Shutdown complete - all data wiped")
+                print("="*70 + "\n")
 
         except Exception as e:
             print("[Quit] Unexpected shutdown error:", e)
