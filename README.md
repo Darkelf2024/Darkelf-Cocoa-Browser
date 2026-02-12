@@ -26,22 +26,20 @@ Two editions are available:
 
 ------------------------------------------------------------------------
 
-# 🧩 Editions Comparison
+## 🧩 Editions Comparison
 
-  Feature                   🟢 General       🔒 Hardened
-  ------------------------- ---------------- -------------------------
-  Daily Use Optimized       ✅               ⚠️
-  Non-Persistent Sessions   ✅               ✅ (strict)
-  Declarative Ad Blocking   ✅               ✅ (enhanced)
-  Fingerprint Reduction     Moderate         Aggressive
-  JavaScript Toggle         ✅               ✅
-  Tor Support               ❌               ✅ Optional
-  SOCKS Proxy               ❌               ✅
-  WebKit Hardening          Balanced         Advanced
-  MiniAI Monitoring         ✅               ✅
-  Intended Audience         Everyday users   Researchers / High-risk
-
-------------------------------------------------------------------------
+| Feature | 🟢 General | 🔒 Hardened |
+|----------|------------|------------|
+| Daily Use Optimized | ✅ Yes | ⚠️ Not Primary Focus |
+| Non-Persistent Sessions | ✅ Yes | ✅ Enforced (Strict) |
+| Declarative Ad Blocking | ✅ Safari-Style | ✅ Enhanced |
+| Fingerprint Reduction | Moderate | Aggressive |
+| JavaScript Toggle | ✅ Yes | ✅ Yes |
+| Tor Support | ❌ None | ✅ Optional |
+| SOCKS Proxy | ❌ None | ✅ Yes |
+| WebKit Hardening | Balanced | Advanced |
+| MiniAI Monitoring | ✅ Enabled | ✅ Enabled |
+| Intended Audience | Everyday Users | Researchers / High-Risk |
 
 # 🟢 Darkelf Cocoa -- General Edition
 
@@ -136,30 +134,8 @@ Tested:
 
 -   DuckDuckGo Lite
 -   Wikipedia
--   YouTube (DDG Lite proxy)
+-   YouTube (DDG Lite)
 -   Cover Your Tracks
-
-------------------------------------------------------------------------
-
-# ⚙️ Installation
-
-## Requirements
-
--   macOS 13+
--   Python 3.11+
--   PyObjC
-
-## Install Dependencies
-
-``` bash
-pip install pyobjc-framework-Cocoa             pyobjc-framework-WebKit             pyobjc-framework-Quartz
-```
-
-## Run
-
-``` bash
-python3 Darkelf_Cocoa_Browser_3.6.py
-```
 
 ------------------------------------------------------------------------
 
@@ -175,14 +151,10 @@ python3 Darkelf_Cocoa_Browser_3.6.py
   Instant Exit   ⌘⇧X
 
 ------------------------------------------------------------------------
+## 📂 Source Files
 
-# 📂 Source Files
-
-General Edition:\
-https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/blob/main/Darkelf_Cocoa_Browser_3.6.py
-
-Hardened Edition:\
-https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/blob/main/Darkelf%20Cocoa%20Hardened%20Browser%203.6.py
+- 🟢 [Darkelf Cocoa Browser](https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/blob/main/Darkelf_Cocoa_Browser_3.6.py)  
+- 🔒 [Darkelf Hardened Cocoa Browser](https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/blob/main/Darkelf%20Cocoa%20Hardened%20Browser%203.6.py)
 
 ------------------------------------------------------------------------
 
