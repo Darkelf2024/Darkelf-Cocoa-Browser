@@ -163,7 +163,7 @@ python3 Darkelf_Cocoa_Browser_3.6.py
 
 ------------------------------------------------------------------------
 
-# ⌨️ Keyboard Shortcuts
+# Keyboard Shortcuts
 
   Action         Shortcut
   -------------- ----------
