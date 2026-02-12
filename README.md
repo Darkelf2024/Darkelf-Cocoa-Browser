@@ -139,16 +139,17 @@ Tested:
 
 ------------------------------------------------------------------------
 
-# Keyboard Shortcuts
+## ⌨️ Keyboard Shortcuts
 
-  Action         Shortcut
-  -------------- ----------
-  New Tab        ⌘T
-  Close Tab      ⌘W
-  Reload         ⌘R
-  Address Bar    ⌘L
-  Screenshot     ⌘S
-  Instant Exit   ⌘⇧X
+| Action        | Shortcut |
+|---------------|----------|
+| New Tab       | ⌘T       |
+| Close Tab     | ⌘W       |
+| Reload        | ⌘R       |
+| Address Bar   | ⌘L       |
+| Screenshot    | ⌘S       |
+| Instant Exit  | ⌘⇧X      |
+
 
 ------------------------------------------------------------------------
 ## 📂 Source Files
