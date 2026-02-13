@@ -2939,11 +2939,7 @@ class Browser(NSObject):
 
         except Exception as e:
             print("[AdBlock] Failed to initialize native ad blocker:", e)
-
-        try:
-            ucc.removeScriptMessageHandlerForName_("netlog")
-        except Exception:
-            pass
+            
         # ✅ Continue with netlog handler registration
         try:
             ucc.removeScriptMessageHandlerForName_("netlog")
@@ -4011,7 +4007,7 @@ def main():
     
     # ✅ WAIT FOR ASYNC COMPILATION
     import time
-    time.sleep(3.0)  # Give WebKit time to compile 100 rules
+    time.sleep(3.0)  # Give WebKit time to compile 121 rules
     
     if ContentRuleManager._rule_list:
         print("[Startup] ✅ Rules ready - initializing browser")
