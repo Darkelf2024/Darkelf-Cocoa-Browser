@@ -4011,7 +4011,7 @@ def main():
     
     # ✅ WAIT FOR ASYNC COMPILATION
     import time
-    time.sleep(3.0)  # Give WebKit time to compile 121 rules
+    time.sleep(3.0)  # Give WebKit time to compile 100 rules
     
     if ContentRuleManager._rule_list:
         print("[Startup] ✅ Rules ready - initializing browser")
