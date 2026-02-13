@@ -559,18 +559,22 @@ class ContentRuleManager:
     _loaded = False
 
     @classmethod
-    def load_rules(cls):
+    def load_rules(cls, completion_callback=None):
         if cls._loaded:
+            if cls._rule_list and completion_callback:
+                completion_callback()
             return
 
         cls._loaded = True
         store = WKContentRuleListStore.defaultStore()
-        identifier = "darkelf_builtin_rules_v7_enhanced"  # Updated version
+        identifier = "darkelf_builtin_rules_v8_enhanced"
 
         def _lookup(rule_list, error):
             if rule_list:
                 cls._rule_list = rule_list
                 print("[Rules] Loaded cached comprehensive tracker blocking rule list")
+                if completion_callback:
+                    completion_callback()
                 return
 
             json_rules = cls._load_json()
@@ -579,8 +583,12 @@ class ContentRuleManager:
                 if error:
                     print("[Rules] Compile error:", error)
                     return
+
                 cls._rule_list = rule_list
                 print("[Rules] Comprehensive tracker blocking rules compiled & ready (100+ domains)")
+
+                if completion_callback:
+                    completion_callback()
 
             store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler_(
                 identifier,
@@ -595,6 +603,7 @@ class ContentRuleManager:
 
     @classmethod
     def _load_json(cls):
+        # your JSON rules here
         rules_json = """
         [
           {
@@ -1254,7 +1263,49 @@ class ContentRuleManager:
               "resource-type": ["image", "script"]
             },
             "action": { "type": "block" }
-          }
+          },
+          {
+            "trigger": {
+              "url-filter": ".*lijit\\\\.com.*",
+              "resource-type": ["image", "script"]
+           },
+           "action": { "type": "block" }
+         },
+         {
+           "trigger": {
+             "url-filter": ".*adform\\\\.net.*",
+             "resource-type": ["image", "script"]
+           },
+           "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": ".*smartadserver\\\\.com.*",
+              "resource-type": ["image", "script"]
+            },
+            "action": { "type": "block" }
+          },        
+          {
+            "trigger": {
+              "url-filter": ".*trafficjunky\\\\.net.*",
+              "resource-type": ["image", "script"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": ".*triplelift\\\\.com.*",
+              "resource-type": ["image", "script"]
+            },
+            "action": { "type": "block" }
+          },
+          {
+            "trigger": {
+              "url-filter": ".*undertone\\\\.com.*",
+              "resource-type": ["image", "script"]
+            },
+            "action": { "type": "block" }
+        }
         ]
         """
         
@@ -1263,15 +1314,6 @@ class ContentRuleManager:
             import json
             rules = json.loads(rules_json)
             print(f"[ContentRules] Loaded {len(rules)} blocking rules")
-            
-            # Print first 5 domains for verification
-            domains = []
-            for rule in rules[:5]:
-                try:
-                    domains.append(rule['trigger']['url-filter'])
-                except:
-                    pass
-            print(f"[ContentRules] Sample domains: {domains}")
         except Exception as e:
             print(f"[ContentRules] Parse error: {e}")
         
@@ -2704,10 +2746,8 @@ class Browser(NSObject):
             _add(r"""
             (function(){
                 try {
-                    // Skip YouTube and Cover Your Tracks
                     if (
-                        location.hostname.includes("youtube.com") ||
-                    ) return;
+                        location.hostname.includes("youtube.com")) return;
 
                     var css = `
                     /* Generic ad blocking */
@@ -2812,12 +2852,98 @@ class Browser(NSObject):
             if rule_list:
                 ucc.addContentRuleList_(rule_list)
                 print("[AdBlock] ✅ Content blocking rules attached (100+ domains)")
-            else:
-                print("[AdBlock] ⚠️  Rules not compiled yet")
         
         except Exception as e:
             print(f"[AdBlock] ❌ Rule attachment failed: {e}")
+            
+        try:
+            from WebKit import WKContentRuleListStore
 
+            adblock_rules = r'''
+            [
+              {
+                "trigger": {
+                  "url-filter": ".*",
+                  "resource-type": [
+                    "image",
+                    "style-sheet",
+                    "script",
+                    "media",
+                    "raw",
+                    "font"
+                  ],
+                  "if-domain": [
+                    "doubleclick.net",
+                    "googlesyndication.com",
+                    "googleadservices.com",
+                    "adsystem.com",
+                    "adservice.google.com",
+                    "taboola.com",
+                    "outbrain.com",
+                    "criteo.com",
+                    "pubmatic.com",
+                    "openx.net",
+                    "rubiconproject.com",
+                    "adnxs.com",
+                    "scorecardresearch.com",
+                    "quantserve.com",
+                    "zedo.com",
+                    "revcontent.com",
+                    "uubooster.com"
+                  ]
+                },
+                "action": { "type": "block" }
+              },
+              {
+                "trigger": {
+                  "url-filter": ".*(pixel|track|beacon|analytics).*",
+                  "resource-type": ["image", "script"]
+                },
+                "action": { "type": "block" }
+              },
+            {
+              "trigger": {
+                "url-filter": ".*(adserver|ads|sponsor|promoted).*",
+                "resource-type": ["script"]
+              },
+              "action": { "type": "block" }
+            }
+          ]
+          '''
+            
+            store = WKContentRuleListStore.defaultStore()
+
+            def _adblock_ready(rule_list, error):
+                if rule_list and not error:
+                    ucc.addContentRuleList_(rule_list)
+                    print("[AdBlock] Native WebKit ad blocking enabled")
+                elif error:
+                    print("[AdBlock] Rule compilation error:", error)
+                    
+            rules = ContentRuleManager._load_json()
+
+            if hasattr(
+                store,
+                "compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler_"
+            ):
+                try:
+                    store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler_(
+                        "darkelf_native_adblock",
+                        rules,
+                        _adblock_ready
+                    )
+                except Exception as e:
+                    print("[AdBlock] Native adblock skipped:", e)
+            else:
+                print("[AdBlock] Native WebKit content blocking unavailable — using injector")
+
+        except Exception as e:
+            print("[AdBlock] Failed to initialize native ad blocker:", e)
+
+        try:
+            ucc.removeScriptMessageHandlerForName_("netlog")
+        except Exception:
+            pass
         # ✅ Continue with netlog handler registration
         try:
             ucc.removeScriptMessageHandlerForName_("netlog")
@@ -3868,7 +3994,7 @@ class AppDelegate(NSObject):
 
         except Exception as e:
             print("[Quit] Unexpected shutdown error:", e)
-            
+
 def main():
     try:
         NSUserDefaults.standardUserDefaults().setVolatileDomain_forName_({}, NSRegistrationDomain)
@@ -3879,25 +4005,21 @@ def main():
     from Cocoa import NSApplication
     app = NSApplication.sharedApplication()
     
-    # ✅ START RULE COMPILATION (async)
+    # ✅ PRE-COMPILE RULES BEFORE BROWSER STARTS
     print("[Startup] Compiling content blocking rules...")
     ContentRuleManager.load_rules()
-
+    
+    # ✅ WAIT FOR ASYNC COMPILATION
+    import time
+    time.sleep(3.0)  # Give WebKit time to compile 121 rules
+    
+    if ContentRuleManager._rule_list:
+        print("[Startup] ✅ Rules ready - initializing browser")
+    
     app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
 
     delegate = AppDelegate.alloc().init()
     app.setDelegate_(delegate)
-
-    # ✅ WAIT FOR RULES TO COMPILE (prevents race condition)
-    import time
-    print("[Startup] Waiting for rules to compile...")
-    time.sleep(1.0)  # 1 second is enough for 70 rules
-    
-    # Verify rules are ready
-    if ContentRuleManager._rule_list:
-        print("[Startup] ✅ Rules ready - initializing browser")
-    else:
-        print("[Startup] ⚠️  Rules not ready yet (will retry per-tab)")
 
     delegate.browser = Browser.alloc().init()
 
@@ -3906,3 +4028,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
