@@ -33,11 +33,11 @@ Two editions are available:
 | Daily Use Optimized | ✅ Yes | ⚠️ Not Primary Focus |
 | Non-Persistent Sessions | ✅ Yes | ✅ Enforced (Strict) |
 | Declarative Ad Blocking | ✅ Safari-Style | ✅ Enhanced |
-| Fingerprint Reduction | Moderate | Aggressive |
+| Fingerprint Reduction | Aggressive | Aggressive |
 | JavaScript Toggle | ✅ Yes | ✅ Yes |
 | Tor Support | ❌ None | ✅ Optional |
 | SOCKS Proxy | ❌ None | ✅ Yes |
-| WebKit Hardening | Balanced | Advanced |
+| WebKit Hardening | Advanced | Advanced |
 | MiniAI Monitoring | ✅ Enabled | ✅ Enabled |
 | Intended Audience | Everyday Users | Researchers / High-Risk |
 
