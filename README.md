@@ -32,7 +32,7 @@ Two editions are available:
 |----------|------------|------------|
 | Daily Use Optimized | ✅ Yes | ⚠️ Not Primary Focus |
 | Non-Persistent Sessions | ✅ Yes | ✅ Enforced (Strict) |
-| Declarative Ad Blocking | ✅ Safari-Style | ✅ Enhanced |
+| Declarative Ad Blocking | ✅ Enhanced | ✅ Enhanced |
 | Fingerprint Reduction | Aggressive | Aggressive |
 | JavaScript Toggle | ✅ Yes | ✅ Yes |
 | Tor Support | ❌ None | ✅ Optional |
