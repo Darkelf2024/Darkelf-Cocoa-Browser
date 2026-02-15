@@ -101,6 +101,8 @@ HTTP_BLOCK_PAGE_HTML = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<meta http-equiv="Content-Security-Policy"
+content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Darkelf — Insecure Connection Blocked</title>
@@ -254,6 +256,12 @@ class DarkelfMiniAISentinel:
         
         # 🔴 LOCKDOWN STATE
         self.lockdown_active = False
+        try:
+            if hasattr(self, "browser_bridge"):
+                self.browser_bridge._wipe_all_site_data()
+        except Exception:
+            pass
+
         self.lockdown_threshold = 3  # 3 critical events triggers lockdown
         self.lockdown_triggered_at = None
         
@@ -410,21 +418,94 @@ class DarkelfMiniAISentinel:
             self._trigger_lockdown()
 
     def _trigger_lockdown(self):
-        """Activate defensive lockdown mode"""
+        """Activate defensive lockdown mode with full containment"""
         if self.lockdown_active:
             return
-        
+
         self.lockdown_active = True
         self.lockdown_triggered_at = time.time()
-        
+
         print("\n" + "="*62)
         print("[MiniAI] 🔴 LOCKDOWN MODE ACTIVATED")
         print("[MiniAI] Critical threat threshold exceeded")
         print("[MiniAI] Initiating defensive containment...")
         print("="*62 + "\n")
-        
-        # Activate lockout page
-        self._activate_lockout_page()
+
+        # ==============================
+        # 1️⃣ Hard Stop All WebViews
+        # ==============================
+        try:
+            if hasattr(self, "browser_bridge"):
+                for tab in getattr(self.browser_bridge, "tabs", []):
+                    try:
+                        tab.view.stopLoading()
+                    except Exception:
+                        pass
+        except Exception as e:
+            print("[MiniAI] Stop loading failed:", e)
+
+        # ==============================
+        # 2️⃣ Purge Website Data
+        # ==============================
+        try:
+            if hasattr(self, "browser_bridge"):
+                from Foundation import NSDate
+
+                for tab in getattr(self.browser_bridge, "tabs", []):
+                    try:
+                        webview = tab.view
+                        config = webview.configuration()
+                        dataStore = config.websiteDataStore()
+
+                        dataStore.removeDataOfTypes_modifiedSince_completionHandler_(
+                            {
+                                "WKWebsiteDataTypeCookies",
+                                "WKWebsiteDataTypeDiskCache",
+                                "WKWebsiteDataTypeMemoryCache",
+                                "WKWebsiteDataTypeLocalStorage",
+                                "WKWebsiteDataTypeSessionStorage",
+                                "WKWebsiteDataTypeIndexedDBDatabases",
+                                "WKWebsiteDataTypeServiceWorkerRegistrations"
+                            },
+                            NSDate.dateWithTimeIntervalSince1970_(0),
+                            None
+                        )
+                    except Exception:
+                        pass
+        except Exception as e:
+            print("[MiniAI] Data purge failed:", e)
+
+        # ==============================
+        # 3️⃣ Destroy WebViews (True Containment)
+        # ==============================
+        try:
+            if hasattr(self, "browser_bridge"):
+                for tab in getattr(self.browser_bridge, "tabs", []):
+                    try:
+                        tab.view.removeFromSuperview()
+                    except Exception:
+                        pass
+        except Exception as e:
+            print("[MiniAI] WebView destruction failed:", e)
+            
+        # ==============================
+        # 3.5️⃣ Clear All Tabs (Full Memory Reset)
+        # ==============================
+        try:
+            if hasattr(self, "browser_bridge"):
+                self.browser_bridge.tabs.clear()
+                self.browser_bridge.active = -1
+                print("[MiniAI] All tabs cleared from memory")
+        except Exception as e:
+            print("[MiniAI] Tab clearing failed:", e)
+
+        # ==============================
+        # 4️⃣ Show Lockdown Page
+        # ==============================
+        try:
+            self._activate_lockout_page()
+        except Exception as e:
+            print("[MiniAI] Lockout page failed:", e)
 
     # =====================================================
     # LOCKOUT PAGE BRIDGE (CALL INTO WEBKIT LAYER)
@@ -457,6 +538,8 @@ class DarkelfMiniAISentinel:
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<meta http-equiv="Content-Security-Policy"
+content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Darkelf Browser — Security Lockdown</title>
@@ -2042,10 +2125,13 @@ class _NavDelegate(NSObject):
                 print("[MiniAI Lockdown] Failed:", e)
 
             # ==============================
-            # 3️⃣ Prevent recursion
+            # 3️⃣ Block Dangerous Schemes
             # ==============================
-            if url_str.startswith("data:") or url_str.startswith("about:"):
-                decisionHandler(WKNavigationActionPolicyAllow)
+
+            dangerous = ("data:", "blob:", "file:", "ftp:")
+
+            if url_str.lower().startswith(dangerous):
+                decisionHandler(WKNavigationActionPolicyCancel)
                 handled = True
                 return
 
@@ -2105,6 +2191,8 @@ APP_NAME = "Darkelf"
 HOMEPAGE_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
+<meta http-equiv="Content-Security-Policy"
+content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Darkelf Browser — Cocoa, Private, Hardened</title>
@@ -2287,7 +2375,7 @@ body::after{
   </div>
   <div class="tagline">Cocoa • Private • Hardened</div>
 
-  <form class="search-wrap" action="https://https://lite.duckduckgo.com/lite/" method="get">
+  <form class="search-wrap" action="https://lite.duckduckgo.com/lite/" method="get">
     <input type="text" name="q" placeholder="Search DuckDuckGo" autofocus/>
     <button type="submit">
       <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
@@ -2470,37 +2558,118 @@ PERFORMANCE_DEFENSE_JS = r'''
 })();
 '''
 
-# Core network monitoring JavaScript
 CORE_JS = r'''
 (function() {
-    // Network request interceptor for MiniAI monitoring
-    const origFetch = window.fetch;
-    window.fetch = function(...args) {
+
+    // ===============================
+    // 1️⃣ MiniAI Network Monitoring
+    // ===============================
+
+    const sendToMiniAI = function(url) {
         try {
-            const url = args[0];
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.netlog) {
+            if (window.webkit &&
+                window.webkit.messageHandlers &&
+                window.webkit.messageHandlers.netlog) {
+
                 window.webkit.messageHandlers.netlog.postMessage({
                     url: String(url),
                     headers: {}
                 });
             }
         } catch(e){}
+    };
+
+    // fetch interceptor
+    const origFetch = window.fetch;
+    window.fetch = function(...args) {
+        try { sendToMiniAI(args[0]); } catch(e){}
         return origFetch.apply(this, args);
     };
-    
+
     // XHR interceptor
     const origOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function(method, url) {
-        try {
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.netlog) {
-                window.webkit.messageHandlers.netlog.postMessage({
-                    url: String(url),
-                    headers: {}
-                });
-            }
-        } catch(e){}
+        try { sendToMiniAI(url); } catch(e){}
         return origOpen.apply(this, arguments);
     };
+
+    // ===============================
+    // 2️⃣ Block window.open
+    // ===============================
+    window.open = function() {
+        console.warn("[Darkelf] window.open blocked");
+        return null;
+    };
+
+    // ===============================
+    // 3️⃣ Freeze WebRTC
+    // ===============================
+    try {
+        Object.defineProperty(window, "RTCPeerConnection", {
+            get: function() { return undefined; },
+            configurable: false
+        });
+
+        Object.defineProperty(window, "webkitRTCPeerConnection", {
+            get: function() { return undefined; },
+            configurable: false
+        });
+
+        Object.defineProperty(navigator, "mediaDevices", {
+            get: function() { return undefined; },
+            configurable: false
+        });
+    } catch(e){}
+
+    // ===============================
+    // 4️⃣ Canvas Fingerprint Noise
+    // ===============================
+    try {
+        if (window.HTMLCanvasElement) {
+            const orig = HTMLCanvasElement.prototype.toDataURL;
+
+            Object.defineProperty(HTMLCanvasElement.prototype, "toDataURL", {
+                value: function() {
+                    try {
+                        const ctx = this.getContext("2d");
+                        if (ctx) {
+                            ctx.fillStyle = "rgba(0,0,0,0.01)";
+                            ctx.fillRect(0,0,1,1);
+                        }
+                    } catch(e){}
+                    return orig.apply(this, arguments);
+                },
+                writable: false,
+                configurable: false
+            });
+        }
+    } catch(e){}
+
+    // ===============================
+    // 5️⃣ OffscreenCanvas Protection
+    // ===============================
+    try {
+        if (window.OffscreenCanvas) {
+            Object.defineProperty(OffscreenCanvas.prototype, "convertToBlob", {
+                value: function() {
+                    return Promise.resolve(new Blob());
+                },
+                writable: false,
+                configurable: false
+            });
+        }
+    } catch(e){}
+
+    // ===============================
+    // 6️⃣ Optional: Block WebSocket
+    // ===============================
+    try {
+        Object.defineProperty(window, "WebSocket", {
+            get: function() { return undefined; },
+            configurable: false
+        });
+    } catch(e){}
+
 })();
 '''
 
@@ -2579,6 +2748,8 @@ class Browser(NSObject):
 
         self.window = self._make_window()
         self.mini_ai = DarkelfMiniAISentinel()
+        
+        self.mini_ai.browser_bridge = self
 
         self.toolbar = self._make_toolbar()
         self.window.setToolbar_(self.toolbar)
@@ -3573,7 +3744,7 @@ class Browser(NSObject):
         cfg.setPreferences_(prefs)
 
         try:
-            cfg.setLimitsNavigationsToAppBoundDomains_(False)
+            cfg.setLimitsNavigationsToAppBoundDomains_(True)
             print("[Debug] App-bound domain restriction OFF")
         except Exception:
             pass
@@ -3724,13 +3895,6 @@ class Browser(NSObject):
                 else:
                     print("[Inject] ⛔ Skipped defense scripts for YouTube")
 
-            except Exception as e:
-                print(f"[Inject] ❌ External site scripts error: {e}")
-                
-        elif js_should_be_enabled:
-            try:
-                self._inject_core_scripts(ucc)
-                print("[Inject] ✅ Core defense scripts added")
             except Exception as e:
                 print(f"[Inject] ❌ External site scripts error: {e}")
 
@@ -3941,21 +4105,15 @@ class Browser(NSObject):
         except Exception as e:
             print(f"[JS Prompt] Error: {e}")
             completionHandler(None)
-
+            
     def webView_requestMediaCapturePermissionForOrigin_initiatedByFrame_type_decisionHandler_(
         self, webView, origin, frame, type, decisionHandler
     ):
-        """Allow media capture for video/audio playback"""
         try:
-            print(f"[Media] Permission for: {origin}, type: {type}")
-            decisionHandler(1)
-            print("[Media] ✅ Permission GRANTED")
-        except Exception as e:
-            print(f"[Media] ❌ Error: {e}")
-            try:
-                decisionHandler(0)
-            except:
-                pass
+            print(f"[Media] 🔒 Denied media capture for: {origin}")
+            decisionHandler(0)  # Always deny
+        except Exception:
+            pass
                                                     
     def _mount_webview(self, wk):
         """Mount the webview BELOW the tabbar so tabs never get covered."""
@@ -4857,4 +5015,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
