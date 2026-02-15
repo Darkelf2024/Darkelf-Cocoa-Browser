@@ -1,4 +1,4 @@
-# Darkelf Cocoa Hardened Browser v3.7 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa Hardened Browser v3.8 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -3085,14 +3085,28 @@ class Browser(NSObject):
             _add(r"""
             (function(){
                 try {
-                    if (location.hostname.includes("youtube.com")) return;
+                    if (
+                        location.hostname.includes("youtube.com")) return;
 
                     var css = `
                     /* Generic ad blocking */
                     iframe[src*="ad"],
-                    div[class*="ad"],
-                    div[id*="ad"],
-                    aside,
+                    iframe[src*="doubleclick"],
+                    iframe[src*="adsystem"],
+                    iframe[src*="googlesyndication"],
+
+                    div[id^="ad_"],
+                    div[id^="ads_"],
+                    div[class^="ad-"],
+                    div[class^="ads-"],
+
+                    [data-ad],
+                    [data-sponsored],
+
+                    #centralNotice,
+                    .frb-banner,
+                    .cn-banner
+
                     [data-ad],
                     [data-sponsored],
                 
@@ -3132,9 +3146,9 @@ class Browser(NSObject):
                 }
             })();
             """)
-
-            print("[Inject] Core defense scripts added to UCC.")
             
+            print("[Inject] Core defense scripts added to UCC.")
+        
         except Exception as e:
             print(f"[Inject] Core script injection failed: {e}")
             
