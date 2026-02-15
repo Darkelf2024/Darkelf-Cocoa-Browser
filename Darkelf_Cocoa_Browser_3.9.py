@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v3.8 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v3.9 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -315,7 +315,7 @@ class DarkelfMiniAISentinel:
         
         # Anomaly detection
         self.request_timestamps = deque(maxlen=100)
-        self.anomaly_threshold = 50  # requests per second = suspicious
+        self.anomaly_threshold = 300  # requests per second = suspicious
         
         print("[MiniAI] Sentinel enabled (passive mode)")
         print("[MiniAI] Intrusion detection: ACTIVE")
@@ -1169,7 +1169,7 @@ class ContentRuleManager:
 
         cls._loaded = True
         store = WKContentRuleListStore.defaultStore()
-        identifier = "darkelf_builtin_rules_v8_enhanced"
+        identifier = "darkelf_builtin_rules_v9_enhanced"
 
         def _lookup(rule_list, error):
             if rule_list:
@@ -1818,10 +1818,6 @@ LOCAL_WEBSOCKET_POLICY_VALUE = (
     "https://youtubei.googleapis.com "
     "https://*.youtube.com;"
 )
-
-# ---- Local ORS / CORS Header Whitelist (off by default) ----
-ENABLE_LOCAL_EXPOSE_HEADERS = True
-LOCAL_EXPOSE_HEADERS_VALUE = "Content-Length, Content-Type, Content-Language"
 
 class _NavDelegate(NSObject):
     def initWithOwner_(self, owner):
@@ -2570,6 +2566,9 @@ class Browser(NSObject):
         self.mini_ai = DarkelfMiniAISentinel()
         
         self.mini_ai.browser_bridge = self
+        
+        # ✅ Compile WebKit content blocking rules ONCE at startup
+        ContentRuleManager.load_rules()
 
         self.toolbar = self._make_toolbar()
         self.window.setToolbar_(self.toolbar)
@@ -3409,45 +3408,6 @@ class Browser(NSObject):
         except Exception as e:
             print("[WebSocketPolicy] Injector add failed:", e)
             
-    def _install_local_expose_headers(self, ucc):
-        """
-        Injects a <meta http-equiv="Access-Control-Expose-Headers"> declaration
-        to whitelist safe response headers for CORS (ORS Headers).
-        Limits scope to HTTPS and file:// pages to avoid conflicts.
-        """
-        try:
-            from WebKit import WKUserScript
-        except Exception:
-            return
-
-        js = f"""
-        setTimeout(() => {{
-          try {{
-            const here = location.protocol;
-            if (here !== 'file:' && here !== 'https:') return;
-
-            if (document.querySelector('meta[http-equiv="Access-Control-Expose-Headers"]')) return;
-
-            const meta = document.createElement('meta');
-            meta.httpEquiv = 'Access-Control-Expose-Headers';
-            meta.content = {repr(LOCAL_EXPOSE_HEADERS_VALUE)};
-            (document.head || document.documentElement).prepend(meta);
-
-            console.log('[ExposeHeaders] Safe header whitelist injected.');
-          }} catch (e) {{
-          }}
-        }}, 100);
-        """
-
-        try:
-            script = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
-                js, 1, False
-            )
-            ucc.addUserScript_(script)
-            print("[ExposeHeaders] Local Access-Control-Expose-Headers injector installed (https:// & file:// only).")
-        except Exception as e:
-            print("[ExposeHeaders] Injector add failed:", e)
-
     @objc.python_method
     def _inject_core_scripts(self, ucc):
         try:
@@ -3482,10 +3442,6 @@ class Browser(NSObject):
             if ENABLE_LOCAL_WEBSOCKET_POLICY:
                 self._install_local_websocket_policy(ucc)
                 print("[WebSocketPolicy] Local WebSocket Policy attached to UCC.")
-                
-            if ENABLE_LOCAL_EXPOSE_HEADERS:
-                self._install_local_expose_headers(ucc)
-                print("[ExposeHeaders] Local ORS header whitelist attached to UCC.")
                         
             # ✅ UPDATED: Enhanced ad/banner blocking with Wikipedia support
             _add(r"""
@@ -3497,9 +3453,22 @@ class Browser(NSObject):
                     var css = `
                     /* Generic ad blocking */
                     iframe[src*="ad"],
-                    div[class*="ad"],
-                    div[id*="ad"],
-                    aside,
+                    iframe[src*="doubleclick"],
+                    iframe[src*="adsystem"],
+                    iframe[src*="googlesyndication"],
+
+                    div[id^="ad_"],
+                    div[id^="ads_"],
+                    div[class^="ad-"],
+                    div[class^="ads-"],
+
+                    [data-ad],
+                    [data-sponsored],
+
+                    #centralNotice,
+                    .frb-banner,
+                    .cn-banner
+
                     [data-ad],
                     [data-sponsored],
                 
@@ -3546,430 +3515,120 @@ class Browser(NSObject):
             print(f"[Inject] Core script injection failed: {e}")
             
     def _new_wk(self) -> WKWebView:
-        # --- determine if this WKWebView is for the homepage ---
-        is_home = False
-        try:
-            if getattr(self, "loading_home", False):
-                is_home = True
-        except Exception:
-            pass
 
+    # ---------------------------------------
+    # Determine if this is homepage
+    # ---------------------------------------
+        is_home = bool(getattr(self, "loading_home", False))
+
+    # ---------------------------------------
+    # Configuration
+    # ---------------------------------------
         cfg = WKWebViewConfiguration.alloc().init()
-        
-            # 🔒 Create ONE shared non-persistent store (memory only)
+
+    # Shared non-persistent store (ephemeral)
         if not hasattr(self, "_data_store") or self._data_store is None:
             self._data_store = WKWebsiteDataStore.nonPersistentDataStore()
 
         cfg.setWebsiteDataStore_(self._data_store)
 
-        # 🔒 Enforce ephemeral mode
         if self._data_store.isPersistent():
             raise RuntimeError("Darkelf security failure: persistent data store detected")
 
-        # ✅ FIXED: Determine JS state ONCE at the top
-        js_should_be_enabled = True if is_home else bool(getattr(self, "js_enabled", True))
+    # ---------------------------------------
+    # JavaScript State
+    # ---------------------------------------
+        js_enabled = True if is_home else bool(getattr(self, "js_enabled", True))
 
         prefs = WKPreferences.alloc().init()
-        try:
-            prefs.setJavaScriptEnabled_(js_should_be_enabled)
-            prefs.setJavaScriptCanOpenWindowsAutomatically_(True)
-            print(f"[WKPrefs] JS={'ON' if js_should_be_enabled else 'OFF'} (home={is_home}, global={getattr(self, 'js_enabled', True)})")
-        except Exception as e:
-            print(f"[WKPrefs] Failed to set JS state: {e}")
+        prefs.setJavaScriptEnabled_(js_enabled)
+        prefs.setJavaScriptCanOpenWindowsAutomatically_(True)
         cfg.setPreferences_(prefs)
+
+        print(f"[WKPrefs] JS={'ON' if js_enabled else 'OFF'} (home={is_home})")
 
         try:
             cfg.setLimitsNavigationsToAppBoundDomains_(False)
-            print("[Debug] App-bound domain restriction OFF")
         except Exception:
             pass
-            
+
+    # ---------------------------------------
+    # User Content Controller
+    # ---------------------------------------
         ucc = WKUserContentController.alloc().init()
 
-        # Attach content rules AFTER injection
+        #Attach compiled adblock rules
         if ContentRuleManager._rule_list:
             ucc.addContentRuleList_(ContentRuleManager._rule_list)
+            print("[AdBlock] Rule list attached")
 
-        cfg.setUserContentController_(ucc)
-
-        # ✅ ATTACH PRE-COMPILED CONTENT BLOCKING RULES (Sync)
-        try:
-            rule_list = ContentRuleManager._rule_list
-    
-            if rule_list:
-                ucc.addContentRuleList_(rule_list)
-                print("[AdBlock] ✅ Content blocking rules attached")
-        
-        except Exception as e:
-            print(f"[AdBlock] ❌ Rule attachment failed: {e}")
-                        
-        try:
-            from WebKit import WKContentRuleListStore
-            adblock_rules = r'''
-            [
-              {
-                "trigger": {
-                  "url-filter": ".*",
-                  "resource-type": [
-                    "image",
-                    "style-sheet",
-                    "script",
-                    "media",
-                    "raw",
-                    "font"
-                  ],
-                  "if-domain": [
-                    "doubleclick.net",
-                    "doubleclick.com",
-                    "googlesyndication.com",
-                    "googleadservices.com",
-                    "adsystem.com",
-                    "adservice.google.com",
-                    "googletagmanager.com",
-                    "googletagservices.com",
-                    "taboola.com",
-                    "outbrain.com",
-                    "criteo.com",
-                    "pubmatic.com",
-                    "openx.net",
-                    "rubiconproject.com",
-                    "adnxs.com",
-                    "scorecardresearch.com",
-                    "quantserve.com",
-                    "zedo.com",
-                    "revcontent.com",
-                    "uubooster.com",
-                    "amazon-adsystem.com",
-                    "casalemedia.com",
-                    "contextweb.com",
-                    "33across.com",
-                    "yieldmo.com",
-                    "sharethrough.com",
-                    "triplelift.com",
-                    "sovrn.com",
-                    "media.net",
-                    "indexexchange.com",
-                    "bidswitch.com",
-                    "lijit.com",
-                    "adform.net",
-                    "smartadserver.com",
-                    "trafficjunky.net",
-                    "undertone.com"
-                  ]
-                },
-                "action": { "type": "block" }
-              },
-              
-              {
-                "trigger": {
-                  "url-filter": ".*(pixel|track|beacon|analytics).*",
-                  "resource-type": ["image", "script"]
-                },
-                "action": { "type": "block" }
-              },
-              
-              {
-                "trigger": {
-                  "url-filter": ".*(adserver|ads|sponsor|promoted).*",
-                  "resource-type": ["script"]
-                },
-                "action": { "type": "block" }
-              },
-
-              {
-                "trigger": {
-                  "url-filter": ".*(pixel|track|beacon|analytics|telemetry|collect).*",
-                  "resource-type": ["image", "script"]
-              },
-              "action": { "type": "block" }
-             },
-             
-             {
-                "trigger": {
-                  "url-filter": ".*(adserver|ads|sponsor|promoted|banner|campaign).*",
-                  "resource-type": ["script"]
-             },
-             "action": { "type": "block" }
-           },
-           
-
-           {
-           
-             "trigger": {
-               "url-filter": ".*",
-               "resource-type": ["script"],
-               "if-domain": [
-                 "cookiebot.com",
-                 "onetrust.com",
-                 "trustarc.com",
-                 "consentmanager.net",
-                 "quantcast.com",
-                 "didomi.io",
-                 "iubenda.com",
-                 "cookieyes.com"
-               ]
-             },
-             "action": { "type": "block" }
-           },
-
-           {
-             "trigger": {
-               "url-filter": ".*",
-               "resource-type": ["script"],
-               "if-domain": [
-                 "onesignal.com",
-                 "pushwoosh.com",
-                 "cleverpush.com",
-                 "subscriber.com",
-                 "getsitecontrol.com"
-               ]
-             },
-             "action": { "type": "block" }
-           },
-
-           {
-             "trigger": {
-               "url-filter": ".*"
-             },
-             "action": {
-               "type": "css-display-none",
-               "selector": ".cookie, .cookie-banner, .cookie-consent, .consent-banner, .gdpr, .gdpr-banner, .cc-window, .onetrust-banner-sdk, #onetrust-banner-sdk, .qc-cmp-ui, .newsletter, .newsletter-popup, .subscribe-popup, .subscription-modal, .modal-backdrop, .push-notification, [id*='cookie'], [class*='cookie'], [id*='consent'], [class*='consent'], [id*='newsletter'], [class*='newsletter'], [id*='subscribe'], [class*='subscribe']"
-              } 
-            }
-          ]
-          '''
-          
-            store = WKContentRuleListStore.defaultStore()
-
-            def _adblock_ready(rule_list, error):
-                if rule_list and not error:
-                    ucc.addContentRuleList_(rule_list)
-                    print("[AdBlock] Native WebKit ad blocking enabled")
-                elif error:
-                    print("[AdBlock] Rule compilation error:", error)
-                    
-            rules = ContentRuleManager._load_json()
-
-            if hasattr(
-                store,
-                "compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler_"
-            ):
-                try:
-                    store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler_(
-                        "darkelf_native_adblock",
-                        rules,
-                        _adblock_ready
-                    )
-                except Exception as e:
-                    print("[AdBlock] Native adblock skipped:", e)
-            else:
-                print("[AdBlock] Native WebKit content blocking unavailable — using injector")
-
-        except Exception as e:
-            print("[AdBlock] Failed to initialize native ad blocker:", e)
-            
-        # ✅ Continue with netlog handler registration
+    # ---------------------------------------
+    # Message Handlers
+    # ---------------------------------------
         try:
             ucc.removeScriptMessageHandlerForName_("netlog")
         except Exception:
             pass
 
-        try:
-            if hasattr(self, "_nav"):
-                ucc.addScriptMessageHandler_name_(self._nav, "netlog")
-                print("[Init] Netlog handler registered")
-            else:
-                print("[Init] ⚠️  _nav delegate not set yet — cannot add netlog handler.")
-        except Exception as e:
-            print(f"[Init] ❌ Failed to register netlog handler: {e}")
-                            
+        if hasattr(self, "_nav"):
+            ucc.addScriptMessageHandler_name_(self._nav, "netlog")
+            print("[Init] Netlog handler registered")
+
         self._search_handler = getattr(self, "_search_handler", None) or SearchHandler.alloc().initWithOwner_(self)
         ucc.addScriptMessageHandler_name_(self._search_handler, "search")
 
-        seed = secrets.randbits(64)
-        self.current_canvas_seed = seed
+    # ---------------------------------------
+    # Script Injection Logic
+    # ---------------------------------------
+        if is_home or js_enabled:
 
-        # =========================================================
-        # ✅ Script Injection Logic
-        # =========================================================
+            current_url = str(getattr(self, "current_url", ""))
 
-        # CASE 1: Homepage (always inject, JS always ON)
-        if is_home:
-            try:
+            if "youtube.com" not in current_url:
                 self._inject_core_scripts(ucc)
-                print("[Inject] ✅ Core defense scripts added (HOMEPAGE)")
-            except Exception as e:
-                print(f"[Inject] ❌ Homepage scripts error: {e}")
+                print("[Inject] Core defense scripts added")
+            else:
+                print("[Inject] Skipped defense scripts for YouTube")
 
-        # CASE 2: External site with JS ENABLED
-        elif js_should_be_enabled:
-            try:
-                current_url = getattr(self, "current_url", "")
-                if "youtube.com" not in str(current_url):
-                    self._inject_core_scripts(ucc)
-                    print("[Inject] ✅ Core defense scripts added")
-                else:
-                    print("[Inject] ⛔ Skipped defense scripts for YouTube")
-
-            except Exception as e:
-                print(f"[Inject] ❌ External site scripts error: {e}")
-
-        # CASE 3: External site with JS DISABLED
         else:
-            print("[Inject] ⛔ SKIPPED core scripts (JS DISABLED globally)")
+            print("[Inject] JS disabled → applying killswitch")
 
-            # ✅ Add aggressive killswitch to block any JS that somehow executes
             js_killswitch = r"""
             (function(){
-                console.log('[Darkelf] JavaScript execution blocked by killswitch');
-        
-                // Block eval and Function constructor
-                try { 
-                    window.eval = function(){ 
-                        console.warn('[Darkelf] eval() blocked'); 
-                        return null; 
-                    }; 
-                } catch(e){}
-        
-                try { 
-                    window.Function = function(){ 
-                        throw new Error("JavaScript blocked by Darkelf"); 
-                    }; 
-                } catch(e){}
-        
-                // Block timers
-                try { 
-                    window.setTimeout = function(){ 
-                        console.warn('[Darkelf] setTimeout() blocked'); 
-                        return 0; 
-                    }; 
-                    window.setInterval = function(){ 
-                        console.warn('[Darkelf] setInterval() blocked'); 
-                        return 0; 
-                    }; 
-                    window.requestAnimationFrame = function(){ 
-                        console.warn('[Darkelf] requestAnimationFrame() blocked'); 
-                        return 0; 
-                    }; 
-                } catch(e){}
-        
-                // Block document.write
-                try { 
-                    document.write = function(){ 
-                        console.warn('[Darkelf] document.write() blocked'); 
-                    }; 
-                } catch(e){}
-        
-                // Block inline event handlers
-                try {
-                    var origSetAttr = Element.prototype.setAttribute;
-                    Element.prototype.setAttribute = function(name, value) {
-                        if (name && /^on/i.test(name)) {
-                            console.warn('[Darkelf] Inline event handler blocked:', name);
-                            return;
-                        }
-                        return origSetAttr.apply(this, arguments);
-                    };
-                } catch(e){}
-        
-                // Block dynamic script creation
-                try {
-                    var origCreate = Document.prototype.createElement;
-                    Document.prototype.createElement = function(tag) {
-                        var el = origCreate.apply(this, arguments);
-                        try {
-                            if (String(tag).toLowerCase() === 'script') {
-                                console.warn('[Darkelf] <script> creation blocked');
-                                Object.defineProperty(el, 'src', { 
-                                    set: function(){}, 
-                                    get: function(){return '';} 
-                                });
-                                el.type = 'darkelf/blocked';
-                                el.defer = true; 
-                                el.noModule = true;
-                            }
-                        } catch(_){}
-                        return el;
-                    };
-            
-                    var origAppend = Element.prototype.appendChild;
-                    Element.prototype.appendChild = function(node) {
-                        try { 
-                            if (node && node.tagName === 'SCRIPT') {
-                                console.warn('[Darkelf] <script> append blocked');
-                                return node; 
-                            }
-                        } catch(_){}
-                        return origAppend.apply(this, arguments);
-                    };
-                } catch(e){}
-        
-                console.log('[Darkelf] Killswitch active — JS blocked');
+                window.eval = function(){ return null; };
+                window.Function = function(){ throw new Error("JS blocked"); };
+                window.setTimeout = function(){ return 0; };
+                window.setInterval = function(){ return 0; };
+                window.requestAnimationFrame = function(){ return 0; };
+                document.write = function(){};
             })();
             """
-    
-            try:
-                ks = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
-                    js_killswitch,
-                    0,    # AtDocumentStart
-                    False # All frames
-                )
-                ucc.addUserScript_(ks)
-                print("[JS] ⛔ Killswitch injected")
-            except Exception as e:
-                print(f"[JS] ❌ Killswitch injection failed: {e}")
-    
-            # ✅ Add native content blocker for ALL <script> resources
-            try:
-                store = WKContentRuleListStore.defaultStore()
-        
-                # Block ALL script resources (network + inline)
-                block_scripts_rule = json.dumps([{
-                    "trigger": {
-                        "url-filter": ".*",
-                        "resource-type": ["script"]
-                    },
-                    "action": {
-                        "type": "block"
-                    }
-                }])
-        
-                def _script_block_ready(rule_list, err):
-                    if rule_list and not err:
-                        ucc.addContentRuleList_(rule_list)
-                        print("[JS] ⛔ Native script blocking enabled")
-                    elif err:
-                        print(f"[JS] ❌ Native script blocking failed: {err}")
-        
-                store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler_(
-                    "darkelf_block_all_scripts",
-                    block_scripts_rule,
-                    _script_block_ready
-                )
-            except Exception as e:
-                print(f"[JS] ❌ Native script blocking error: {e}")
-                
-                # If you use a user content controller:
-        controller = WKUserContentController.alloc().init()
-        cfg.setUserContentController_(controller)
-        # =========================================================
-        # Finalize Configuration
-        # =========================================================
-        
+
+            ks = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
+                js_killswitch,
+                0,
+                False
+            )
+            ucc.addUserScript_(ks)
+
+            # Native script resource blocking
+            store = WKContentRuleListStore.defaultStore()
+
+    # ---------------------------------------
+    # Finalize Configuration
+    # ---------------------------------------
         cfg.setUserContentController_(ucc)
-        #web = WKWebView.alloc().initWithFrame_configuration_(((0, 0), (100, 100)), cfg)
-        
+
         frame = self.window.contentView().bounds()
         web = WKWebView.alloc().initWithFrame_configuration_(frame, cfg)
-        
+
         web.setUIDelegate_(self)
 
-        # 1. Enable magnification (important for fullscreen media)
         try:
             web.setAllowsMagnification_(True)
-        except Exception as e:
+        except Exception:
             pass
-                
+
         return web
         
     def webView_requestFullscreenForElement_completionHandler_(self, webview, element, completionHandler):
@@ -4113,14 +3772,25 @@ class Browser(NSObject):
 
             # --- Build a fresh WebView configuration (App-Bound OFF) ---
             config = WKWebViewConfiguration.alloc().init()
+
+            # Security
+            prefs = config.preferences()
+            prefs.setValue_forKey_(False, "javaScriptCanOpenWindowsAutomatically")
+            prefs.setValue_forKey_(False, "developerExtrasEnabled")
+
+            config.setValue_forKey_(False, "allowFileAccessFromFileURLs")
+            config.setValue_forKey_(False, "allowUniversalAccessFromFileURLs")
+
             try:
                 config.setLimitsNavigationsToAppBoundDomains_(False)
             except Exception:
-                try:
-                    config.limitsNavigationsToAppBoundDomains = False
-                except Exception:
-                    pass
+                pass
 
+            # THEN create webview
+            self.webView = WKWebView.alloc().initWithFrame_configuration_(
+                self.bounds(), config
+            )
+                
             # --- Set JS enabled or disabled ---
             prefs = WKPreferences.alloc().init()
             try:
@@ -4941,4 +4611,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
