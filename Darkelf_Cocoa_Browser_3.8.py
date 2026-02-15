@@ -3561,20 +3561,10 @@ class Browser(NSObject):
             self._data_store = WKWebsiteDataStore.nonPersistentDataStore()
 
         cfg.setWebsiteDataStore_(self._data_store)
-        
-        # If you use a user content controller:
-        controller = WKUserContentController.alloc().init()
-        cfg.setUserContentController_(controller)
-        
-        # Optional safety check
-        try:
-            assert not self._data_store.isPersistent()
-        except Exception:
-            pass
-            try:
-                cfg.setWebsiteDataStore_(WKWebsiteDataStore.nonPersistentDataStore())
-            except Exception:
-                pass
+
+        # 🔒 Enforce ephemeral mode
+        if self._data_store.isPersistent():
+            raise RuntimeError("Darkelf security failure: persistent data store detected")
 
         # ✅ FIXED: Determine JS state ONCE at the top
         js_should_be_enabled = True if is_home else bool(getattr(self, "js_enabled", True))
@@ -3589,7 +3579,7 @@ class Browser(NSObject):
         cfg.setPreferences_(prefs)
 
         try:
-            cfg.setLimitsNavigationsToAppBoundDomains_(True)
+            cfg.setLimitsNavigationsToAppBoundDomains_(False)
             print("[Debug] App-bound domain restriction OFF")
         except Exception:
             pass
@@ -3958,7 +3948,10 @@ class Browser(NSObject):
                 )
             except Exception as e:
                 print(f"[JS] ❌ Native script blocking error: {e}")
-
+                
+                # If you use a user content controller:
+        controller = WKUserContentController.alloc().init()
+        cfg.setUserContentController_(controller)
         # =========================================================
         # Finalize Configuration
         # =========================================================
