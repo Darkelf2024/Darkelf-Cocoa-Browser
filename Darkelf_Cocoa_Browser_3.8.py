@@ -1,4 +1,3 @@
-
 # Darkelf Cocoa General Browser v3.8 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
@@ -2288,7 +2287,7 @@ body::after{
   </div>
   <div class="tagline">Cocoa • Private • Hardened</div>
 
-  <form class="search-wrap" action="https://duckduckgo.com/html/" method="get">
+  <form class="search-wrap" action="https://https://lite.duckduckgo.com/lite/" method="get">
     <input type="text" name="q" placeholder="Search DuckDuckGo" autofocus/>
     <button type="submit">
       <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
@@ -2557,14 +2556,11 @@ def userContentController_didReceiveScriptMessage_(self, controller, message):
             return
 
         # Normal search fallback
-        q = str(body)
-        query = re.sub(r"\s+", "+", q)
-        url = "https://duckduckgo.com/html/?q=" + query
+        q = str(message.body())
+        url = "https://lite.duckduckgo.com/lite/?q=" + re.sub(r"\s+","+",q)
         self.owner._add_tab(url)
-
     except Exception as e:
         print("SearchHandler error:", e)
-
 
 # BROWSER CONTROLLER ===============
 class Browser(NSObject):
@@ -4433,7 +4429,7 @@ class Browser(NSObject):
             if "://" not in text and "." not in text:
                 from urllib.parse import quote_plus
                 q = quote_plus(text)
-                url = "https://duckduckgo.com/html/?q=" + q
+                url = "https://lite.duckduckgo.com/lite/?q=" + q
             elif "://" not in text:
                 url = "https://" + text
             else:
@@ -4861,3 +4857,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
