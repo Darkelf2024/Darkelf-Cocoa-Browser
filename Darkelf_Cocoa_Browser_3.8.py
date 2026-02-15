@@ -1174,7 +1174,7 @@ class ContentRuleManager:
         def _lookup(rule_list, error):
             if rule_list:
                 cls._rule_list = rule_list
-                print("[Rules] Loaded cached comprehensive tracker blocking rule list")
+                cls._loaded = True
                 if completion_callback:
                     completion_callback()
                 return
@@ -1187,7 +1187,8 @@ class ContentRuleManager:
                     return
 
                 cls._rule_list = rule_list
-                print("[Rules] Comprehensive tracker blocking rules compiled & ready (100+ domains)")
+                cls._loaded = True
+                print("[Rules] Comprehensive tracker blocking rules compiled & ready")
 
                 if completion_callback:
                     completion_callback()
@@ -1748,51 +1749,48 @@ class ContentRuleManager:
             rules = json.loads(rules_json)
         except Exception as e:
             print(f"[ContentRules] Parse error in base rules: {e}")
-            return "[]"
+            return
 
         # CSS-based blocking rules (these don't use regex)
         rules.append({
             "trigger": {
-                "url-filter": ".*",
-                "resource-type": ["document"]
-            },
-            "action": {
-                "type": "css-display-none",
-                "selector": "[id*='cookie'], [class*='cookie'], [id*='consent'], [class*='consent'], [id*='gdpr'], [class*='gdpr'], [aria-label*='cookie']"
-            }
-        })
-
-        rules.append({
-            "trigger": {
-                "url-filter": ".*",
-                "resource-type": ["document"]
-            },
-            "action": {
-                "type": "css-display-none",
-                "selector": "[id*='newsletter'], [class*='newsletter'], [id*='subscribe'], [class*='subscribe'], [class*='signup'], [id*='signup'], [class*='mailing']"
-            }
-        })
-
-        rules.append({
-            "trigger": {
-                "url-filter": ".*",
-                "resource-type": ["document"]
-            },
-            "action": {
-                "type": "css-display-none",
-                "selector": "[id*='notification'], [class*='notification'], [class*='push'], [id*='push'], [class*='alert'], [class*='toast'], [class*='banner']"
-            }
-        })
-
-        rules.append({
-            "trigger": {
-                "url-filter": "(cookiebot|onetrust|trustarc|quantcast|consentmanager)",
+                "url-filter": "cookiebot",
                 "resource-type": ["script"]
             },
             "action": { "type": "block" }
         })
 
-        print(f"[ContentRules] Loaded {len(rules)} blocking rules (trackers + annoyances)")
+        rules.append({
+            "trigger": {
+                "url-filter": "onetrust",
+                "resource-type": ["script"]
+            },
+            "action": { "type": "block" }
+        })
+
+        rules.append({
+            "trigger": {
+                "url-filter": "trustarc",
+                "resource-type": ["script"]
+            },
+            "action": { "type": "block" }
+        })
+
+        rules.append({
+            "trigger": {
+                "url-filter": "quantcast",
+                "resource-type": ["script"]
+            },
+            "action": { "type": "block" }
+        })
+
+        rules.append({
+            "trigger": {
+                "url-filter": "consentmanager",
+                "resource-type": ["script"]
+            },
+            "action": { "type": "block" }
+        })
         return json.dumps(rules)
         
 # ---- Darkelf Diagnostics / Kill-Switches ----
@@ -2605,12 +2603,16 @@ class Browser(NSObject):
         return self
                     
     def _start_cookie_scrubber(self):
-        """Start periodic cookie scrubbing using a real Obj-C selector."""
+        """Start periodic cookie scrubbing using non-persistent data store only."""
         try:
-            self._cookie_store = WKWebsiteDataStore.defaultDataStore().httpCookieStore()
+            # Ensure we have a non-persistent data store
+            if not hasattr(self, "_data_store") or self._data_store is None:
+                self._data_store = WKWebsiteDataStore.nonPersistentDataStore()
+
+            self._cookie_store = self._data_store.httpCookieStore()
         except Exception:
             self._cookie_store = None
-
+    
         try:
             self._scrub_cookies()
         except Exception:
@@ -2618,10 +2620,15 @@ class Browser(NSObject):
 
         try:
             self._cookie_timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-                10.0, self, "actScrubCookies:", None, True
+                5.0,
+                self,
+                "actScrubCookies:",
+                None,
+                True
             )
         except Exception:
             self._cookie_timer = None
+
 
     def actScrubCookies_(self, timer):
         try:
@@ -2633,20 +2640,25 @@ class Browser(NSObject):
         try:
             store = getattr(self, "_cookie_store", None)
             if not store:
-                store = WKWebsiteDataStore.defaultDataStore().httpCookieStore()
-                self._cookie_store = store
+                # DO NOT fallback to defaultDataStore (persistent)
+                return
 
             def _got(cookies):
                 try:
                     for c in (cookies or []):
-                        try: store.deleteCookie_(c)
-                        except Exception: pass
-                except Exception: pass
+                        try:
+                            store.deleteCookie_(c)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
             store.getAllCookiesWithCompletionHandler_(_got)
+
         except Exception:
             pass
-            
+
+
     def _stop_cookie_scrubber(self):
         """Invalidate the NSTimer so it stops firing before app exit."""
         try:
@@ -2655,8 +2667,6 @@ class Browser(NSObject):
                 self._cookie_timer = None
         except Exception:
             pass
-            
-    
                         
     def actToggleJS_(self, _):
         """Toggle JavaScript on/off and reload the active tab."""
@@ -2848,8 +2858,6 @@ class Browser(NSObject):
         self.btn_zoom_out = big_btn("minus.magnifyingglass", "Zoom Out")
         self.btn_full   = big_btn("arrow.up.left.and.arrow.down.right", "Fullscreen")
         self.btn_js     = big_btn("bolt.slash", "Toggle JavaScript")
-        self.btn_history = big_btn("clock.arrow.circlepath", "History")
-        self.btn_history.setTarget_(self)
                 
         # JS button coloring
         img = NSImage.imageWithSystemSymbolName_accessibilityDescription_("bolt", None)
@@ -3548,10 +3556,25 @@ class Browser(NSObject):
 
         cfg = WKWebViewConfiguration.alloc().init()
         
+            # 🔒 Create ONE shared non-persistent store (memory only)
+        if not hasattr(self, "_data_store") or self._data_store is None:
+            self._data_store = WKWebsiteDataStore.nonPersistentDataStore()
+
+        cfg.setWebsiteDataStore_(self._data_store)
+        
+        # If you use a user content controller:
+        controller = WKUserContentController.alloc().init()
+        cfg.setUserContentController_(controller)
+        
+        # Optional safety check
         try:
-            cfg.setWebsiteDataStore_(WKWebsiteDataStore.nonPersistentDataStore())
+            assert not self._data_store.isPersistent()
         except Exception:
             pass
+            try:
+                cfg.setWebsiteDataStore_(WKWebsiteDataStore.nonPersistentDataStore())
+            except Exception:
+                pass
 
         # ✅ FIXED: Determine JS state ONCE at the top
         js_should_be_enabled = True if is_home else bool(getattr(self, "js_enabled", True))
@@ -3585,14 +3608,13 @@ class Browser(NSObject):
     
             if rule_list:
                 ucc.addContentRuleList_(rule_list)
-                print("[AdBlock] ✅ Content blocking rules attached (100+ domains)")
+                print("[AdBlock] ✅ Content blocking rules attached")
         
         except Exception as e:
             print(f"[AdBlock] ❌ Rule attachment failed: {e}")
                         
         try:
             from WebKit import WKContentRuleListStore
-
             adblock_rules = r'''
             [
               {
@@ -3608,10 +3630,13 @@ class Browser(NSObject):
                   ],
                   "if-domain": [
                     "doubleclick.net",
+                    "doubleclick.com",
                     "googlesyndication.com",
                     "googleadservices.com",
                     "adsystem.com",
                     "adservice.google.com",
+                    "googletagmanager.com",
+                    "googletagservices.com",
                     "taboola.com",
                     "outbrain.com",
                     "criteo.com",
@@ -3623,11 +3648,28 @@ class Browser(NSObject):
                     "quantserve.com",
                     "zedo.com",
                     "revcontent.com",
-                    "uubooster.com"
+                    "uubooster.com",
+                    "amazon-adsystem.com",
+                    "casalemedia.com",
+                    "contextweb.com",
+                    "33across.com",
+                    "yieldmo.com",
+                    "sharethrough.com",
+                    "triplelift.com",
+                    "sovrn.com",
+                    "media.net",
+                    "indexexchange.com",
+                    "bidswitch.com",
+                    "lijit.com",
+                    "adform.net",
+                    "smartadserver.com",
+                    "trafficjunky.net",
+                    "undertone.com"
                   ]
                 },
                 "action": { "type": "block" }
               },
+              
               {
                 "trigger": {
                   "url-filter": ".*(pixel|track|beacon|analytics).*",
@@ -3635,16 +3677,78 @@ class Browser(NSObject):
                 },
                 "action": { "type": "block" }
               },
-            {
-              "trigger": {
-                "url-filter": ".*(adserver|ads|sponsor|promoted).*",
-                "resource-type": ["script"]
+              
+              {
+                "trigger": {
+                  "url-filter": ".*(adserver|ads|sponsor|promoted).*",
+                  "resource-type": ["script"]
+                },
+                "action": { "type": "block" }
+              },
+
+              {
+                "trigger": {
+                  "url-filter": ".*(pixel|track|beacon|analytics|telemetry|collect).*",
+                  "resource-type": ["image", "script"]
               },
               "action": { "type": "block" }
+             },
+             
+             {
+                "trigger": {
+                  "url-filter": ".*(adserver|ads|sponsor|promoted|banner|campaign).*",
+                  "resource-type": ["script"]
+             },
+             "action": { "type": "block" }
+           },
+           
+
+           {
+           
+             "trigger": {
+               "url-filter": ".*",
+               "resource-type": ["script"],
+               "if-domain": [
+                 "cookiebot.com",
+                 "onetrust.com",
+                 "trustarc.com",
+                 "consentmanager.net",
+                 "quantcast.com",
+                 "didomi.io",
+                 "iubenda.com",
+                 "cookieyes.com"
+               ]
+             },
+             "action": { "type": "block" }
+           },
+
+           {
+             "trigger": {
+               "url-filter": ".*",
+               "resource-type": ["script"],
+               "if-domain": [
+                 "onesignal.com",
+                 "pushwoosh.com",
+                 "cleverpush.com",
+                 "subscriber.com",
+                 "getsitecontrol.com"
+               ]
+             },
+             "action": { "type": "block" }
+           },
+
+           {
+             "trigger": {
+               "url-filter": ".*"
+             },
+             "action": {
+               "type": "css-display-none",
+               "selector": ".cookie, .cookie-banner, .cookie-consent, .consent-banner, .gdpr, .gdpr-banner, .cc-window, .onetrust-banner-sdk, #onetrust-banner-sdk, .qc-cmp-ui, .newsletter, .newsletter-popup, .subscribe-popup, .subscription-modal, .modal-backdrop, .push-notification, [id*='cookie'], [class*='cookie'], [id*='consent'], [class*='consent'], [id*='newsletter'], [class*='newsletter'], [id*='subscribe'], [class*='subscribe']"
+              } 
             }
           ]
           '''
-            
+          
             store = WKContentRuleListStore.defaultStore()
 
             def _adblock_ready(rule_list, error):
@@ -4440,9 +4544,10 @@ class Browser(NSObject):
 
         def on_response(code):
             if int(code) == 1000:
-                store = WKWebsiteDataStore.defaultDataStore()
-            
-                # Explicitly target all storage types including DOM storage
+                store = getattr(self, "_data_store", None)
+                if not store:
+                    return  # Never fallback to defaultDataStore()
+
                 try:
                     from WebKit import (
                         WKWebsiteDataTypeCookies,
@@ -4454,8 +4559,8 @@ class Browser(NSObject):
                         WKWebsiteDataTypeMemoryCache,
                         WKWebsiteDataTypeOfflineWebApplicationCache,
                     )
-                
-                    types = set([
+
+                    types = {
                         WKWebsiteDataTypeCookies,
                         WKWebsiteDataTypeLocalStorage,
                         WKWebsiteDataTypeSessionStorage,
@@ -4464,12 +4569,14 @@ class Browser(NSObject):
                         WKWebsiteDataTypeDiskCache,
                         WKWebsiteDataTypeMemoryCache,
                         WKWebsiteDataTypeOfflineWebApplicationCache,
-                    ])
+                    }
+
                 except Exception:
-                    # Fallback to allWebsiteDataTypes if imports fail
-                    types = WKWebsiteDataStore.allWebsiteDataTypes()
-            
+                    types = store.allWebsiteDataTypes()
+
                 since = NSDate.dateWithTimeIntervalSince1970_(0)
+
+                store.removeDataOfTypes_modifiedSince_completionHandler_(types, since, None)
 
                 def done():
                     ok = NSAlert.alloc().init()
@@ -4659,20 +4766,24 @@ class Browser(NSObject):
                                 
     def _wipe_all_site_data(self):
         try:
-            store = WKWebsiteDataStore.defaultDataStore()
-            types = WKWebsiteDataStore.allWebsiteDataTypes()
+            # Use the SAME non-persistent store used by WebViews
+            store = getattr(self, "_data_store", None)
+            if not store:
+                return  # Never fallback to defaultDataStore()
 
-            def _done():
-                print("[Wipe] All WKWebsiteDataStore data cleared.")
+            types = store.allWebsiteDataTypes()
+
+            since = NSDate.dateWithTimeIntervalSince1970_(0)
 
             store.removeDataOfTypes_modifiedSince_completionHandler_(
                 types,
-                NSDate.distantPast(),
-                _done,
+                since,
+                None
             )
-        except Exception as e:
-            print("[Wipe] Error wiping site data:", e)
-            
+
+        except Exception:
+            pass
+
     def windowWillClose_(self, notification):
         try:
             self._stop_cookie_scrubber()
@@ -4837,6 +4948,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
 
