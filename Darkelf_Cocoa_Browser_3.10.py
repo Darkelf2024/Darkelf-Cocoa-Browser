@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v3.9 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v3.10 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -72,7 +72,7 @@ import warnings
 from collections import deque
 from datetime import datetime
 from typing import Dict, List, Set, Optional
-
+from urllib.parse import urlparse, unquote
 from objc import ObjCPointerWarning
 
 
@@ -96,13 +96,14 @@ from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttribute
 
 from WebKit import WKContentRuleListStore
 import json
+import time
 
 HTTP_BLOCK_PAGE_HTML = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta http-equiv="Content-Security-Policy"
-content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+content="default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; base-uri 'none'; form-action 'none'; navigate-to https:;">
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Darkelf — Insecure Connection Blocked</title>
@@ -155,9 +156,10 @@ body::after{animation-direction:reverse;opacity:.6;}
   backdrop-filter:blur(14px);
 }
 .icon{
-  font-size:64px;
+  width:64px;
+  height:64px;
+  margin:0 auto 20px auto;
   color:var(--green);
-  margin-bottom:20px;
 }
 h1{
   font-size:1.8rem;
@@ -185,6 +187,8 @@ h1{
   color:var(--green);
   font-weight:600;
   cursor:pointer;
+  text-decoration:none;
+  display:inline-block;
 }
 .button:hover{background:rgba(52,199,89,.25);}
 </style>
@@ -192,23 +196,31 @@ h1{
 
 <body>
 <div class="container">
-  <div class="icon">🔒</div>
+  <div class="icon">
+    <svg viewBox="0 0 24 24" width="64" height="64"
+         fill="currentColor"
+         xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 2L4 5V11C4 16 7.5 20.5 12 22C16.5 20.5 20 16 20 11V5L12 2Z"/>
+      <rect x="9" y="10" width="6" height="5" rx="1" fill="#07080d"/>
+      <path d="M10 10V8C10 6.9 10.9 6 12 6C13.1 6 14 6.9 14 8V10"
+            stroke="#07080d" stroke-width="1.5"/>
+    </svg>
+  </div>
+
   <h1>INSECURE CONNECTION BLOCKED</h1>
+
   <div class="message">
     Darkelf Browser does not allow unencrypted HTTP connections.<br>
     This prevents downgrade and MITM attacks.
   </div>
-  <div class="url">BLOCKED_URL_PLACEHOLDER</div>
-  <div class="button" onclick="upgrade()">Try HTTPS Upgrade</div>
-</div>
 
-<script>
-function upgrade(){
-    const current = "BLOCKED_URL_PLACEHOLDER";
-    const https = current.replace("http://","https://");
-    window.location.href = https;
-}
-</script>
+  <div class="url">BLOCKED_URL_PLACEHOLDER</div>
+
+  <a href="HTTPS_UPGRADE_PLACEHOLDER" class="button">
+      Try HTTPS Upgrade
+  </a>
+
+</div>
 </body>
 </html>
 """
@@ -216,7 +228,6 @@ function upgrade(){
 # =========================
 # Darkelf MiniAI (SAFE / PASSIVE) - EXPANDED
 # =========================
-import time
 
 class DarkelfMiniAISentinel:
     """
@@ -232,11 +243,14 @@ class DarkelfMiniAISentinel:
     - No timers (Cocoa-safe)
     """
     
+    MAX_URL_LENGTH = 2048
+    CRITICAL_WINDOW_SECONDS = 60
+    
     def __init__(self):
         self.enabled = True
         
         # Event storage (circular buffer)
-        self.events = deque(maxlen=1000)  # Last 1000 events
+        self.events = deque(maxlen=500)  # Last 1000 events
         
         # Threat counters
         self.tracker_hits = 0
@@ -247,7 +261,6 @@ class DarkelfMiniAISentinel:
         self.intrusion_attempts = 0
         self.http_blocks_attempts = 0  # Track blocked insecure connections
         self.domain_stats = {}
-        self.events = deque(maxlen=500)
         
         # Session tracking
         self.session_start = time.time()
@@ -256,11 +269,6 @@ class DarkelfMiniAISentinel:
         
         # 🔴 LOCKDOWN STATE
         self.lockdown_active = False
-        try:
-            if hasattr(self, "browser_bridge"):
-                self.browser_bridge._wipe_all_site_data()
-        except Exception:
-            pass
 
         self.lockdown_threshold = 3  # 3 critical events triggers lockdown
         self.lockdown_triggered_at = None
@@ -315,13 +323,22 @@ class DarkelfMiniAISentinel:
         
         # Anomaly detection
         self.request_timestamps = deque(maxlen=100)
-        self.anomaly_threshold = 300  # requests per second = suspicious
+        self.anomaly_threshold = 75  # requests per second = suspicious
         
         print("[MiniAI] Sentinel enabled (passive mode)")
         print("[MiniAI] Intrusion detection: ACTIVE")
         print("[MiniAI] Fingerprint monitoring: ACTIVE")
         print("[MiniAI] Threat analysis: ACTIVE")
         print("[MiniAI] Lockdown threshold: 3 critical events")
+        
+    def _normalize_url(self, url: str) -> str:
+        """Decode and normalize URL safely."""
+        try:
+            url = url[:self.MAX_URL_LENGTH]
+            decoded = unquote(unquote(url.lower()))
+            return decoded
+        except Exception:
+            return url.lower()[:self.MAX_URL_LENGTH]
 
     # =====================================================
     # MAIN NETWORK MONITOR
@@ -332,59 +349,87 @@ class DarkelfMiniAISentinel:
         Monitor network requests for threats, intrusions, and anomalies.
         PASSIVE ONLY - logs threats but never blocks (until lockdown).
         """
+
         if not self.enabled or not url:
             return
-        
+
         # 🔴 Block all requests if in lockdown
         if self.lockdown_active:
             print(f"[MiniAI] 🔴 LOCKDOWN: Request blocked - {url[:50]}")
             return
-        
+
         try:
-            url_lower = url.lower()
+            from urllib.parse import unquote
+
+            # ===============================
+            # 🔐 1️⃣ Normalize & Sanitize URL
+            # ===============================
+
+            MAX_URL_LENGTH = 2048  # Prevent memory abuse
+            safe_url = url[:MAX_URL_LENGTH]
+
+            # Decode twice to prevent encoded bypass
+            normalized_url = unquote(unquote(safe_url)).lower()
+
             timestamp = time.time()
-            
-            # Record event
+
+            # ===============================
+            # 📦 2️⃣ Create Event Record
+            # ===============================
+
             event = {
-                'url': url,
+                'url': safe_url,
                 'timestamp': timestamp,
                 'datetime': datetime.now().isoformat(),
                 'threats': [],
                 'risk_level': 'low'
             }
-            
-            # ===== INTRUSION DETECTION =====
-            intrusion_detected = self._detect_intrusion(url_lower, event)
-            
-            # ===== THREAT CLASSIFICATION =====
-            self._classify_threats(url_lower, event)
-            
-            # ===== FINGERPRINTING DETECTION =====
-            self._detect_fingerprinting(url_lower, headers, event)
-            
-            # ===== DOMAIN REPUTATION =====
-            self._check_domain_reputation(url, event)
-            
-            # ===== ANOMALY DETECTION =====
+
+            # ===============================
+            # 🧠 3️⃣ Detection Pipeline
+            # ===============================
+
+            # Intrusion detection
+            self._detect_intrusion(normalized_url, event)
+
+            # Threat classification
+            self._classify_threats(normalized_url, event)
+
+            # Fingerprinting detection
+            self._detect_fingerprinting(normalized_url, headers or {}, event)
+
+            # Domain reputation (use normalized for consistency)
+            self._check_domain_reputation(normalized_url, event)
+
+            # Anomaly detection
             self._detect_anomalies(timestamp, event)
-            
-            # ===== REDIRECT CHAIN ANALYSIS =====
-            self._analyze_redirects(url, headers, event)
-            
-            # Store event
+
+            # Redirect analysis
+            self._analyze_redirects(normalized_url, headers or {}, event)
+
+            # ===============================
+            # 💾 4️⃣ Store Event
+            # ===============================
+
             self.events.append(event)
-            
-            # Log high-risk events
+
+            # ===============================
+            # 🚨 5️⃣ Log High Risk
+            # ===============================
+
             if event['risk_level'] in ('high', 'critical'):
                 self._log_threat(event)
-            
-            # 🔴 LOCKDOWN CHECK
+
+            # ===============================
+            # 🔴 6️⃣ Lockdown Evaluation
+            # ===============================
+
             self._evaluate_lockdown()
-            
+
         except Exception as e:
-            # Silent fail - never crash the browser
-            pass
-            
+            # Still never crash browser — but log internal issue
+            print(f"[MiniAI] Monitor error: {e}")
+
     def on_http_blocked(self, url: str):
         """Called when an HTTP connection is blocked"""
         self.http_blocks_attempts += 1
@@ -400,21 +445,40 @@ class DarkelfMiniAISentinel:
         self.events.append(event)
         print(f"[MiniAI] 🔒 HTTP blocked: {url[:60]}")
 
-    # =====================================================
-    # LOCKDOWN EVALUATION
-    # =====================================================
+        # =====================================================
+        # LOCKDOWN EVALUATION
+        # =====================================================
 
     def _evaluate_lockdown(self):
-        """Check if lockdown should be triggered"""
+        """Check if lockdown should be triggered (time-window based)"""
+
         if self.lockdown_active:
             return
-        
-        # Count critical events in recent history
-        critical_events = sum(
-            1 for e in self.events if e['risk_level'] == 'critical'
+
+        # ===============================
+        # 🔐 Time-Window Protection
+        # ===============================
+
+        LOCKDOWN_WINDOW_SECONDS = 60  # Only count last 60 seconds
+        now = time.time()
+
+        recent_critical_events = sum(
+            1
+            for e in self.events
+            if e['risk_level'] == 'critical'
+            and (now - e['timestamp']) <= LOCKDOWN_WINDOW_SECONDS
         )
-        
-        if critical_events >= self.lockdown_threshold:
+
+        # ===============================
+        # 🔴 Trigger Condition
+        # ===============================
+
+        if recent_critical_events >= self.lockdown_threshold:
+            print(
+                f"[MiniAI] Lockdown threshold met: "
+                f"{recent_critical_events} critical events in "
+                f"{LOCKDOWN_WINDOW_SECONDS}s"
+            )
             self._trigger_lockdown()
 
     def _trigger_lockdown(self):
@@ -431,109 +495,115 @@ class DarkelfMiniAISentinel:
         print("[MiniAI] Initiating defensive containment...")
         print("="*62 + "\n")
 
+        if not hasattr(self, "browser_bridge"):
+            print("[MiniAI] No browser bridge attached.")
+            return
+
+        bridge = self.browser_bridge
+
         # ==============================
-        # 1️⃣ Hard Stop All WebViews
+        # 1️⃣ Stop All WebViews
+        # ==============================
+        for tab in getattr(bridge, "tabs", []):
+            try:
+                tab.view.stopLoading()
+            except Exception:
+                pass
+
+        # ==============================
+        # 2️⃣ Purge Website Data (Global)
         # ==============================
         try:
-            if hasattr(self, "browser_bridge"):
-                for tab in getattr(self.browser_bridge, "tabs", []):
-                    try:
-                        tab.view.stopLoading()
-                    except Exception:
-                        pass
-        except Exception as e:
-            print("[MiniAI] Stop loading failed:", e)
+            from Foundation import NSDate
+            from WebKit import WKWebsiteDataStore
 
-        # ==============================
-        # 2️⃣ Purge Website Data
-        # ==============================
-        try:
-            if hasattr(self, "browser_bridge"):
-                from Foundation import NSDate
+            data_store = WKWebsiteDataStore.defaultDataStore()
 
-                for tab in getattr(self.browser_bridge, "tabs", []):
-                    try:
-                        webview = tab.view
-                        config = webview.configuration()
-                        dataStore = config.websiteDataStore()
-
-                        dataStore.removeDataOfTypes_modifiedSince_completionHandler_(
-                            {
-                                "WKWebsiteDataTypeCookies",
-                                "WKWebsiteDataTypeDiskCache",
-                                "WKWebsiteDataTypeMemoryCache",
-                                "WKWebsiteDataTypeLocalStorage",
-                                "WKWebsiteDataTypeSessionStorage",
-                                "WKWebsiteDataTypeIndexedDBDatabases",
-                                "WKWebsiteDataTypeServiceWorkerRegistrations"
-                            },
-                            NSDate.dateWithTimeIntervalSince1970_(0),
-                            None
-                        )
-                    except Exception:
-                        pass
+            data_store.removeDataOfTypes_modifiedSince_completionHandler_(
+                {
+                    "WKWebsiteDataTypeCookies",
+                    "WKWebsiteDataTypeDiskCache",
+                    "WKWebsiteDataTypeMemoryCache",
+                    "WKWebsiteDataTypeLocalStorage",
+                    "WKWebsiteDataTypeSessionStorage",
+                    "WKWebsiteDataTypeIndexedDBDatabases",
+                    "WKWebsiteDataTypeServiceWorkerRegistrations"
+                },
+                NSDate.dateWithTimeIntervalSince1970_(0),
+                None
+            )
         except Exception as e:
             print("[MiniAI] Data purge failed:", e)
 
         # ==============================
-        # 3️⃣ Destroy WebViews (True Containment)
+        # 3️⃣ Create Ephemeral Lockdown WebView
         # ==============================
         try:
-            if hasattr(self, "browser_bridge"):
-                for tab in getattr(self.browser_bridge, "tabs", []):
-                    try:
-                        tab.view.removeFromSuperview()
-                    except Exception:
-                        pass
+            from WebKit import (
+                WKWebView,
+                WKWebViewConfiguration,
+                WKWebsiteDataStore
+            )
+            from AppKit import (
+                NSViewWidthSizable,
+                NSViewHeightSizable
+            )
+
+            # Remove old views
+            for tab in getattr(bridge, "tabs", []):
+                try:
+                    tab.view.removeFromSuperview()
+                except Exception:
+                    pass
+
+            bridge.tabs.clear()
+            bridge.active = -1
+
+            # Non-persistent configuration
+            config = WKWebViewConfiguration.alloc().init()
+            config.setWebsiteDataStore_(
+                WKWebsiteDataStore.nonPersistentDataStore()
+            )
+
+            lockdown_view = WKWebView.alloc().initWithFrame_configuration_(
+                bridge.contentView().bounds(),
+                config
+            )
+
+            lockdown_view.setAutoresizingMask_(
+                NSViewWidthSizable | NSViewHeightSizable
+            )
+
+            bridge.contentView().addSubview_(lockdown_view)
+
+            # Replace active tab manually
+            Tab = type("Tab", (), {})
+            new_tab = Tab()
+            new_tab.view = lockdown_view
+
+            bridge.tabs.append(new_tab)
+            bridge.active = 0
+
         except Exception as e:
-            print("[MiniAI] WebView destruction failed:", e)
-            
-        # ==============================
-        # 3.5️⃣ Clear All Tabs (Full Memory Reset)
-        # ==============================
-        try:
-            if hasattr(self, "browser_bridge"):
-                self.browser_bridge.tabs.clear()
-                self.browser_bridge.active = -1
-                print("[MiniAI] All tabs cleared from memory")
-        except Exception as e:
-            print("[MiniAI] Tab clearing failed:", e)
+            print("[MiniAI] Lockdown WebView creation failed:", e)
+            return
 
         # ==============================
-        # 4️⃣ Show Lockdown Page
+        # 4️⃣ Inject Lockdown Page
         # ==============================
         try:
-            self._activate_lockout_page()
+            lockdown_view.loadHTMLString_baseURL_(
+                self._lockout_html(120),  # pass countdown value
+                None
+            )
+            print("[MiniAI] Lockdown page injected (ephemeral mode).")
         except Exception as e:
             print("[MiniAI] Lockout page failed:", e)
 
     # =====================================================
     # LOCKOUT PAGE BRIDGE (CALL INTO WEBKIT LAYER)
     # =====================================================
-
-    def _activate_lockout_page(self):
-        """
-        This must connect to your WebKit bridge.
-        Replace `browser_bridge` with your actual interface.
-        
-        Example integration:
-        - self.browser_bridge.navigate_home()
-        - self.browser_bridge.inject_html(self._lockout_html())
-        """
-        try:
-            # If you have a browser bridge/controller, use it here
-            if hasattr(self, "browser_bridge"):
-                self.browser_bridge.navigate_home()
-                self.browser_bridge.inject_html(self._lockout_html())
-            else:
-                # Fallback: just print the HTML for manual integration
-                print("[MiniAI] Lockout HTML ready (no bridge configured)")
-                print(self._lockout_html())
-        except Exception as e:
-            print(f"[MiniAI] Lockout activation failed: {e}")
-
     def _lockout_html(self) -> str:
-        """Generate the lockout page HTML"""
         return """
 <!DOCTYPE html>
 <html lang="en">
@@ -543,9 +613,6 @@ content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inlin
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Darkelf Browser — Security Lockdown</title>
-
-<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
 
 <style>
 :root{
@@ -571,7 +638,7 @@ body{
   background:var(--bg);
 }
 
-/* Aurora Background (same as homepage) */
+/* Aurora Background */
 body::before,
 body::after{
   content:"";
@@ -616,7 +683,9 @@ body::after{
 }
 
 .shield{
-  font-size:70px;
+  width:70px;
+  height:70px;
+  margin:0 auto;
   color:var(--green);
   filter:drop-shadow(0 0 18px rgba(52,199,89,.55));
   animation:pulse 2.2s infinite;
@@ -668,7 +737,15 @@ h1{
 
 <div class="container">
   <div class="shield">
-    <i class="bi bi-shield-lock-fill"></i>
+    <!-- Shield Lock SVG -->
+    <svg viewBox="0 0 24 24" width="70" height="70"
+         fill="currentColor"
+         xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 2L4 5V11C4 16 7.5 20.5 12 22C16.5 20.5 20 16 20 11V5L12 2Z"/>
+      <rect x="9" y="10" width="6" height="5" rx="1" fill="#07080d"/>
+      <path d="M10 10V8C10 6.9 10.9 6 12 6C13.1 6 14 6.9 14 8V10"
+            stroke="#07080d" stroke-width="1.5"/>
+    </svg>
   </div>
 
   <h1>SECURITY LOCKDOWN</h1>
@@ -681,64 +758,130 @@ h1{
     Browser data will be wiped and session terminated.
   </div>
 
-  <div class="status">
-    ⏳ Session ends in <span id="countdown2">120</span> seconds<br>
-    🗑️ Storage clearing in progress<br>
-    🔒 Zero persistence enforcement
+<div class="status">
+
+  <!-- Hourglass -->
+  <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
+    <svg viewBox="0 0 24 24" width="18" height="18"
+         fill="currentColor"
+         xmlns="http://www.w3.org/2000/svg">
+      <path d="M6 2h12v4c0 3-2 4-4 6 2 2 4 3 4 6v4H6v-4c0-3 2-4 4-6-2-2-4-3-4-6V2z"/>
+    </svg>
+    <span>Session ends in <span id="countdown2">120</span> seconds</span>
   </div>
+
+  <!-- Trash -->
+  <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:6px;">
+    <svg viewBox="0 0 24 24" width="18" height="18"
+         fill="currentColor"
+         xmlns="http://www.w3.org/2000/svg">
+      <path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM6 9h2v8H6V9z"/>
+    </svg>
+    <span>Storage clearing in progress</span>
+  </div>
+
+  <!-- Lock -->
+  <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:6px;">
+    <svg viewBox="0 0 24 24" width="18" height="18"
+         fill="currentColor"
+         xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 2a4 4 0 00-4 4v3H6a2 2 0 00-2 2v9h16v-9a2 2 0 00-2-2h-2V6a4 4 0 00-4-4zm-2 7V6a2 2 0 114 0v3h-4z"/>
+    </svg>
+    <span>Zero persistence enforcement</span>
+  </div>
+
 </div>
 
 <script>
+(function(){
+
 let seconds = 120;
 const el = document.getElementById("countdown");
 const el2 = document.getElementById("countdown2");
 
-const interval = setInterval(() => {
-    seconds--;
-    el.textContent = seconds;
-    el2.textContent = seconds;
+let interval = null;
 
-    if (seconds <= 0) {
-        clearInterval(interval);
+function updateDisplay(value){
+    if (el)  el.textContent  = value;
+    if (el2) el2.textContent = value;
+}
 
-        try {
-            localStorage.clear();
-            sessionStorage.clear();
+function wipeAndFinish(){
+    try {
+        localStorage.clear();
+        sessionStorage.clear();
 
-            document.cookie.split(";").forEach(function(c) {
-                document.cookie = c
-                  .replace(/^ +/, "")
-                  .replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+        document.cookie.split(";").forEach(function(c) {
+            document.cookie = c
+              .replace(/^ +/, "")
+              .replace(/=.*/, "=;expires=" + new Date(0).toUTCString() + ";path=/");
+        });
+
+        if (window.indexedDB && indexedDB.databases) {
+            indexedDB.databases().then(dbs => {
+                dbs.forEach(db => indexedDB.deleteDatabase(db.name));
             });
+        }
 
-            if (window.indexedDB && indexedDB.databases) {
-                indexedDB.databases().then(dbs => {
-                    dbs.forEach(db => indexedDB.deleteDatabase(db.name));
-                });
-            }
+        if (window.webkit &&
+            window.webkit.messageHandlers &&
+            window.webkit.messageHandlers.lockdownComplete) {
+            window.webkit.messageHandlers.lockdownComplete.postMessage("terminate");
+        }
 
-            if (window.webkit &&
-                window.webkit.messageHandlers &&
-                window.webkit.messageHandlers.lockdownComplete) {
-                window.webkit.messageHandlers.lockdownComplete.postMessage("terminate");
-            }
-
-            document.querySelector(".container").innerHTML = `
-                <div class="shield"><i class="bi bi-shield-check"></i></div>
+        const container = document.querySelector(".container");
+        if (container) {
+            container.innerHTML = `
+                <div class="shield">
+                  <svg viewBox="0 0 24 24" width="70" height="70"
+                       fill="currentColor"
+                       xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2L4 5V11C4 16 7.5 20.5 12 22C16.5 20.5 20 16 20 11V5L12 2Z"/>
+                    <path d="M8 12L11 15L16 9"
+                          stroke="#07080d"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"/>
+                  </svg>
+                </div>
                 <h1>LOCKDOWN COMPLETE</h1>
                 <div class="warning">
                     All session data wiped.<br>
                     Darkelf Browser secured.
                 </div>
             `;
-        } catch(e){}
-    }
-}, 1000);
+        }
 
-window.addEventListener('beforeunload', (e) => {
+    } catch(e){}
+}
+
+function startCountdown(){
+    updateDisplay(seconds);
+
+    interval = setInterval(() => {
+        seconds--;
+
+        if (seconds <= 0) {
+            seconds = 0;
+            updateDisplay(seconds);
+            clearInterval(interval);
+            wipeAndFinish();
+            return;
+        }
+
+        updateDisplay(seconds);
+
+    }, 1000);
+}
+
+startCountdown();
+
+window.addEventListener('beforeunload', function(e){
     e.preventDefault();
     e.returnValue = '';
 });
+
+})();
 </script>
 
 </body>
@@ -750,31 +893,81 @@ window.addEventListener('beforeunload', (e) => {
     # =====================================================
 
     def _detect_intrusion(self, url: str, event: dict) -> bool:
-        """Detect intrusion attempts (SQLi, XSS, path traversal, hacker tools, etc.)"""
+        """Detect intrusion attempts (SQLi, XSS, path traversal, tools, etc.)"""
+
         intrusion_found = False
-        
-        # Check for hacker tools
+
+        try:
+    
+            # ==========================================
+            # 🔐 Normalize & Decode URL (anti-bypass)
+            # ==========================================
+
+            decoded = unquote(unquote(url))  # double decode
+            normalized = decoded.lower().replace("+", " ")
+
+            # Remove common obfuscation tricks
+            normalized = normalized.replace("/**/", "")
+            normalized = normalized.replace("%00", "")
+
+        except Exception:
+            normalized = url.lower()
+
+        # ==========================================
+        # 🛠 Hacker Tool Detection
+        # ==========================================
+
         for tool in self.hacker_tools:
-            if tool in url:
+            if tool in normalized:
                 self.intrusion_attempts += 1
                 event['threats'].append(f"HACKER_TOOL: {tool.upper()}")
                 event['risk_level'] = 'critical'
                 intrusion_found = True
+
                 print(f"[MiniAI] 🚨 HACKER TOOL DETECTED: {tool} in {url[:100]}")
-        
-        # Check for attack patterns
+                break  # Avoid duplicate counting
+
+        # ==========================================
+        # 🚨 Pattern-Based Intrusion Detection
+        # ==========================================
+
         for attack_type, patterns in self.intrusion_patterns.items():
             for pattern in patterns:
-                if pattern in url:
+                if pattern in normalized:
                     self.intrusion_attempts += 1
                     event['threats'].append(f"INTRUSION: {attack_type.upper()}")
                     event['risk_level'] = 'critical'
                     intrusion_found = True
-                    
+
                     print(f"[MiniAI] 🚨 INTRUSION DETECTED: {attack_type} in {url[:100]}")
-                    break
-        
+                    break  # stop scanning this attack_type
+
+            if intrusion_found:
+                break  # prevent stacking multiple identical flags
+
+        # ==========================================
+        # 🔥 Regex-Based Advanced Detection
+        # ==========================================
+
+        regex_patterns = {
+            "SQLI": r"(union\s+select|or\s+1=1|drop\s+table|insert\s+into)",
+            "XSS": r"(<script.*?>|javascript:|onerror=|onload=)",
+            "PATH_TRAVERSAL": r"(\.\./|\.\.\\)",
+            "CMD_INJECTION": r"(;|\|\||&&)\s*(whoami|ls|cat|bash|cmd)",
+        }
+
+        for attack_name, regex in regex_patterns.items():
+            if re.search(regex, normalized):
+                self.intrusion_attempts += 1
+                event['threats'].append(f"INTRUSION_REGEX: {attack_name}")
+                event['risk_level'] = 'critical'
+                intrusion_found = True
+
+                print(f"[MiniAI] 🚨 REGEX INTRUSION: {attack_name} in {url[:100]}")
+                break
+
         return intrusion_found
+
 
     def _classify_threats(self, url: str, event: dict):
         """Classify known threat patterns"""
@@ -887,16 +1080,85 @@ window.addEventListener('beforeunload', (e) => {
             pass
 
     def _detect_anomalies(self, timestamp: float, event: dict):
-        """Detect unusual request patterns (DDoS, rapid requests, etc.)"""
+        """
+        Advanced anomaly detection:
+        - High request rate (1s window)
+        - Sustained flood (5s window)
+        - Burst detection
+        - Domain spray detection
+        - Rapid redirect chain detection
+        """
+
         self.request_timestamps.append(timestamp)
-        
-        # Check request rate (last second)
-        recent_requests = sum(1 for t in self.request_timestamps if timestamp - t < 1.0)
-        
-        if recent_requests > self.anomaly_threshold:
-            event['threats'].append(f"ANOMALY: High request rate ({recent_requests}/sec)")
+
+        # ==============================
+        # 1️⃣ Request Rate Windows
+        # ==============================
+
+        last_1s = sum(1 for t in self.request_timestamps if timestamp - t < 1.0)
+        last_5s = sum(1 for t in self.request_timestamps if timestamp - t < 5.0)
+        last_10s = sum(1 for t in self.request_timestamps if timestamp - t < 10.0)
+
+        # High instant spike
+        if last_1s > self.anomaly_threshold:
+            event['threats'].append(f"ANOMALY: Burst ({last_1s}/sec)")
             event['risk_level'] = 'high'
-            print(f"[MiniAI] ⚠️  ANOMALY: {recent_requests} requests/sec detected")
+            print(f"[MiniAI] ⚠️ Burst spike detected: {last_1s}/sec")
+
+        # Sustained flood
+        if last_5s > self.anomaly_threshold * 3:
+            event['threats'].append(f"ANOMALY: Sustained flood ({last_5s}/5s)")
+            event['risk_level'] = 'critical'
+            print(f"[MiniAI] 🚨 Sustained flood detected: {last_5s}/5s")
+
+        # ==============================
+        # 2️⃣ Domain Spray Detection
+        # ==============================
+
+        # Many unique domains in short time
+        recent_domains = set()
+
+        for e in list(self.events)[-50:]:
+            try:
+                domain = urlparse(e['url']).netloc
+                if timestamp - e['timestamp'] < 3.0:
+                    recent_domains.add(domain)
+            except Exception:
+                pass
+
+        if len(recent_domains) > 15:
+            event['threats'].append(f"ANOMALY: Domain spray ({len(recent_domains)} domains)")
+            event['risk_level'] = 'high'
+            print(f"[MiniAI] ⚠️ Domain spray detected: {len(recent_domains)} domains")
+
+        # ==============================
+        # 3️⃣ Port Scanning Detection
+        # ==============================
+
+        recent_ports = set()
+
+        for e in list(self.events)[-50:]:
+            try:
+                parsed = urlparse(e['url'])
+                if parsed.port:
+                    if timestamp - e['timestamp'] < 3.0:
+                        recent_ports.add(parsed.port)
+            except Exception:
+                pass
+
+        if len(recent_ports) > 5:
+            event['threats'].append(f"ANOMALY: Port scan ({len(recent_ports)} ports)")
+            event['risk_level'] = 'critical'
+            print(f"[MiniAI] 🚨 Port scanning behavior detected")
+
+        # ==============================
+        # 4️⃣ Rapid Redirect Loop
+        # ==============================
+
+        if len(self.redirects) > 8:
+            event['threats'].append("ANOMALY: Redirect loop")
+            event['risk_level'] = 'high'
+            print(f"[MiniAI] ⚠️ Redirect loop detected")
 
     def _analyze_redirects(self, url: str, headers: Dict[str, str], event: dict):
         """Analyze redirect chains for suspicious behavior"""
@@ -1122,7 +1384,7 @@ TOP 10 THREAT DOMAINS:
             report += f"\n  ✅ VERDICT: Your browser fingerprint was NOT collected."
             report += f"\n  ✅ All {stats['threats']['fingerprinting']} fingerprinting attempts were defended."
             report += f"\n  ✅ {stats['threats']['trackers']} trackers were blocked by native WebKit rules."
-            report += f"\n  🔒 {stats['threats'].get('http_blocks', 0)} insecure HTTP connections blocked."            
+            report += f"\n  🔒 {stats['threats'].get('http_blocks', 0)} insecure HTTP connections blocked."
             report += f"\n  🛡️  Lockdown ready: {stats['lockdown']['threshold'] - sum(1 for e in self.events if e['risk_level'] == 'critical')} critical events remaining"
         
         report += "\n" + "="*62
@@ -1150,9 +1412,14 @@ TOP 10 THREAT DOMAINS:
         return True
     
     def shutdown(self):
-        """Graceful shutdown with final report"""
         self.enabled = False
         print("\n[MiniAI] Sentinel shutting down...")
+
+        try:
+            if hasattr(self, "get_threat_report"):
+                print(self.get_threat_report())
+        except Exception as e:
+            print("[MiniAI] Report failed:", e)
         
 HOME_URL = "darkelf://home"
         
@@ -1923,22 +2190,20 @@ class _NavDelegate(NSObject):
             # ==============================
             # 2️⃣ Enforce Lockdown Mode
             # ==============================
-            try:
-                if (
-                    hasattr(self._owner, "mini_ai")
-                    and self._owner.mini_ai
-                    and self._owner.mini_ai.lockdown_active
-                ):
-                    decisionHandler(WKNavigationActionPolicyCancel)
-                    handled = True
 
-                    webView.loadHTMLString_baseURL_(
-                        LOCKDOWN_HTML_PAGE,
-                        None
-                    )
-                    return
-            except Exception as e:
-                print("[MiniAI Lockdown] Failed:", e)
+            mini_ai = getattr(self._owner, "mini_ai", None)
+
+            if mini_ai and mini_ai.lockdown_active:
+
+                decisionHandler(WKNavigationActionPolicyCancel)
+                handled = True
+
+                webView.loadHTMLString_baseURL_(
+                    mini_ai._lockout_html(),
+                    None
+                )
+                return
+
 
             # ==============================
             # 3️⃣ Block Dangerous Schemes
@@ -1957,7 +2222,6 @@ class _NavDelegate(NSObject):
 
             if url_str.lower().startswith("http://"):
 
-                # 🔥 Notify MiniAI FIRST
                 try:
                     if hasattr(self._owner, "mini_ai") and self._owner.mini_ai:
                         self._owner.mini_ai.on_http_blocked(url_str)
@@ -1967,13 +2231,17 @@ class _NavDelegate(NSObject):
                 decisionHandler(WKNavigationActionPolicyCancel)
                 handled = True
 
-                safe_html = HTTP_BLOCK_PAGE_HTML.replace(
-                    "BLOCKED_URL_PLACEHOLDER",
-                    url_str
+                https_url = url_str.replace("http://", "https://", 1)
+
+                safe_html = (
+                    HTTP_BLOCK_PAGE_HTML
+                    .replace("BLOCKED_URL_PLACEHOLDER", url_str)
+                    .replace("HTTPS_UPGRADE_PLACEHOLDER", https_url)
                 )
 
                 webView.loadHTMLString_baseURL_(safe_html, None)
                 return
+
 
             # ==============================
             # 5️⃣ Homepage reload fix
