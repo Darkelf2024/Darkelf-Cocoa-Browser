@@ -1,4 +1,4 @@
-# 🕶️ Darkelf Cocoa Browser v3.9
+# 🕶️ Darkelf Cocoa Browser v3.10
 
 ![License](https://img.shields.io/badge/license-LGPL--3.0-green)
 ![Python](https://img.shields.io/badge/python-3.11+-blue)
@@ -154,7 +154,7 @@ Tested:
 ------------------------------------------------------------------------
 ## 📂 Source Files
 
-- 🟢 [Darkelf Cocoa Browser](https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/blob/main/Darkelf_Cocoa_Browser_3.9.py)  
+- 🟢 [Darkelf Cocoa Browser](https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/blob/main/Darkelf_Cocoa_Browser_3.10.py)  
 - 🔒 [Darkelf Hardened Cocoa Browser](https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/blob/main/Darkelf%20Cocoa%20Hardened%20Browser%203.7.py)
 
 ------------------------------------------------------------------------
