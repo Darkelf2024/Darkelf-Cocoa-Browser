@@ -1412,14 +1412,16 @@ TOP 10 THREAT DOMAINS:
         return True
     
     def shutdown(self):
+        if not self.enabled:
+            return
+
         self.enabled = False
-        print("\n[MiniAI] Sentinel shutting down...")
 
         try:
-            if hasattr(self, "get_threat_report"):
-                print(self.get_threat_report())
+            print(self.get_threat_report())
         except Exception as e:
             print("[MiniAI] Report failed:", e)
+
         
 HOME_URL = "darkelf://home"
         
@@ -4456,93 +4458,55 @@ class Browser(NSObject):
             print("[Go] Failed:", e)
 
     def actNuke_(self, sender):
-        ACCENT = (52/255.0, 199/255.0, 89/255.0, 1.0)
 
+        from AppKit import NSAlert, NSAlertStyleCritical, NSApp
+        from WebKit import WKWebsiteDataStore
+
+        # 🔴 Confirmation Alert
         alert = NSAlert.alloc().init()
         alert.setMessageText_("Clear All Browsing Data?")
-        alert.setInformativeText_("This will wipe cookies, cache, local storage, IndexedDB, and all website data.")
+        alert.setInformativeText_(
+            "This will wipe cookies, cache, local storage, "
+            "IndexedDB, and all website data, then close Darkelf."
+        )
         alert.setAlertStyle_(NSAlertStyleCritical)
 
-        alert.addButtonWithTitle_("Wipe")
-        alert.addButtonWithTitle_("Cancel")
+        # Order matters:
+        # First button = 1000
+        # Second button = 1001
+        alert.addButtonWithTitle_("Cancel")  # 1000
+        alert.addButtonWithTitle_("Wipe")    # 1001
 
-        try:
-            buttons = alert.buttons()
-            if buttons and hasattr(buttons[0], "setBezelColor_"):
-                buttons[0].setBezelColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(*ACCENT))
-        except Exception:
-            pass
-
+        # 🔴 Response Handler
         def on_response(code):
-            if int(code) == 1000:
-                store = getattr(self, "_data_store", None)
-                if not store:
-                    return  # Never fallback to defaultDataStore()
 
-                try:
-                    from WebKit import (
-                        WKWebsiteDataTypeCookies,
-                        WKWebsiteDataTypeLocalStorage,
-                        WKWebsiteDataTypeSessionStorage,
-                        WKWebsiteDataTypeIndexedDBDatabases,
-                        WKWebsiteDataTypeWebSQLDatabases,
-                        WKWebsiteDataTypeDiskCache,
-                        WKWebsiteDataTypeMemoryCache,
-                        WKWebsiteDataTypeOfflineWebApplicationCache,
-                    )
+            # Only proceed if Wipe was pressed (1001)
+            if int(code) != 1001:
+                return
 
-                    types = {
-                        WKWebsiteDataTypeCookies,
-                        WKWebsiteDataTypeLocalStorage,
-                        WKWebsiteDataTypeSessionStorage,
-                        WKWebsiteDataTypeIndexedDBDatabases,
-                        WKWebsiteDataTypeWebSQLDatabases,
-                        WKWebsiteDataTypeDiskCache,
-                        WKWebsiteDataTypeMemoryCache,
-                        WKWebsiteDataTypeOfflineWebApplicationCache,
-                    }
-
-                except Exception:
-                    types = store.allWebsiteDataTypes()
-
-                since = NSDate.dateWithTimeIntervalSince1970_(0)
-
-                store.removeDataOfTypes_modifiedSince_completionHandler_(types, since, None)
-
-                def done():
-                    ok = NSAlert.alloc().init()
-                    ok.setMessageText_("All data cleared")
-                    ok.setInformativeText_("Cookies, cache, localStorage, sessionStorage, IndexedDB, and all website data have been removed.")
-                    ok.addButtonWithTitle_("OK")
-
+            try:
+                # 1️⃣ Destroy all WebViews (ephemeral wipe)
+                for tab in list(self.tabs):
                     try:
-                        ok_btn = ok.buttons()[0]
-                        if hasattr(ok_btn, "setBezelColor_"):
-                            ok_btn.setBezelColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(*ACCENT))
-                        else:
-                            ok_btn.setWantsLayer_(True)
-                            ok_btn.layer().setBackgroundColor_(
-                            NSColor.colorWithCalibratedRed_green_blue_alpha_(*ACCENT).CGColor()
-                            )
-                            ok_btn.setBordered_(False)
-                            if hasattr(ok_btn, "setContentTintColor_"):
-                                ok_btn.setContentTintColor_(NSColor.whiteColor())
+                        self._teardown_webview(tab.view)
                     except Exception:
                         pass
 
-                    try:
-                        ok.beginSheetModalForWindow_completionHandler_(self.window, None)
-                    except Exception:
-                        ok.runModal()
+                self.tabs.clear()
+                self.active = 0
 
-                store.removeDataOfTypes_modifiedSince_completionHandler_(types, since, done)
+                # 2️⃣ Reset ephemeral store
+                self._data_store = WKWebsiteDataStore.nonPersistentDataStore()
 
-        try:
-            alert.beginSheetModalForWindow_completionHandler_(self.window, on_response)
-        except Exception:
-            resp = alert.runModal()
-            on_response(resp)
-            
+            except Exception as e:
+                print("wipe error:", e)
+
+            # 3️⃣ Shutdown browser cleanly
+            NSApp().terminate_(None)
+
+        # Show confirmation sheet
+        alert.beginSheetModalForWindow_completionHandler_(self.window, on_response)
+
     def _storage_cleanup(self):
         try:
             from WebKit import WKWebsiteDataStore
@@ -4696,31 +4660,32 @@ class Browser(NSObject):
             print("[MiniAI] Shutdown failed:", e)
                                 
     def _wipe_all_site_data(self):
+
+        if getattr(self, "_has_wiped", False):
+            return
+        self._has_wiped = True
+
         try:
-            # Use the SAME non-persistent store used by WebViews
-            store = getattr(self, "_data_store", None)
-            if not store:
-                return  # Never fallback to defaultDataStore()
+            for tab in list(self.tabs):
+                try:
+                    self._teardown_webview(tab.view)
+                except Exception:
+                    pass
 
-            types = store.allWebsiteDataTypes()
+            self.tabs.clear()
+            self.active = 0
 
-            since = NSDate.dateWithTimeIntervalSince1970_(0)
+            # Reset to fresh ephemeral store
+            self._data_store = WKWebsiteDataStore.nonPersistentDataStore()
 
-            store.removeDataOfTypes_modifiedSince_completionHandler_(
-                types,
-                since,
-                None
-            )
-
-        except Exception:
-            pass
+        except Exception as e:
+            print("wipe error:", e)
 
     def windowWillClose_(self, notification):
         try:
             self._stop_cookie_scrubber()
         except Exception:
             pass
-        NSApp().terminate_(None)
 
     def applicationWillTerminate_(self, notification):
         try:
@@ -4774,10 +4739,9 @@ class AppDelegate(NSObject):
                         print("[MiniAI] Generating final threat report...\n")
                     
                         # ✅ Check if enhanced report method exists
-                        if hasattr(self.browser.mini_ai, 'get_threat_report'):
+                        if hasattr(self.browser.mini_ai, 'shutdown'):
                             # Display full threat report
-                            report = self.browser.mini_ai.get_threat_report()
-                            print(report)
+                            self.browser.mini_ai.shutdown()
                         else:
                             # Fallback to basic statistics
                             print("[MiniAI] Enhanced report not available, showing basic stats:")
@@ -4829,15 +4793,6 @@ class AppDelegate(NSObject):
                     print("[Quit] Cookie scrubber stopped")
                 except Exception as e:
                     print("[Quit] Failed to stop cookie scrubber:", e)
-        
-                # ═══════════════════════════════════════════════════════════
-                # 3. WIPE ALL BROWSING DATA
-                # ═══════════════════════════════════════════════════════════
-                try:
-                    self.browser._wipe_all_site_data()
-                    print("[Quit Wipe] All WKWebsiteDataStore data cleared on quit.")
-                except Exception as e:
-                    print("[Quit Wipe] Error wiping data:", e)
         
                 print("\n" + "="*70)
                 print("[Darkelf] Shutdown complete - all data wiped")
