@@ -1,4 +1,4 @@
-# 🕶️ Darkelf Cocoa Browser v3.10
+# 🕶️ Darkelf Cocoa Browser v3.11
 
 ![License](https://img.shields.io/badge/license-LGPL--3.0-green)
 ![Python](https://img.shields.io/badge/python-3.11+-blue)
