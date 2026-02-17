@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v3.10 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v3.11 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -65,14 +65,18 @@ import os
 import sys, re, json, subprocess, threading
 from dataclasses import dataclass
 from typing import List
+import hashlib
+import zipfile
+import datetime
 import objc
 import secrets
 import atexit
 import warnings
+import AppKit
 from collections import deque
 from datetime import datetime
 from typing import Dict, List, Set, Optional
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, quote_plus
 from objc import ObjCPointerWarning
 
 
@@ -87,12 +91,11 @@ from Cocoa import (
     NSToolbarFlexibleSpaceItemIdentifier, NSApplicationActivationPolicyRegular
 )
 from WebKit import (
-    WKWebView, WKWebViewConfiguration, WKUserContentController, WKUserScript, WKPreferences,
-    WKWebsiteDataStore, WKNavigationActionPolicyAllow, WKNavigationActionPolicyCancel, WKNavigationTypeReload, WKNavigationType, WKUserScript
+    WKWebView, WKWebViewConfiguration, WKUserContentController, WKUserScript, WKPreferences, WKContentRuleListStore, WKWebsiteDataStore, WKNavigationActionPolicyAllow, WKNavigationActionPolicyCancel, WKNavigationTypeReload, WKNavigationType, WKUserScript
 )
 from Foundation import NSURL, NSURLRequest, NSMakeRect, NSNotificationCenter, NSDate, NSTimer, NSObject, NSUserDefaults, NSRegistrationDomain
 
-from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttributedString, NSAlert, NSAlertStyleCritical, NSColor, NSAppearance, NSAnimationContext, NSViewWidthSizable, NSViewHeightSizable
+from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttributedString, NSAlert, NSAlertStyleCritical, NSColor, NSAppearance, NSAnimationContext, NSViewWidthSizable, NSViewHeightSizable, NSAppearance, NSEventModifierFlagCommand, NSEventModifierFlagShift, NSSavePanel, NSBitmapImageRep, NSMutableParagraphStyle, NSFont, NSAttributedString
 
 from WebKit import WKContentRuleListStore
 import json
@@ -482,41 +485,33 @@ class DarkelfMiniAISentinel:
             self._trigger_lockdown()
 
     def _trigger_lockdown(self):
-        """Activate defensive lockdown mode with full containment"""
+
         if self.lockdown_active:
             return
 
         self.lockdown_active = True
         self.lockdown_triggered_at = time.time()
 
-        print("\n" + "="*62)
         print("[MiniAI] 🔴 LOCKDOWN MODE ACTIVATED")
-        print("[MiniAI] Critical threat threshold exceeded")
-        print("[MiniAI] Initiating defensive containment...")
-        print("="*62 + "\n")
 
         if not hasattr(self, "browser_bridge"):
-            print("[MiniAI] No browser bridge attached.")
             return
 
         bridge = self.browser_bridge
 
         # ==============================
-        # 1️⃣ Stop All WebViews
+        # 1️⃣ Stop all WebViews
         # ==============================
         for tab in getattr(bridge, "tabs", []):
             try:
                 tab.view.stopLoading()
-            except Exception:
+            except:
                 pass
 
         # ==============================
-        # 2️⃣ Purge Website Data (Global)
+        # 2️⃣ Global Data Purge
         # ==============================
         try:
-            from Foundation import NSDate
-            from WebKit import WKWebsiteDataStore
-
             data_store = WKWebsiteDataStore.defaultDataStore()
 
             data_store.removeDataOfTypes_modifiedSince_completionHandler_(
@@ -532,38 +527,99 @@ class DarkelfMiniAISentinel:
                 NSDate.dateWithTimeIntervalSince1970_(0),
                 None
             )
+
         except Exception as e:
             print("[MiniAI] Data purge failed:", e)
 
         # ==============================
-        # 3️⃣ Create Ephemeral Lockdown WebView
+        # 3️⃣ Create Ephemeral Lockdown View
         # ==============================
         try:
-            from WebKit import (
-                WKWebView,
-                WKWebViewConfiguration,
-                WKWebsiteDataStore
-            )
-            from AppKit import (
-                NSViewWidthSizable,
-                NSViewHeightSizable
-            )
-
             # Remove old views
             for tab in getattr(bridge, "tabs", []):
                 try:
                     tab.view.removeFromSuperview()
-                except Exception:
+                except:
                     pass
 
             bridge.tabs.clear()
             bridge.active = -1
 
-            # Non-persistent configuration
             config = WKWebViewConfiguration.alloc().init()
             config.setWebsiteDataStore_(
                 WKWebsiteDataStore.nonPersistentDataStore()
             )
+
+            # ==============================
+            # 4️⃣ Inject Engine-Level Countdown
+            # ==============================
+
+            countdown_js = """
+    (function(){
+
+    let seconds = 120;
+
+    function update(){
+        const el  = document.getElementById("countdown");
+        const el2 = document.getElementById("countdown2");
+
+        if(el)  el.textContent  = seconds;
+        if(el2) el2.textContent = seconds;
+    }
+
+    function wipe(){
+        try {
+            localStorage.clear();
+            sessionStorage.clear();
+
+            document.cookie.split(";").forEach(function(c) {
+                document.cookie = c
+                  .replace(/^ +/, "")
+                  .replace(/=.*/, "=;expires=" + new Date(0).toUTCString() + ";path=/");
+            });
+
+            if(window.webkit &&
+               window.webkit.messageHandlers &&
+               window.webkit.messageHandlers.lockdownComplete){
+                window.webkit.messageHandlers.lockdownComplete.postMessage("terminate");
+            }
+
+            document.body.innerHTML =
+                "<h1 style='color:#34C759;text-align:center;margin-top:20%'>LOCKDOWN COMPLETE</h1>";
+
+        } catch(e){}
+    }
+
+    function start(){
+        update();
+
+        const interval = setInterval(function(){
+            seconds--;
+
+            if(seconds <= 0){
+                seconds = 0;
+                update();
+                clearInterval(interval);
+                wipe();
+                return;
+            }
+
+            update();
+        },1000);
+    }
+
+    document.addEventListener("DOMContentLoaded", start);
+
+    })();
+    """
+
+            user_script = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
+                countdown_js,
+                WKUserScriptInjectionTimeAtDocumentEnd,
+                True
+            )
+
+            config.userContentController().addUserScript_(user_script)
 
             lockdown_view = WKWebView.alloc().initWithFrame_configuration_(
                 bridge.contentView().bounds(),
@@ -576,7 +632,7 @@ class DarkelfMiniAISentinel:
 
             bridge.contentView().addSubview_(lockdown_view)
 
-            # Replace active tab manually
+            # Create new tab object
             Tab = type("Tab", (), {})
             new_tab = Tab()
             new_tab.view = lockdown_view
@@ -589,27 +645,28 @@ class DarkelfMiniAISentinel:
             return
 
         # ==============================
-        # 4️⃣ Inject Lockdown Page
+        # 5️⃣ Load Lockdown HTML
         # ==============================
         try:
             lockdown_view.loadHTMLString_baseURL_(
-                self._lockout_html(120),  # pass countdown value
+                self._lockout_html(),
                 None
             )
-            print("[MiniAI] Lockdown page injected (ephemeral mode).")
+            print("[MiniAI] Lockdown page injected (ephemeral, secure mode).")
         except Exception as e:
             print("[MiniAI] Lockout page failed:", e)
 
-    # =====================================================
-    # LOCKOUT PAGE BRIDGE (CALL INTO WEBKIT LAYER)
-    # =====================================================
+        # =====================================================
+        # LOCKOUT PAGE BRIDGE (CALL INTO WEBKIT LAYER)
+        # =====================================================
+        
     def _lockout_html(self) -> str:
         return """
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta http-equiv="Content-Security-Policy"
-content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+content="default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; base-uri 'none'; form-action 'none';">
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Darkelf Browser — Security Lockdown</title>
@@ -619,14 +676,11 @@ content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inlin
   --bg:#07080d;
   --green:#34C759;
   --cyan:#04a8c8;
-  --border:rgba(255,255,255,.10);
   --text:#eef2f6;
   --muted:#9aa3ad;
 }
-
 *{box-sizing:border-box}
 html,body{height:100%}
-
 body{
   margin:0;
   font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
@@ -634,43 +688,8 @@ body{
   display:flex;
   justify-content:center;
   align-items:center;
-  overflow:hidden;
   background:var(--bg);
 }
-
-/* Aurora Background */
-body::before,
-body::after{
-  content:"";
-  position:absolute;
-  inset:-20%;
-  z-index:-2;
-  background:
-    radial-gradient(900px 500px at 20% 10%, rgba(4,168,200,.15), transparent 60%),
-    radial-gradient(800px 500px at 80% 20%, rgba(52,199,89,.20), transparent 60%),
-    radial-gradient(600px 400px at 50% 90%, rgba(52,199,89,.10), transparent 60%);
-  animation:drift 36s ease-in-out infinite;
-}
-body::after{
-  animation-duration:54s;
-  animation-direction:reverse;
-  opacity:.6;
-}
-
-@keyframes drift{
-  0%{transform:translate(0,0)}
-  50%{transform:translate(-6%,-4%)}
-  100%{transform:translate(0,0)}
-}
-
-.vignette{
-  position:absolute;
-  inset:0;
-  pointer-events:none;
-  background:radial-gradient(circle at center, transparent 55%, rgba(0,0,0,.6));
-  z-index:-1;
-}
-
 .container{
   max-width:640px;
   background:rgba(0,0,0,.65);
@@ -679,211 +698,36 @@ body::after{
   padding:48px;
   text-align:center;
   box-shadow:0 0 60px rgba(52,199,89,.25);
-  backdrop-filter:blur(14px);
 }
-
-.shield{
-  width:70px;
-  height:70px;
-  margin:0 auto;
-  color:var(--green);
-  filter:drop-shadow(0 0 18px rgba(52,199,89,.55));
-  animation:pulse 2.2s infinite;
-}
-
-@keyframes pulse{
-  0%,100%{transform:scale(1);opacity:1}
-  50%{transform:scale(1.08);opacity:.85}
-}
-
 h1{
-  margin-top:20px;
   font-size:2rem;
   font-weight:900;
-  letter-spacing:.08em;
   color:var(--green);
 }
-
 .timer{
   margin-top:30px;
   font-size:4rem;
   font-weight:900;
   color:var(--green);
-  text-shadow:0 0 25px rgba(52,199,89,.8);
 }
-
-.warning{
-  margin-top:30px;
-  font-size:.95rem;
-  color:var(--muted);
-  line-height:1.6;
-}
-
 .status{
   margin-top:28px;
-  padding:16px;
-  border-radius:14px;
-  background:rgba(52,199,89,.08);
-  border:1px solid rgba(52,199,89,.25);
-  font-size:.85rem;
-  letter-spacing:.05em;
+  font-size:.9rem;
+  color:var(--muted);
 }
 </style>
 </head>
 
 <body>
-
-<div class="vignette"></div>
-
 <div class="container">
-  <div class="shield">
-    <!-- Shield Lock SVG -->
-    <svg viewBox="0 0 24 24" width="70" height="70"
-         fill="currentColor"
-         xmlns="http://www.w3.org/2000/svg">
-      <path d="M12 2L4 5V11C4 16 7.5 20.5 12 22C16.5 20.5 20 16 20 11V5L12 2Z"/>
-      <rect x="9" y="10" width="6" height="5" rx="1" fill="#07080d"/>
-      <path d="M10 10V8C10 6.9 10.9 6 12 6C13.1 6 14 6.9 14 8V10"
-            stroke="#07080d" stroke-width="1.5"/>
-    </svg>
-  </div>
-
   <h1>SECURITY LOCKDOWN</h1>
-
   <div class="timer" id="countdown">120</div>
-
-  <div class="warning">
-    Critical intrusion patterns detected.<br>
-    Darkelf MiniAI entering secure containment mode.<br><br>
-    Browser data will be wiped and session terminated.
+  <div class="status">
+    Session ends in <span id="countdown2">120</span> seconds<br>
+    Storage clearing in progress<br>
+    Zero persistence enforcement
   </div>
-
-<div class="status">
-
-  <!-- Hourglass -->
-  <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
-    <svg viewBox="0 0 24 24" width="18" height="18"
-         fill="currentColor"
-         xmlns="http://www.w3.org/2000/svg">
-      <path d="M6 2h12v4c0 3-2 4-4 6 2 2 4 3 4 6v4H6v-4c0-3 2-4 4-6-2-2-4-3-4-6V2z"/>
-    </svg>
-    <span>Session ends in <span id="countdown2">120</span> seconds</span>
-  </div>
-
-  <!-- Trash -->
-  <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:6px;">
-    <svg viewBox="0 0 24 24" width="18" height="18"
-         fill="currentColor"
-         xmlns="http://www.w3.org/2000/svg">
-      <path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM6 9h2v8H6V9z"/>
-    </svg>
-    <span>Storage clearing in progress</span>
-  </div>
-
-  <!-- Lock -->
-  <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:6px;">
-    <svg viewBox="0 0 24 24" width="18" height="18"
-         fill="currentColor"
-         xmlns="http://www.w3.org/2000/svg">
-      <path d="M12 2a4 4 0 00-4 4v3H6a2 2 0 00-2 2v9h16v-9a2 2 0 00-2-2h-2V6a4 4 0 00-4-4zm-2 7V6a2 2 0 114 0v3h-4z"/>
-    </svg>
-    <span>Zero persistence enforcement</span>
-  </div>
-
 </div>
-
-<script>
-(function(){
-
-let seconds = 120;
-const el = document.getElementById("countdown");
-const el2 = document.getElementById("countdown2");
-
-let interval = null;
-
-function updateDisplay(value){
-    if (el)  el.textContent  = value;
-    if (el2) el2.textContent = value;
-}
-
-function wipeAndFinish(){
-    try {
-        localStorage.clear();
-        sessionStorage.clear();
-
-        document.cookie.split(";").forEach(function(c) {
-            document.cookie = c
-              .replace(/^ +/, "")
-              .replace(/=.*/, "=;expires=" + new Date(0).toUTCString() + ";path=/");
-        });
-
-        if (window.indexedDB && indexedDB.databases) {
-            indexedDB.databases().then(dbs => {
-                dbs.forEach(db => indexedDB.deleteDatabase(db.name));
-            });
-        }
-
-        if (window.webkit &&
-            window.webkit.messageHandlers &&
-            window.webkit.messageHandlers.lockdownComplete) {
-            window.webkit.messageHandlers.lockdownComplete.postMessage("terminate");
-        }
-
-        const container = document.querySelector(".container");
-        if (container) {
-            container.innerHTML = `
-                <div class="shield">
-                  <svg viewBox="0 0 24 24" width="70" height="70"
-                       fill="currentColor"
-                       xmlns="http://www.w3.org/2000/svg">
-                    <path d="M12 2L4 5V11C4 16 7.5 20.5 12 22C16.5 20.5 20 16 20 11V5L12 2Z"/>
-                    <path d="M8 12L11 15L16 9"
-                          stroke="#07080d"
-                          stroke-width="2"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"/>
-                  </svg>
-                </div>
-                <h1>LOCKDOWN COMPLETE</h1>
-                <div class="warning">
-                    All session data wiped.<br>
-                    Darkelf Browser secured.
-                </div>
-            `;
-        }
-
-    } catch(e){}
-}
-
-function startCountdown(){
-    updateDisplay(seconds);
-
-    interval = setInterval(() => {
-        seconds--;
-
-        if (seconds <= 0) {
-            seconds = 0;
-            updateDisplay(seconds);
-            clearInterval(interval);
-            wipeAndFinish();
-            return;
-        }
-
-        updateDisplay(seconds);
-
-    }, 1000);
-}
-
-startCountdown();
-
-window.addEventListener('beforeunload', function(e){
-    e.preventDefault();
-    e.returnValue = '';
-});
-
-})();
-</script>
-
 </body>
 </html>
 """
@@ -2539,11 +2383,41 @@ WEBRTC_DEFENSE_JS = r'''
 
 CANVAS_DEFENSE_JS = r'''
 (function() {
-    function addNoise(data) {
-        for (var i = 0; i < data.length; i++) {
-            data[i] = Math.min(255, Math.max(0, data[i] + Math.floor(Math.random() * 8 - 4)));
+
+    // --- Generate per-tab seed (persists across reload, resets on tab close) ---
+    function generateSeed() {
+        const array = new Uint32Array(1);
+        crypto.getRandomValues(array);
+        return array[0];
+    }
+
+    if (!sessionStorage.getItem('canvasSeed')) {
+        sessionStorage.setItem('canvasSeed', generateSeed());
+    }
+
+    const SEED = parseInt(sessionStorage.getItem('canvasSeed'), 10);
+
+    // --- Simple deterministic PRNG (Mulberry32) ---
+    function mulberry32(a) {
+        return function() {
+            var t = a += 0x6D2B79F5;
+            t = Math.imul(t ^ t >>> 15, t | 1);
+            t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+            return ((t ^ t >>> 14) >>> 0) / 4294967296;
         }
     }
+
+    const rand = mulberry32(SEED);
+
+    function addNoise(data) {
+        for (var i = 0; i < data.length; i++) {
+            // deterministic noise
+            const noise = Math.floor(rand() * 8 - 4);
+            data[i] = Math.min(255, Math.max(0, data[i] + noise));
+        }
+    }
+
+    // --- Hook toDataURL ---
     var origToDataURL = HTMLCanvasElement.prototype.toDataURL;
     HTMLCanvasElement.prototype.toDataURL = function() {
         try {
@@ -2560,6 +2434,8 @@ CANVAS_DEFENSE_JS = r'''
         } catch(e) {}
         return origToDataURL.apply(this, arguments);
     };
+
+    // --- Hook toBlob ---
     var origToBlob = HTMLCanvasElement.prototype.toBlob;
     HTMLCanvasElement.prototype.toBlob = function(callback, type, quality) {
         try {
@@ -2578,15 +2454,23 @@ CANVAS_DEFENSE_JS = r'''
         } catch(e) {}
         origToBlob.apply(this, arguments);
     };
+
+    // --- Hook getImageData ---
     var origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
     CanvasRenderingContext2D.prototype.getImageData = function(x, y, w, h) {
         var imageData = origGetImageData.call(this, x, y, w, h);
         addNoise(imageData.data);
         return imageData;
     };
+
     try {
-        Object.defineProperty(window, 'canvasFingerprintDefended', {value: true, writable: false, configurable: false});
+        Object.defineProperty(window, 'canvasFingerprintDefended', {
+            value: true,
+            writable: false,
+            configurable: false
+        });
     } catch(e){}
+
 })();
 '''
 
@@ -2647,10 +2531,9 @@ PERFORMANCE_DEFENSE_JS = r'''
 CORE_JS = r'''
 (function() {
 
-    // ===============================
-    // 1️⃣ MiniAI Network Monitoring
-    // ===============================
-
+    // ==========================================
+    // 1️⃣ Network Monitoring (MiniAI)
+    // ==========================================
     const sendToMiniAI = function(url) {
         try {
             if (window.webkit &&
@@ -2658,102 +2541,71 @@ CORE_JS = r'''
                 window.webkit.messageHandlers.netlog) {
 
                 window.webkit.messageHandlers.netlog.postMessage({
-                    url: String(url),
-                    headers: {}
+                    url: String(url)
                 });
             }
         } catch(e){}
     };
 
     // fetch interceptor
-    const origFetch = window.fetch;
-    window.fetch = function(...args) {
-        try { sendToMiniAI(args[0]); } catch(e){}
-        return origFetch.apply(this, args);
-    };
+    if (window.fetch) {
+        const origFetch = window.fetch;
+        window.fetch = function(...args) {
+            try { sendToMiniAI(args[0]); } catch(e){}
+            return origFetch.apply(this, args);
+        };
+    }
 
     // XHR interceptor
-    const origOpen = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function(method, url) {
-        try { sendToMiniAI(url); } catch(e){}
-        return origOpen.apply(this, arguments);
-    };
+    if (window.XMLHttpRequest) {
+        const origOpen = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function(method, url) {
+            try { sendToMiniAI(url); } catch(e){}
+            return origOpen.apply(this, arguments);
+        };
+    }
 
-    // ===============================
-    // 2️⃣ Block window.open
-    // ===============================
-    window.open = function() {
-        console.warn("[Darkelf] window.open blocked");
-        return null;
-    };
-
-    // ===============================
-    // 3️⃣ Freeze WebRTC
-    // ===============================
+    // ==========================================
+    // 2️⃣ Controlled window.open Block
+    // ==========================================
     try {
-        Object.defineProperty(window, "RTCPeerConnection", {
-            get: function() { return undefined; },
-            configurable: false
-        });
-
-        Object.defineProperty(window, "webkitRTCPeerConnection", {
-            get: function() { return undefined; },
-            configurable: false
-        });
-
-        Object.defineProperty(navigator, "mediaDevices", {
-            get: function() { return undefined; },
-            configurable: false
-        });
+        const origOpen = window.open;
+        window.open = function() {
+            console.warn("[Darkelf] window.open blocked");
+            return null;
+        };
     } catch(e){}
 
-    // ===============================
-    // 4️⃣ Canvas Fingerprint Noise
-    // ===============================
+    // ==========================================
+    // 3️⃣ OffscreenCanvas Guard (minimal)
+    // ==========================================
     try {
-        if (window.HTMLCanvasElement) {
-            const orig = HTMLCanvasElement.prototype.toDataURL;
+        if (window.OffscreenCanvas &&
+            OffscreenCanvas.prototype &&
+            OffscreenCanvas.prototype.convertToBlob) {
 
-            Object.defineProperty(HTMLCanvasElement.prototype, "toDataURL", {
-                value: function() {
-                    try {
-                        const ctx = this.getContext("2d");
-                        if (ctx) {
-                            ctx.fillStyle = "rgba(0,0,0,0.01)";
-                            ctx.fillRect(0,0,1,1);
-                        }
-                    } catch(e){}
-                    return orig.apply(this, arguments);
-                },
-                writable: false,
-                configurable: false
-            });
+            const origConvert = OffscreenCanvas.prototype.convertToBlob;
+
+            OffscreenCanvas.prototype.convertToBlob = function() {
+                return origConvert.apply(this, arguments);
+            };
         }
     } catch(e){}
 
-    // ===============================
-    // 5️⃣ OffscreenCanvas Protection
-    // ===============================
+    // ==========================================
+    // 4️⃣ Optional WebSocket Restriction
+    // ==========================================
     try {
-        if (window.OffscreenCanvas) {
-            Object.defineProperty(OffscreenCanvas.prototype, "convertToBlob", {
-                value: function() {
-                    return Promise.resolve(new Blob());
-                },
-                writable: false,
-                configurable: false
-            });
-        }
-    } catch(e){}
+        if (window.WebSocket) {
+            const RealWebSocket = window.WebSocket;
 
-    // ===============================
-    // 6️⃣ Optional: Block WebSocket
-    // ===============================
-    try {
-        Object.defineProperty(window, "WebSocket", {
-            get: function() { return undefined; },
-            configurable: false
-        });
+            window.WebSocket = function(url, protocols) {
+                console.warn("[Darkelf] WebSocket blocked:", url);
+                throw new Error("WebSocket disabled by Darkelf");
+            };
+
+            window.WebSocket.prototype = RealWebSocket.prototype;
+        }
     } catch(e){}
 
 })();
@@ -2788,6 +2640,7 @@ class HoverButton(NSButton):
 @dataclass
 class Tab:
     view: WKWebView
+    data_store: WKWebsiteDataStore
     url: str = ""
     host: str = "new"
     canvas_seed: int = None
@@ -2850,10 +2703,12 @@ class Browser(NSObject):
         self._build_tabbar()
         self._add_tab(home=True)
         self._bring_tabbar_to_front()
-
+        
         self.window.makeKeyAndOrderFront_(None)
-        NSApp().activateIgnoringOtherApps_(True)
+    
+        NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
 
+        self.window.setDelegate_(self)
         self._install_key_monitor()
 
         try:
@@ -2866,76 +2721,7 @@ class Browser(NSObject):
             )
         except Exception:
             pass
-            
-        self._start_cookie_scrubber()
 
-        return self
-                    
-    def _start_cookie_scrubber(self):
-        """Start periodic cookie scrubbing using non-persistent data store only."""
-        try:
-            # Ensure we have a non-persistent data store
-            if not hasattr(self, "_data_store") or self._data_store is None:
-                self._data_store = WKWebsiteDataStore.nonPersistentDataStore()
-
-            self._cookie_store = self._data_store.httpCookieStore()
-        except Exception:
-            self._cookie_store = None
-    
-        try:
-            self._scrub_cookies()
-        except Exception:
-            pass
-
-        try:
-            self._cookie_timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-                5.0,
-                self,
-                "actScrubCookies:",
-                None,
-                True
-            )
-        except Exception:
-            self._cookie_timer = None
-
-
-    def actScrubCookies_(self, timer):
-        try:
-            self._scrub_cookies()
-        except Exception:
-            pass
-
-    def _scrub_cookies(self):
-        try:
-            store = getattr(self, "_cookie_store", None)
-            if not store:
-                # DO NOT fallback to defaultDataStore (persistent)
-                return
-
-            def _got(cookies):
-                try:
-                    for c in (cookies or []):
-                        try:
-                            store.deleteCookie_(c)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-
-            store.getAllCookiesWithCompletionHandler_(_got)
-
-        except Exception:
-            pass
-
-
-    def _stop_cookie_scrubber(self):
-        """Invalidate the NSTimer so it stops firing before app exit."""
-        try:
-            if getattr(self, "_cookie_timer", None):
-                self._cookie_timer.invalidate()
-                self._cookie_timer = None
-        except Exception:
-            pass
                         
     def actToggleJS_(self, _):
         """Toggle JavaScript on/off and reload the active tab."""
@@ -3092,7 +2878,6 @@ class Browser(NSObject):
         return b
                                         
     def _make_toolbar(self):
-        from AppKit import NSColor, NSAppearance
         tb = NSToolbar.alloc().initWithIdentifier_("DarkelfToolbar")
         tb.setDisplayMode_(2)
         tb.setSizeMode_(1)
@@ -3190,8 +2975,6 @@ class Browser(NSObject):
             (self.btn_fwd, 'actFwd:'),
             (self.btn_reload, 'actReload:'),
             (self.btn_home, 'actHome:'),
-            (self.btn_newtab, 'actNewTab:'),
-            (self.btn_close, 'actCloseTab:'),
             (self.btn_zoom_in, 'actZoomIn:'),
             (self.btn_zoom_out, 'actZoomOut:'),
             (self.btn_full, 'actFull:'),
@@ -3229,7 +3012,6 @@ class Browser(NSObject):
         
         # Green border on focus (see your snippet)
         try:
-            from AppKit import NSColor
             self.addr.setFocusRingType_(1)  # NSFocusRingTypeNone
             self.addr.setWantsLayer_(True)
             self.addr.layer().setBorderColor_(
@@ -3241,7 +3023,6 @@ class Browser(NSObject):
 
         # --- Keep address field text white in both Dark and Light macOS modes ---
         try:
-            from AppKit import NSAppearance
             darkAqua = NSAppearance.appearanceNamed_("NSAppearanceNameDarkAqua")
             if darkAqua and hasattr(self.addr, "setAppearance_"):
                 self.addr.setAppearance_(darkAqua)
@@ -3270,8 +3051,6 @@ class Browser(NSObject):
             "NSToolbarFlexibleSpaceItem",
             addr_item,
             "NSToolbarFlexibleSpaceItem",
-            item('NewTab', self.btn_newtab),
-            item('CloseTab', self.btn_close),
             item('ZoomIn', self.btn_zoom_in),
             item('ZoomOut', self.btn_zoom_out),
             item('Full', self.btn_full),
@@ -3355,6 +3134,8 @@ class Browser(NSObject):
             self.btn_tab_add.setImagePosition_(0)   # NSImageOnly
             self.btn_tab_add.setBordered_(False)
             self.btn_tab_add.setBezelStyle_(1)
+            self.btn_tab_add.setTitle_("+")
+            
             if hasattr(self.btn_tab_add, "setImageScaling_"):
                 self.btn_tab_add.setImageScaling_(1)  # NSImageScaleProportionallyDown
         except Exception:
@@ -3409,6 +3190,7 @@ class Browser(NSObject):
 
             tb = self.tabbar.frame()
 
+            # Position "+" directly after the last tab
             self.btn_tab_add.setFrame_(
                 ((tb.size.width - 32.0, (tab_h - tab_btn_height) / 2.0),
                  (28.0, tab_btn_height))
@@ -3435,6 +3217,12 @@ class Browser(NSObject):
                 close.setEnabled_(True)
 
                 x += tab_w + gap
+                
+                # Position "+" right after last tab
+                self.btn_tab_add.setFrame_(
+                    ((x, (tab_h - tab_btn_height) / 2.0),
+                     (28.0, tab_btn_height))
+                )
 
         except Exception as e:
             print("Layout error:", e)
@@ -3465,7 +3253,7 @@ class Browser(NSObject):
 
                 close.setImage_(None)
                 close.setAttributedTitle_(NSAttributedString.alloc().initWithString_attributes_(
-                    "•",
+                    "x",
                     {
                         "NSFont": NSFont.boldSystemFontOfSize_(14.0),
                         "NSParagraphStyle": style,
@@ -3497,8 +3285,6 @@ class Browser(NSObject):
 
             b = HoverButton.alloc().init()
             try:
-                from AppKit import NSMutableParagraphStyle, NSFont, NSAttributedString
-
                 style = NSMutableParagraphStyle.alloc().init()
                 style.setAlignment_(1)
                 style.setFirstLineHeadIndent_(26.0)
@@ -3570,9 +3356,9 @@ class Browser(NSObject):
         Limited to HTTPS and file:// origins to avoid breaking third-party sites.
         """
         try:
-            from WebKit import WKUserScript
+            some_call()
         except Exception:
-            return
+            pass
 
         js = f"""
         (() => {{
@@ -3606,9 +3392,9 @@ class Browser(NSObject):
         for pages we control. Limited to file:// and HTTPS origins.
         """
         try:
-            from WebKit import WKUserScript
+            some_call()
         except Exception:
-            return
+            pass
 
         js = f"""
         setTimeout(() => {{
@@ -3644,9 +3430,9 @@ class Browser(NSObject):
         Limited to file:// and HTTPS origins to avoid breaking third-party sites.
         """
         try:
-            from WebKit import WKUserScript
+            some_call()
         except Exception:
-            return
+            pass
 
         js = f"""
         setTimeout(() => {{
@@ -3681,7 +3467,7 @@ class Browser(NSObject):
     @objc.python_method
     def _inject_core_scripts(self, ucc):
         try:
-            seed = getattr(self, "current_canvas_seed", None) or 123456789
+           # seed = getattr(self, "current_canvas_seed", None) or 123456789
 
             def _add(src):
                 try:
@@ -3786,23 +3572,24 @@ class Browser(NSObject):
             
     def _new_wk(self) -> WKWebView:
 
-    # ---------------------------------------
-    # Determine if this is homepage
-    # ---------------------------------------
+        # ---------------------------------------
+        # Determine if this is homepage
+        # ---------------------------------------
         is_home = bool(getattr(self, "loading_home", False))
 
-    # ---------------------------------------
-    # Configuration
-    # ---------------------------------------
+        # ---------------------------------------
+        # Configuration
+        # ---------------------------------------
         cfg = WKWebViewConfiguration.alloc().init()
 
-    # Shared non-persistent store (ephemeral)
-        if not hasattr(self, "_data_store") or self._data_store is None:
-            self._data_store = WKWebsiteDataStore.nonPersistentDataStore()
+        # ---------------------------------------
+        # Per-Tab Ephemeral Data Store
+        # ---------------------------------------
 
-        cfg.setWebsiteDataStore_(self._data_store)
+        tab_store = WKWebsiteDataStore.nonPersistentDataStore()
+        cfg.setWebsiteDataStore_(tab_store)
 
-        if self._data_store.isPersistent():
+        if tab_store.isPersistent():
             raise RuntimeError("Darkelf security failure: persistent data store detected")
 
     # ---------------------------------------
@@ -3899,7 +3686,7 @@ class Browser(NSObject):
         except Exception:
             pass
 
-        return web
+        return web, tab_store
         
     def webView_requestFullscreenForElement_completionHandler_(self, webview, element, completionHandler):
         print("🔥 WebKit requested element fullscreen")
@@ -3965,7 +3752,6 @@ class Browser(NSObject):
                                                     
     def _mount_webview(self, wk):
         """Mount the webview BELOW the tabbar so tabs never get covered."""
-        from AppKit import NSColor
 
         cv = self.window.contentView()
         tab_h = 34.0
@@ -4091,7 +3877,6 @@ class Browser(NSObject):
             # --- Optional: Block external script resources when JS is off ---
             try:
                 if not getattr(self, "js_enabled", True):
-                    from WebKit import WKContentRuleListStore
                     store = WKContentRuleListStore.defaultStore()
                     rule_text = '[{"trigger":{"url-filter":".*"},"action":{"type":"block","resource-type":["script"]}}]'
                     def _cb(rule_list, err):
@@ -4186,7 +3971,7 @@ class Browser(NSObject):
         print(f"[AddTab] Creating tab: home={home}, url={url or '(none)'}, js_enabled={getattr(self, 'js_enabled', True)}")
     
         self._nav = _NavDelegate.alloc().initWithOwner_(self)
-        wk = self._new_wk()
+        wk, store = self._new_wk()
         wk.setNavigationDelegate_(self._nav)
 
         if 0 <= self.active < len(self.tabs):
@@ -4200,13 +3985,16 @@ class Browser(NSObject):
 
         tab = Tab(
             view=wk,
+            data_store=store,
             url="",
             host="new",
             canvas_seed=getattr(self, "current_canvas_seed", None)
         )
         self.tabs.append(tab)
         self.active = len(self.tabs) - 1
-    
+        
+        tab.canvas_seed = secrets.randbits(32)
+
         if home:
             try:
                 self.addr.setStringValue_("")
@@ -4306,6 +4094,11 @@ class Browser(NSObject):
             
         try:
             wk.removeFromSuperview()
+        except Exception:
+            pass
+            
+        try:
+            tab.data_store = None
         except Exception:
             pass
 
@@ -4444,7 +4237,6 @@ class Browser(NSObject):
 
             # Build URL (your existing logic)
             if "://" not in text and "." not in text:
-                from urllib.parse import quote_plus
                 q = quote_plus(text)
                 url = "https://lite.duckduckgo.com/lite/?q=" + q
             elif "://" not in text:
@@ -4458,9 +4250,6 @@ class Browser(NSObject):
             print("[Go] Failed:", e)
 
     def actNuke_(self, sender):
-
-        from AppKit import NSAlert, NSAlertStyleCritical, NSApp
-        from WebKit import WKWebsiteDataStore
 
         # 🔴 Confirmation Alert
         alert = NSAlert.alloc().init()
@@ -4493,7 +4282,7 @@ class Browser(NSObject):
                         pass
 
                 self.tabs.clear()
-                self.active = 0
+                self.active = -1
 
                 # 2️⃣ Reset ephemeral store
                 self._data_store = WKWebsiteDataStore.nonPersistentDataStore()
@@ -4502,14 +4291,13 @@ class Browser(NSObject):
                 print("wipe error:", e)
 
             # 3️⃣ Shutdown browser cleanly
-            NSApp().terminate_(None)
+            NSApplication.sharedApplication().terminate_(None)
 
         # Show confirmation sheet
         alert.beginSheetModalForWindow_completionHandler_(self.window, on_response)
 
     def _storage_cleanup(self):
         try:
-            from WebKit import WKWebsiteDataStore
             store = WKWebsiteDataStore.nonPersistentDataStore()
             types = WKWebsiteDataStore.allWebsiteDataTypes()
 
@@ -4564,7 +4352,6 @@ class Browser(NSObject):
             pass
 
     def _install_key_monitor(self):
-        from AppKit import NSEventModifierFlagCommand, NSEventModifierFlagShift
 
         def handler(evt):
             try:
@@ -4602,12 +4389,22 @@ class Browser(NSObject):
 
                 # 🔥 ⌘ + S  → Snapshot
                 if ch == "s":
-                    self.actSnapshot_(None)
+                    self.evidence_mode.showMenu()
                     return None
 
                 # 🔥 ⌘ + Shift + X  → Instant Exit (FIXED)
                 if ch.lower() == "x" and shift:
                     NSApp().terminate_(None)
+                    return None
+
+                # ➖ ⌘ + - → Zoom Out
+                if ch == "-":
+                    self.actZoomOut_(None)
+                    return None
+
+                # ➕ ⌘ + = (Shift gives +) → Zoom In
+                if ch == "=":
+                    self.actZoomIn_(None)
                     return None
 
             except Exception as e:
@@ -4622,12 +4419,6 @@ class Browser(NSObject):
             print("[Browser] __del__ called, cleaning up timers and observers.")
         except Exception:
             pass
-
-        # Invalidate cookie timer
-        try:
-            self._stop_cookie_scrubber()
-        except Exception as e:
-            print("[Browser] Failed to stop cookie scrubber in __del__:", e)
 
         # Remove resize notification observer
         try:
@@ -4682,14 +4473,31 @@ class Browser(NSObject):
             print("wipe error:", e)
 
     def windowWillClose_(self, notification):
+
+        print("[Darkelf] 🔴 Window close triggered — FULL TERMINATION")
+
         try:
-            self._stop_cookie_scrubber()
+            # Shutdown MiniAI cleanly
+            if hasattr(self, "mini_ai") and self.mini_ai:
+                self.mini_ai.shutdown()
         except Exception:
             pass
 
+        try:
+            # Stop all webviews
+            for tab in getattr(self, "tabs", []):
+                try:
+                    tab.view.stopLoading()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        NSApplication.sharedApplication().terminate_(None)
+
     def applicationWillTerminate_(self, notification):
         try:
-            self._stop_cookie_scrubber()
+            pass
         except Exception:
             pass
             
@@ -4699,14 +4507,12 @@ class Browser(NSObject):
 
             def handler(image, error):
                 if image and not error:
-                    from AppKit import NSSavePanel
                     panel = NSSavePanel.savePanel()
                     panel.setNameFieldStringValue_("darkelf_snapshot.png")
 
                     if panel.runModal() == 1:
                         url = panel.URL()
                         tiff = image.TIFFRepresentation()
-                        from AppKit import NSBitmapImageRep
                         rep = NSBitmapImageRep.imageRepWithData_(tiff)
                         png = rep.representationUsingType_properties_(4, None)  # PNG
                         png.writeToURL_atomically_(url, True)
@@ -4808,7 +4614,7 @@ def main():
     except Exception as e:
         print("[Prefs] Failed to set volatile domain:", e)
 
-    from Cocoa import NSApplication
+
     app = NSApplication.sharedApplication()
     
     # ✅ PRE-COMPILE RULES BEFORE BROWSER STARTS
@@ -4816,7 +4622,7 @@ def main():
     ContentRuleManager.load_rules()
     
     # ✅ WAIT FOR ASYNC COMPILATION
-    import time
+
     time.sleep(3.0)  # Give WebKit time to compile 121 rules
     
     if ContentRuleManager._rule_list:
