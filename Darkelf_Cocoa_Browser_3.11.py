@@ -4389,7 +4389,7 @@ class Browser(NSObject):
 
                 # 🔥 ⌘ + S  → Snapshot
                 if ch == "s":
-                    self.evidence_mode.showMenu()
+                    self.actSnapshot_(None)
                     return None
 
                 # 🔥 ⌘ + Shift + X  → Instant Exit (FIXED)
