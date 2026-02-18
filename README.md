@@ -57,7 +57,8 @@ Designed for privacy-conscious daily browsing without Tor complexity.
 -   MiniAI passive monitoring
 -   Native macOS AppKit interface
 -   Keyboard hotkeys
--   Per Tab Isolation/Canvas Signatures change on Boot-up and Per-Tab! Not on Reload.
+-   Per Tab Isolation/
+-   Canvas Signatures change on Boot-up and Per-Tab! Not on Reload.
 
 ------------------------------------------------------------------------
 
