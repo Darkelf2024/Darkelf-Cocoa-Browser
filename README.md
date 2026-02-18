@@ -150,7 +150,7 @@ Tested:
 | Reload        | ⌘R       |
 | Address Bar   | ⌘L       |
 | Screenshot    | ⌘S       |
-| Instant Exit  | ⌘⇧X      |
+| Instant Exit  | ⌘ShiftX  |
 
 
 ------------------------------------------------------------------------
