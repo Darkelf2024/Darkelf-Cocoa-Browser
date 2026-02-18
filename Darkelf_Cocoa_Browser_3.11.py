@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v3.11 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.0 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -2382,96 +2382,108 @@ WEBRTC_DEFENSE_JS = r'''
 '''
 
 CANVAS_DEFENSE_JS = r'''
-(function() {
+(function(SEED) {
 
-    // --- Generate per-tab seed (persists across reload, resets on tab close) ---
-    function generateSeed() {
-        const array = new Uint32Array(1);
-        crypto.getRandomValues(array);
-        return array[0];
+    // ---- 32-bit deterministic hash per pixel ----
+    function pixelNoise(seed, index) {
+        let x = seed ^ index;
+        x = Math.imul(x ^ (x >>> 15), 0x85ebca6b);
+        x = Math.imul(x ^ (x >>> 13), 0xc2b2ae35);
+        x = x ^ (x >>> 16);
+        return (x & 0xff);
     }
 
-    if (!sessionStorage.getItem('canvasSeed')) {
-        sessionStorage.setItem('canvasSeed', generateSeed());
+    function applyNoise(imageData) {
+        const data = imageData.data;
+        for (let i = 0; i < data.length; i++) {
+            const n = (pixelNoise(SEED, i) % 8) - 4;
+            data[i] = Math.min(255, Math.max(0, data[i] + n));
+        }
     }
 
-    const SEED = parseInt(sessionStorage.getItem('canvasSeed'), 10);
+    function cloneImageData(ctx, src) {
+        const copy = ctx.createImageData(src.width, src.height);
+        copy.data.set(src.data);
+        return copy;
+    }
 
-    // --- Simple deterministic PRNG (Mulberry32) ---
-    function mulberry32(a) {
+    function safePatch(proto, method, wrapper) {
+        const original = proto[method];
+        Object.defineProperty(proto, method, {
+            value: wrapper(original),
+            configurable: false,
+            writable: false
+        });
+    }
+
+    // ---- Patch toDataURL ----
+    safePatch(HTMLCanvasElement.prototype, 'toDataURL', function(original) {
         return function() {
-            var t = a += 0x6D2B79F5;
-            t = Math.imul(t ^ t >>> 15, t | 1);
-            t ^= t + Math.imul(t ^ t >>> 7, t | 61);
-            return ((t ^ t >>> 14) >>> 0) / 4294967296;
-        }
-    }
+            try {
+                const ctx = this.getContext('2d');
+                if (!ctx) return original.apply(this, arguments);
 
-    const rand = mulberry32(SEED);
+                const w = this.width;
+                const h = this.height;
+                if (!w || !h) return original.apply(this, arguments);
 
-    function addNoise(data) {
-        for (var i = 0; i < data.length; i++) {
-            // deterministic noise
-            const noise = Math.floor(rand() * 8 - 4);
-            data[i] = Math.min(255, Math.max(0, data[i] + noise));
-        }
-    }
+                const originalData = ctx.getImageData(0, 0, w, h);
+                const modifiedData = cloneImageData(ctx, originalData);
 
-    // --- Hook toDataURL ---
-    var origToDataURL = HTMLCanvasElement.prototype.toDataURL;
-    HTMLCanvasElement.prototype.toDataURL = function() {
-        try {
-            var ctx = this.getContext('2d');
-            var w = this.width, h = this.height;
-            if (ctx && w > 0 && h > 0) {
-                var imageData = ctx.getImageData(0, 0, w, h);
-                addNoise(imageData.data);
-                ctx.putImageData(imageData, 0, 0);
-                var result = origToDataURL.apply(this, arguments);
-                ctx.putImageData(imageData, 0, 0);
+                applyNoise(modifiedData);
+                ctx.putImageData(modifiedData, 0, 0);
+
+                const result = original.apply(this, arguments);
+
+                ctx.putImageData(originalData, 0, 0);
+
                 return result;
+            } catch (e) {
+                return original.apply(this, arguments);
             }
-        } catch(e) {}
-        return origToDataURL.apply(this, arguments);
-    };
+        };
+    });
 
-    // --- Hook toBlob ---
-    var origToBlob = HTMLCanvasElement.prototype.toBlob;
-    HTMLCanvasElement.prototype.toBlob = function(callback, type, quality) {
-        try {
-            var ctx = this.getContext('2d');
-            var w = this.width, h = this.height;
-            if (ctx && w > 0 && h > 0) {
-                var imageData = ctx.getImageData(0, 0, w, h);
-                addNoise(imageData.data);
-                ctx.putImageData(imageData, 0, 0);
-                origToBlob.call(this, function(blob) {
-                    ctx.putImageData(imageData, 0, 0);
+    // ---- Patch toBlob ----
+    safePatch(HTMLCanvasElement.prototype, 'toBlob', function(original) {
+        return function(callback, type, quality) {
+            try {
+                const ctx = this.getContext('2d');
+                if (!ctx) return original.apply(this, arguments);
+
+                const w = this.width;
+                const h = this.height;
+                if (!w || !h) return original.apply(this, arguments);
+
+                const originalData = ctx.getImageData(0, 0, w, h);
+                const modifiedData = cloneImageData(ctx, originalData);
+
+                applyNoise(modifiedData);
+                ctx.putImageData(modifiedData, 0, 0);
+
+                const self = this;
+
+                original.call(this, function(blob) {
+                    ctx.putImageData(originalData, 0, 0);
                     callback(blob);
                 }, type, quality);
-                return;
+
+            } catch (e) {
+                return original.apply(this, arguments);
             }
-        } catch(e) {}
-        origToBlob.apply(this, arguments);
-    };
+        };
+    });
 
-    // --- Hook getImageData ---
-    var origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
-    CanvasRenderingContext2D.prototype.getImageData = function(x, y, w, h) {
-        var imageData = origGetImageData.call(this, x, y, w, h);
-        addNoise(imageData.data);
-        return imageData;
-    };
+    // ---- Patch getImageData (non-mutating) ----
+    safePatch(CanvasRenderingContext2D.prototype, 'getImageData', function(original) {
+        return function(x, y, w, h) {
+            const imageData = original.call(this, x, y, w, h);
+            applyNoise(imageData);
+            return imageData;
+        };
+    });
 
-    try {
-        Object.defineProperty(window, 'canvasFingerprintDefended', {
-            value: true,
-            writable: false,
-            configurable: false
-        });
-    } catch(e){}
-
-})();
+})(__NATIVE_SEED__);
 '''
 
 WEBGL_DEFENSE_JS = r"""
@@ -3467,7 +3479,13 @@ class Browser(NSObject):
     @objc.python_method
     def _inject_core_scripts(self, ucc):
         try:
-           # seed = getattr(self, "current_canvas_seed", None) or 123456789
+            seed = getattr(self, "_current_canvas_seed", None)
+            if seed is None:
+                seed = secrets.randbits(32) & 0xFFFFFFFF
+
+            canvas_script = CANVAS_DEFENSE_JS.replace(
+                "__NATIVE_SEED__", str(seed)
+            )
 
             def _add(src):
                 try:
@@ -3478,7 +3496,7 @@ class Browser(NSObject):
 
             _add(WEBRTC_DEFENSE_JS)
             _add(WEBGL_DEFENSE_JS)
-            _add(CANVAS_DEFENSE_JS)
+            _add(canvas_script)
             _add(TIMEZONE_LOCALE_DEFENSE_JS)
             _add(FONTS_DEFENSE_JS)
             _add(MEDIA_ENUM_DEFENSE_JS)
@@ -3967,11 +3985,17 @@ class Browser(NSObject):
                 
     def _add_tab(self, url: str = "", home: bool = False):
         self.loading_home = bool(home)
-    
-        print(f"[AddTab] Creating tab: home={home}, url={url or '(none)'}, js_enabled={getattr(self, 'js_enabled', True)}")
-    
+
+        # 🔥 Generate seed FIRST
+        seed = secrets.randbits(32) & 0xFFFFFFFF
+        self._current_canvas_seed = seed   # temporary storage
+
+        print(f"[AddTab] Seed = {seed}")
+
         self._nav = _NavDelegate.alloc().initWithOwner_(self)
-        wk, store = self._new_wk()
+
+        wk, store = self._new_wk()   # injection happens here
+
         wk.setNavigationDelegate_(self._nav)
 
         if 0 <= self.active < len(self.tabs):
@@ -3982,19 +4006,20 @@ class Browser(NSObject):
 
         self._mount_webview(wk)
         self._bring_tabbar_to_front()
-
+        
         tab = Tab(
             view=wk,
             data_store=store,
             url="",
             host="new",
-            canvas_seed=getattr(self, "current_canvas_seed", None)
+            canvas_seed=seed
         )
+
         self.tabs.append(tab)
         self.active = len(self.tabs) - 1
         
-        tab.canvas_seed = secrets.randbits(32)
-
+        self._current_canvas_seed = None
+    
         if home:
             try:
                 self.addr.setStringValue_("")
@@ -4640,5 +4665,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
