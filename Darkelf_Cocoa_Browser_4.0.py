@@ -1933,6 +1933,7 @@ LOCAL_WEBSOCKET_POLICY_VALUE = (
 )
 
 class _NavDelegate(NSObject):
+
     def initWithOwner_(self, owner):
         self = objc.super(_NavDelegate, self).init()
         if self is None:
@@ -1946,12 +1947,15 @@ class _NavDelegate(NSObject):
             url = webView.URL()
             title = webView.title()
 
+            # --- Update matching tab ---
             for tab in browser.tabs:
                 if tab.view is webView:
+
                     # HARDENED HOME GUARD — never override Home
                     if url and url.absoluteString() == HOME_URL:
                         tab.url = HOME_URL
                         tab.host = "Darkelf Home"
+
                     else:
                         # UI update ONLY — no security escalation
                         if title:
@@ -1962,9 +1966,52 @@ class _NavDelegate(NSObject):
                         if url:
                             tab.url = url.absoluteString()
 
-                    browser._update_tab_buttons()
-                    browser._sync_addr()
-                    return
+                    break  # Stop after finding matching tab
+
+            browser._update_tab_buttons()
+            browser._sync_addr()
+
+            # --- Address bar color logic ---
+            try:
+                url = webView.URL()
+                color = NSColor.whiteColor()  # Default
+
+                if url and url.scheme():
+
+                    scheme = str(url.scheme()).lower()
+                    url_str = str(url.absoluteString())
+
+                    # 🔴 Blocked pages
+                    if url_str.startswith("about:blank#blocked"):
+                        color = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                            1.0, 0.2, 0.2, 1.0
+                        )
+
+                    # 🟢 HTTPS (or 🔴 if mixed content)
+                    elif scheme == "https" and url_str != HOME_URL:
+
+                        # 🔴 Mixed content detection
+                        if not webView.hasOnlySecureContent():
+                            color = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                                1.0, 0.2, 0.2, 1.0
+                            )
+                        else:
+                            color = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                                0.0, 0.85, 0.4, 1.0
+                            )
+
+
+                    # 🔵 HTTP
+                    elif scheme == "http":
+                        color = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                            0.2, 0.6, 1.0, 1.0
+                        )
+
+                browser.addr.setTextColor_(color)
+
+            except Exception:
+                browser.addr.setTextColor_(NSColor.whiteColor())
+
         except Exception as e:
             print(f"[NavDelegate] didFinish error: {e}")
 
@@ -1972,40 +2019,22 @@ class _NavDelegate(NSObject):
     def userContentController_didReceiveScriptMessage_(self, ucc, message):
 
         try:
-            if message.name() == "netlog" and message.body() == "darkelf_fullscreen":
-                print("🔥 FULLSCREEN TRIGGERED")
-
-                if hasattr(self, "owner") and hasattr(self.owner, "window"):
-                    self.owner.window.toggleFullScreen_(None)
-
-        except Exception as e:
-            print("Fullscreen error:", e)
-        return
-
-        try:
-            # --- ONLY HANDLE NETLOG MESSAGES ---
             if message.name() != "netlog":
                 return
 
-            data = message.body() or {}
+            body = message.body()
 
-            # Ensure it's a dictionary (avoid crashes)
-            if not isinstance(data, dict):
-                return
-    
-            url = str(data.get("url", ""))
-            headers = data.get("headers", {}) or {}
+            # MiniAI monitoring
+            if isinstance(body, dict):
+                url = str(body.get("url", ""))
+                headers = body.get("headers", {}) or {}
 
-            # Feed to MiniAI for passive monitoring
-            if (
-                hasattr(self, "_owner")
-                and hasattr(self._owner, "mini_ai")
-                and self._owner.mini_ai
-            ):
-                self._owner.mini_ai.monitor_network(url, headers)
+                if hasattr(self._owner, "mini_ai") and self._owner.mini_ai:
+                    self._owner.mini_ai.monitor_network(url, headers)
 
         except Exception as e:
-            print("[Netlog Handler] Error:", e)
+            print("[NavDelegate ScriptMessage] Error:", e)
+
 
     # ✅ MINI AI + HTTP BLOCK INTEGRATION
     def webView_decidePolicyForNavigationAction_decisionHandler_(
@@ -2110,8 +2139,20 @@ class _NavDelegate(NSObject):
                 decisionHandler(WKNavigationActionPolicyAllow)
 
     def webView_didFailProvisionalNavigation_withError_(self, webView, nav, error):
-        pass
-        
+        try:
+            browser = self._owner
+
+            # Only affect active tab
+            if webView is browser.tabs[browser.active].view:
+                browser.addr.setTextColor_(
+                    NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                        1.0, 0.2, 0.2, 1.0
+                    )
+                )
+
+        except Exception:
+            pass
+
 IS_MAC = sys.platform == "darwin"
 if not IS_MAC:
     print("[Darkelf] macOS only."); sys.exit(1)
@@ -3010,6 +3051,12 @@ class Browser(NSObject):
                         objc.super(AddressField, self).rightMouseDown_(event)
                 except Exception as e:
                     print("Context menu popover error:", e)
+                    
+            def textDidBeginEditing_(self, notification):
+                try:
+                    self.setTextColor_(NSColor.whiteColor())
+                except Exception:
+                    pass
 
         self.addr = AddressField.alloc().initWithFrame_owner_(((0, 0), (1080, 32)), self)
         try:
@@ -4476,23 +4523,35 @@ class Browser(NSObject):
             print("[MiniAI] Shutdown failed:", e)
                                 
     def _wipe_all_site_data(self):
+        """
+        Fully reset browser session:
+        - Tear down all webviews
+        - Clear tab list
+        - Reset active index
+        - Recreate fresh non-persistent data store
+        """
 
         if getattr(self, "_has_wiped", False):
             return
-        self._has_wiped = True
 
         try:
+            # Teardown all webviews safely
             for tab in list(self.tabs):
                 try:
-                    self._teardown_webview(tab.view)
+                    if hasattr(tab, "view") and tab.view:
+                        self._teardown_webview(tab.view)
                 except Exception:
                     pass
 
-            self.tabs.clear()
+            # Clear tab state
+            self.tabs = []
             self.active = 0
 
             # Reset to fresh ephemeral store
             self._data_store = WKWebsiteDataStore.nonPersistentDataStore()
+
+            # Mark wipe complete only after success
+            self._has_wiped = True
 
         except Exception as e:
             print("wipe error:", e)
