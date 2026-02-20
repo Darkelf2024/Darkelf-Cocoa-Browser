@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.0 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.0.1 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -1941,6 +1941,19 @@ class _NavDelegate(NSObject):
         self._owner = owner
         return self
 
+    # -------------------------------------------------
+    # Navigation Started (commit phase)
+    # -------------------------------------------------
+    def webView_didCommitNavigation_(self, webView, nav):
+        try:
+            # While loading → neutral (white)
+            self._owner.addr.setTextColor_(NSColor.whiteColor())
+        except Exception:
+            pass
+
+    # -------------------------------------------------
+    # Navigation Finished
+    # -------------------------------------------------
     def webView_didFinishNavigation_(self, webView, nav):
         try:
             browser = self._owner
@@ -1951,13 +1964,10 @@ class _NavDelegate(NSObject):
             for tab in browser.tabs:
                 if tab.view is webView:
 
-                    # HARDENED HOME GUARD — never override Home
                     if url and url.absoluteString() == HOME_URL:
                         tab.url = HOME_URL
                         tab.host = "Darkelf Home"
-
                     else:
-                        # UI update ONLY — no security escalation
                         if title:
                             tab.host = title
                         elif url:
@@ -1966,46 +1976,36 @@ class _NavDelegate(NSObject):
                         if url:
                             tab.url = url.absoluteString()
 
-                    break  # Stop after finding matching tab
+                    break
 
             browser._update_tab_buttons()
             browser._sync_addr()
 
-            # --- Address bar color logic ---
+            # --- Apply Security Color ---
             try:
-                url = webView.URL()
-                color = NSColor.whiteColor()  # Default
+                color = NSColor.whiteColor()
 
                 if url and url.scheme():
 
                     scheme = str(url.scheme()).lower()
                     url_str = str(url.absoluteString())
 
-                    # 🔴 Blocked pages
+                    # 🔴 Explicit Block Page
                     if url_str.startswith("about:blank#blocked"):
-                        color = NSColor.colorWithCalibratedRed_green_blue_alpha_(
-                            1.0, 0.2, 0.2, 1.0
-                        )
-
-                    # 🟢 HTTPS (or 🔴 if mixed content)
-                    elif scheme == "https" and url_str != HOME_URL:
-
-                        # 🔴 Mixed content detection
-                        if not webView.hasOnlySecureContent():
-                            color = NSColor.colorWithCalibratedRed_green_blue_alpha_(
-                                1.0, 0.2, 0.2, 1.0
-                            )
-                        else:
-                            color = NSColor.colorWithCalibratedRed_green_blue_alpha_(
-                                0.0, 0.85, 0.4, 1.0
-                            )
-
+                        color = NSColor.systemRedColor()
 
                     # 🔵 HTTP
                     elif scheme == "http":
-                        color = NSColor.colorWithCalibratedRed_green_blue_alpha_(
-                            0.2, 0.6, 1.0, 1.0
-                        )
+                        color = NSColor.systemBlueColor()
+
+                    # 🟢 / 🔴 HTTPS
+                    elif scheme == "https":
+
+                        # Mixed content = insecure
+                        if not webView.hasOnlySecureContent():
+                            color = NSColor.systemRedColor()
+                        else:
+                            color = NSColor.systemGreenColor()
 
                 browser.addr.setTextColor_(color)
 
@@ -2015,16 +2015,16 @@ class _NavDelegate(NSObject):
         except Exception as e:
             print(f"[NavDelegate] didFinish error: {e}")
 
-    # ✅ MINI AI INTEGRATION: Handle JavaScript network requests (fetch/XHR)
+    # -------------------------------------------------
+    # JS Bridge (MiniAI Network Monitor Only)
+    # -------------------------------------------------
     def userContentController_didReceiveScriptMessage_(self, ucc, message):
-
         try:
             if message.name() != "netlog":
                 return
 
             body = message.body()
 
-            # MiniAI monitoring
             if isinstance(body, dict):
                 url = str(body.get("url", ""))
                 headers = body.get("headers", {}) or {}
@@ -2035,8 +2035,9 @@ class _NavDelegate(NSObject):
         except Exception as e:
             print("[NavDelegate ScriptMessage] Error:", e)
 
-
-    # ✅ MINI AI + HTTP BLOCK INTEGRATION
+    # -------------------------------------------------
+    # Navigation Policy
+    # -------------------------------------------------
     def webView_decidePolicyForNavigationAction_decisionHandler_(
         self, webView, navAction, decisionHandler
     ):
@@ -2046,63 +2047,36 @@ class _NavDelegate(NSObject):
             req = navAction.request()
             url = req.URL()
 
-            if url is None:
+            if not url:
                 decisionHandler(WKNavigationActionPolicyAllow)
                 return
 
             url_str = str(url.absoluteString())
 
-            # ==============================
-            # 1️⃣ Feed URL to MiniAI FIRST
-            # ==============================
+            # Feed MiniAI
             try:
                 if hasattr(self._owner, "mini_ai") and self._owner.mini_ai:
                     headers = dict(req.allHTTPHeaderFields() or {})
                     self._owner.mini_ai.monitor_network(url_str, headers)
-            except Exception as e:
-                print("[MiniAI Monitor] Failed:", e)
+            except Exception:
+                pass
 
-            # ==============================
-            # 2️⃣ Enforce Lockdown Mode
-            # ==============================
-
+            # Lockdown Mode
             mini_ai = getattr(self._owner, "mini_ai", None)
-
             if mini_ai and mini_ai.lockdown_active:
-
                 decisionHandler(WKNavigationActionPolicyCancel)
                 handled = True
-
-                webView.loadHTMLString_baseURL_(
-                    mini_ai._lockout_html(),
-                    None
-                )
+                webView.loadHTMLString_baseURL_(mini_ai._lockout_html(), None)
                 return
 
-
-            # ==============================
-            # 3️⃣ Block Dangerous Schemes
-            # ==============================
-
-            dangerous = ("data:", "blob:", "file:", "ftp:")
-
-            if url_str.lower().startswith(dangerous):
+            # Block dangerous schemes
+            if url_str.lower().startswith(("data:", "blob:", "file:", "ftp:")):
                 decisionHandler(WKNavigationActionPolicyCancel)
                 handled = True
                 return
 
-            # ==============================
-            # 4️⃣ Block HTTP (Hard Transport Enforcement)
-            # ==============================
-
+            # Block HTTP
             if url_str.lower().startswith("http://"):
-
-                try:
-                    if hasattr(self._owner, "mini_ai") and self._owner.mini_ai:
-                        self._owner.mini_ai.on_http_blocked(url_str)
-                except Exception as e:
-                    print("[MiniAI HTTP Block Error]:", e)
-
                 decisionHandler(WKNavigationActionPolicyCancel)
                 handled = True
 
@@ -2117,18 +2091,12 @@ class _NavDelegate(NSObject):
                 webView.loadHTMLString_baseURL_(safe_html, None)
                 return
 
-
-            # ==============================
-            # 5️⃣ Homepage reload fix
-            # ==============================
+            # Homepage reload fix
             if navAction.navigationType() == WKNavigationTypeReload:
                 if url_str in (HOME_URL, "about:home", "about://home", ""):
                     decisionHandler(WKNavigationActionPolicyCancel)
                     handled = True
-                    try:
-                        self._owner.load_homepage()
-                    except Exception as e:
-                        print("[Reload] Failed:", e)
+                    self._owner.load_homepage()
                     return
 
         except Exception as e:
@@ -2138,20 +2106,15 @@ class _NavDelegate(NSObject):
             if not handled:
                 decisionHandler(WKNavigationActionPolicyAllow)
 
+    # -------------------------------------------------
+    # TLS / Load Failure
+    # -------------------------------------------------
     def webView_didFailProvisionalNavigation_withError_(self, webView, nav, error):
         try:
-            browser = self._owner
-
-            # Only affect active tab
-            if webView is browser.tabs[browser.active].view:
-                browser.addr.setTextColor_(
-                    NSColor.colorWithCalibratedRed_green_blue_alpha_(
-                        1.0, 0.2, 0.2, 1.0
-                    )
-                )
-
+            self._owner.addr.setTextColor_(NSColor.systemRedColor())
         except Exception:
             pass
+
 
 IS_MAC = sys.platform == "darwin"
 if not IS_MAC:
