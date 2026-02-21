@@ -52,12 +52,12 @@ Designed for privacy-conscious daily browsing without Tor complexity.
 -   Direct networking (no proxy chain)
 -   Safari-style declarative content blocking
 -   Non-persistent WKWebView data store
--   10-second cookie scrub timer
 -   JavaScript toggle button
 -   MiniAI passive monitoring
 -   Native macOS AppKit interface
 -   Keyboard hotkeys
--   Per Tab Isolation/
+-   Wipe Nuke on Exit
+-   Per Tab Isolation
 -   Canvas Signatures change on Boot-up and Per-Tab! Not on Reload.
 
 ------------------------------------------------------------------------
