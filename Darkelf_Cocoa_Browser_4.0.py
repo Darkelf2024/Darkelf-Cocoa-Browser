@@ -89,7 +89,7 @@ from Cocoa import (
     NSObject, NSToolbar, NSToolbarItem, NSSearchField, NSButton, NSImage, NSBox, NSColor, NSView,
     NSTrackingArea, NSTrackingMouseEnteredAndExited, NSTrackingActiveAlways,
     NSEvent,
-    NSToolbarFlexibleSpaceItemIdentifier, NSApplicationActivationPolicyRegular
+    NSToolbarFlexibleSpaceItemIdentifier, NSApplicationActivationPolicyRegular, NSOperationQueue
 )
 from WebKit import (
     WKWebView, WKWebViewConfiguration, WKUserContentController, WKUserScript, WKPreferences, WKContentRuleListStore, WKWebsiteDataStore, WKNavigationActionPolicyAllow, WKNavigationActionPolicyCancel, WKNavigationTypeReload, WKNavigationType, WKUserScript
@@ -2003,7 +2003,7 @@ class _NavDelegate(NSObject):
                 serverTrust = protectionSpace.serverTrust()
 
                 isTrusted = False
-
+    
                 if serverTrust:
                     # Evaluate trust (modern macOS)
                     try:
@@ -2024,8 +2024,12 @@ class _NavDelegate(NSObject):
                         print("✅ Certificate trusted")
                     else:
                         print("❌ Certificate NOT trusted")
-                        # 🔴 Mark address bar red if invalid cert
-                        self._owner.addr.setTextColor_(NSColor.systemRedColor())
+
+                    # ✅ UPDATE SECURITY UI HERE (MAIN THREAD SAFE)
+                    if hasattr(self._owner, "update_security_indicator"):
+                        NSOperationQueue.mainQueue().addOperationWithBlock_(
+                            lambda: self._owner.update_security_indicator(isTrusted)
+                        )
 
                 # Continue loading (normal browser behavior)
                 completionHandler(
@@ -2659,7 +2663,7 @@ class Browser(NSObject):
         self.window.makeKeyAndOrderFront_(None)
     
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
-
+        
         self.window.setDelegate_(self)
         self._install_key_monitor()
 
@@ -2673,7 +2677,28 @@ class Browser(NSObject):
             )
         except Exception:
             pass
+            
+    def update_security_indicator(self, trusted):
+        try:
+            cell = self.addr.cell()
 
+            if trusted:
+                # Green lock icon
+                lock = NSImage.imageNamed_("NSLockLockedTemplate")
+                cell.setSearchButtonCell_(cell.searchButtonCell())
+                cell.searchButtonCell().setImage_(lock)
+
+                self.addr.setTextColor_(NSColor.labelColor())
+
+            else:
+                # Warning triangle
+                warn = NSImage.imageNamed_("NSCaution")
+                cell.searchButtonCell().setImage_(warn)
+
+                self.addr.setTextColor_(NSColor.systemRedColor())
+
+        except Exception as e:
+            print("Security indicator error:", e)
                         
     def actToggleJS_(self, _):
         """Toggle JavaScript on/off and reload the active tab."""
