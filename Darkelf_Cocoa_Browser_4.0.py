@@ -73,6 +73,7 @@ import secrets
 import atexit
 import warnings
 import AppKit
+from Security import *
 from collections import deque
 from datetime import datetime
 from typing import Dict, List, Set, Optional
@@ -93,140 +94,13 @@ from Cocoa import (
 from WebKit import (
     WKWebView, WKWebViewConfiguration, WKUserContentController, WKUserScript, WKPreferences, WKContentRuleListStore, WKWebsiteDataStore, WKNavigationActionPolicyAllow, WKNavigationActionPolicyCancel, WKNavigationTypeReload, WKNavigationType, WKUserScript
 )
-from Foundation import NSURL, NSURLRequest, NSMakeRect, NSNotificationCenter, NSDate, NSTimer, NSObject, NSUserDefaults, NSRegistrationDomain
+from Foundation import NSURL, NSURLRequest, NSMakeRect, NSNotificationCenter, NSDate, NSTimer, NSObject, NSUserDefaults, NSRegistrationDomain,NSURLAuthenticationMethodServerTrust, NSURLSessionAuthChallengeUseCredential, NSURLSessionAuthChallengePerformDefaultHandling
 
 from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttributedString, NSAlert, NSAlertStyleCritical, NSColor, NSAppearance, NSAnimationContext, NSViewWidthSizable, NSViewHeightSizable, NSAppearance, NSEventModifierFlagCommand, NSEventModifierFlagShift, NSSavePanel, NSBitmapImageRep, NSMutableParagraphStyle, NSFont, NSAttributedString
 
 from WebKit import WKContentRuleListStore
 import json
 import time
-
-HTTP_BLOCK_PAGE_HTML = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta http-equiv="Content-Security-Policy"
-content="default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; base-uri 'none'; form-action 'none'; navigate-to https:;">
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Darkelf — Insecure Connection Blocked</title>
-
-<style>
-:root{
-  --bg:#07080d;
-  --green:#34C759;
-  --cyan:#04a8c8;
-  --text:#eef2f6;
-  --muted:#9aa3ad;
-}
-*{box-sizing:border-box}
-html,body{height:100%}
-body{
-  margin:0;
-  font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
-  color:var(--text);
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  overflow:hidden;
-  background:var(--bg);
-}
-body::before,
-body::after{
-  content:"";
-  position:absolute;
-  inset:-20%;
-  z-index:-2;
-  background:
-    radial-gradient(900px 500px at 20% 10%, rgba(4,168,200,.15), transparent 60%),
-    radial-gradient(800px 500px at 80% 20%, rgba(52,199,89,.20), transparent 60%);
-  animation:drift 40s ease-in-out infinite;
-}
-body::after{animation-direction:reverse;opacity:.6;}
-@keyframes drift{
-  0%{transform:translate(0,0)}
-  50%{transform:translate(-6%,-4%)}
-  100%{transform:translate(0,0)}
-}
-.container{
-  max-width:640px;
-  background:rgba(0,0,0,.65);
-  border:1px solid rgba(52,199,89,.35);
-  border-radius:20px;
-  padding:48px;
-  text-align:center;
-  box-shadow:0 0 60px rgba(52,199,89,.25);
-  backdrop-filter:blur(14px);
-}
-.icon{
-  width:64px;
-  height:64px;
-  margin:0 auto 20px auto;
-  color:var(--green);
-}
-h1{
-  font-size:1.8rem;
-  font-weight:900;
-  letter-spacing:.08em;
-  color:var(--green);
-}
-.message{
-  margin-top:24px;
-  color:var(--muted);
-  line-height:1.6;
-}
-.url{
-  margin-top:20px;
-  font-size:.9rem;
-  color:var(--cyan);
-  word-break:break-all;
-}
-.button{
-  margin-top:32px;
-  padding:12px 24px;
-  background:rgba(52,199,89,.15);
-  border:1px solid rgba(52,199,89,.4);
-  border-radius:12px;
-  color:var(--green);
-  font-weight:600;
-  cursor:pointer;
-  text-decoration:none;
-  display:inline-block;
-}
-.button:hover{background:rgba(52,199,89,.25);}
-</style>
-</head>
-
-<body>
-<div class="container">
-  <div class="icon">
-    <svg viewBox="0 0 24 24" width="64" height="64"
-         fill="currentColor"
-         xmlns="http://www.w3.org/2000/svg">
-      <path d="M12 2L4 5V11C4 16 7.5 20.5 12 22C16.5 20.5 20 16 20 11V5L12 2Z"/>
-      <rect x="9" y="10" width="6" height="5" rx="1" fill="#07080d"/>
-      <path d="M10 10V8C10 6.9 10.9 6 12 6C13.1 6 14 6.9 14 8V10"
-            stroke="#07080d" stroke-width="1.5"/>
-    </svg>
-  </div>
-
-  <h1>INSECURE CONNECTION BLOCKED</h1>
-
-  <div class="message">
-    Darkelf Browser does not allow unencrypted HTTP connections.<br>
-    This prevents downgrade and MITM attacks.
-  </div>
-
-  <div class="url">BLOCKED_URL_PLACEHOLDER</div>
-
-  <a href="HTTPS_UPGRADE_PLACEHOLDER" class="button">
-      Try HTTPS Upgrade
-  </a>
-
-</div>
-</body>
-</html>
-"""
 
 # =========================
 # Darkelf MiniAI (SAFE / PASSIVE) - EXPANDED
@@ -441,7 +315,7 @@ class DarkelfMiniAISentinel:
             'url': url,
             'timestamp': time.time(),
             'datetime': datetime.now().isoformat(),
-            'threats': ['HTTP_INSECURE'],
+            'threats': ['HTTP_AUTO_UPGRADE'],
             'risk_level': 'medium'
         }
 
@@ -1934,22 +1808,15 @@ LOCAL_WEBSOCKET_POLICY_VALUE = (
 
 class _NavDelegate(NSObject):
 
+    # -------------------------------------------------
+    # Init
+    # -------------------------------------------------
     def initWithOwner_(self, owner):
         self = objc.super(_NavDelegate, self).init()
         if self is None:
             return None
         self._owner = owner
         return self
-
-    # -------------------------------------------------
-    # Navigation Started (commit phase)
-    # -------------------------------------------------
-    def webView_didCommitNavigation_(self, webView, nav):
-        try:
-            # While loading → neutral (white)
-            self._owner.addr.setTextColor_(NSColor.whiteColor())
-        except Exception:
-            pass
 
     # -------------------------------------------------
     # Navigation Finished
@@ -1981,42 +1848,24 @@ class _NavDelegate(NSObject):
             browser._update_tab_buttons()
             browser._sync_addr()
 
-            # --- Apply Security Color ---
-            try:
-                color = NSColor.whiteColor()
+            color = NSColor.whiteColor()
 
-                if url and url.scheme():
+            if url and url.scheme():
+                scheme = str(url.scheme()).lower()
 
-                    scheme = str(url.scheme()).lower()
-                    url_str = str(url.absoluteString())
+                if scheme == "https":
+                    # Only set green if not already red
+                    current = browser.addr.textColor()
+                    if current != NSColor.systemRedColor():
+                        color = NSColor.systemGreenColor()
 
-                    # 🔴 Explicit Block Page
-                    if url_str.startswith("about:blank#blocked"):
-                        color = NSColor.systemRedColor()
-
-                    # 🔵 HTTP
-                    elif scheme == "http":
-                        color = NSColor.systemBlueColor()
-
-                    # 🟢 / 🔴 HTTPS
-                    elif scheme == "https":
-
-                        # Mixed content = insecure
-                        if not webView.hasOnlySecureContent():
-                            color = NSColor.systemRedColor()
-                        else:
-                            color = NSColor.systemGreenColor()
-
-                browser.addr.setTextColor_(color)
-
-            except Exception:
-                browser.addr.setTextColor_(NSColor.whiteColor())
+            browser.addr.setTextColor_(color)
 
         except Exception as e:
             print(f"[NavDelegate] didFinish error: {e}")
 
     # -------------------------------------------------
-    # JS Bridge (MiniAI Network Monitor Only)
+    # JS Bridge (MiniAI Network Monitor)
     # -------------------------------------------------
     def userContentController_didReceiveScriptMessage_(self, ucc, message):
         try:
@@ -2036,7 +1885,7 @@ class _NavDelegate(NSObject):
             print("[NavDelegate ScriptMessage] Error:", e)
 
     # -------------------------------------------------
-    # Navigation Policy
+    # Navigation Policy (HTTPS Enforcement Here)
     # -------------------------------------------------
     def webView_decidePolicyForNavigationAction_decisionHandler_(
         self, webView, navAction, decisionHandler
@@ -2047,13 +1896,32 @@ class _NavDelegate(NSObject):
             req = navAction.request()
             url = req.URL()
 
-            if not url:
-                decisionHandler(WKNavigationActionPolicyAllow)
+            url_str = ""
+            scheme = ""
+            host = ""
+
+            if url:
+                url_str = str(url.absoluteString() or "").strip()
+                scheme = str(url.scheme() or "").lower()
+                host = str(url.host() or "")
+
+            # =====================================================
+            # 🚫 Invalid HTTP/HTTPS without host (e.g. "http://")
+            # =====================================================
+            if scheme in ("http", "https") and not host:
+                decisionHandler(WKNavigationActionPolicyCancel)
+                handled = True
+
+                webView.loadRequest_(
+                    NSURLRequest.requestWithURL_(
+                        NSURL.URLWithString_(HOME_URL)
+                    )
+                )
                 return
 
-            url_str = str(url.absoluteString())
-
+            # =====================================================
             # Feed MiniAI
+            # =====================================================
             try:
                 if hasattr(self._owner, "mini_ai") and self._owner.mini_ai:
                     headers = dict(req.allHTTPHeaderFields() or {})
@@ -2061,7 +1929,9 @@ class _NavDelegate(NSObject):
             except Exception:
                 pass
 
+            # =====================================================
             # Lockdown Mode
+            # =====================================================
             mini_ai = getattr(self._owner, "mini_ai", None)
             if mini_ai and mini_ai.lockdown_active:
                 decisionHandler(WKNavigationActionPolicyCancel)
@@ -2069,35 +1939,50 @@ class _NavDelegate(NSObject):
                 webView.loadHTMLString_baseURL_(mini_ai._lockout_html(), None)
                 return
 
+            # =====================================================
             # Block dangerous schemes
-            if url_str.lower().startswith(("data:", "blob:", "file:", "ftp:")):
+            # =====================================================
+            if scheme in ("data", "blob", "file", "ftp"):
                 decisionHandler(WKNavigationActionPolicyCancel)
                 handled = True
                 return
 
-            # Block HTTP
-            if url_str.lower().startswith("http://"):
-                decisionHandler(WKNavigationActionPolicyCancel)
-                handled = True
+            # =====================================================
+            # 🔁 Auto-upgrade HTTP → HTTPS
+            # =====================================================
+            if scheme == "http":
+
+                # 🔒 Report insecure attempt to MiniAI
+                if hasattr(self._owner, "mini_ai") and self._owner.mini_ai:
+                    self._owner.mini_ai.on_http_blocked(url_str)
 
                 https_url = url_str.replace("http://", "https://", 1)
 
-                safe_html = (
-                    HTTP_BLOCK_PAGE_HTML
-                    .replace("BLOCKED_URL_PLACEHOLDER", url_str)
-                    .replace("HTTPS_UPGRADE_PLACEHOLDER", https_url)
-                )
+                decisionHandler(WKNavigationActionPolicyCancel)
+                handled = True
 
-                webView.loadHTMLString_baseURL_(safe_html, None)
+                webView.loadRequest_(
+                    NSURLRequest.requestWithURL_(
+                        NSURL.URLWithString_(https_url)
+                    )
+                )
                 return
 
-            # Homepage reload fix
-            if navAction.navigationType() == WKNavigationTypeReload:
-                if url_str in (HOME_URL, "about:home", "about://home", ""):
-                    decisionHandler(WKNavigationActionPolicyCancel)
-                    handled = True
-                    self._owner.load_homepage()
-                    return
+                # 🔒 Report insecure attempt to MiniAI
+                if hasattr(self._owner, "mini_ai") and self._owner.mini_ai:
+                    self._owner.mini_ai.on_http_blocked(url_str)
+
+                https_url = url_str.replace("http://", "https://", 1)
+
+                decisionHandler(WKNavigationActionPolicyCancel)
+                handled = True
+
+                webView.loadRequest_(
+                    NSURLRequest.requestWithURL_(
+                        NSURL.URLWithString_(https_url)
+                    )
+                )
+                return
 
         except Exception as e:
             print(f"[NavDelegate] Policy decision error: {e}")
@@ -2105,16 +1990,67 @@ class _NavDelegate(NSObject):
         finally:
             if not handled:
                 decisionHandler(WKNavigationActionPolicyAllow)
+                
+    def webView_didReceiveAuthenticationChallenge_completionHandler_(
+        self, webView, challenge, completionHandler
+    ):
+        try:
+            protectionSpace = challenge.protectionSpace()
+            authMethod = protectionSpace.authenticationMethod()
+
+            # Only inspect TLS server trust
+            if authMethod == NSURLAuthenticationMethodServerTrust:
+                serverTrust = protectionSpace.serverTrust()
+
+                isTrusted = False
+
+                if serverTrust:
+                    # Evaluate trust (modern macOS)
+                    try:
+                        isTrusted = SecTrustEvaluateWithError(serverTrust, None)
+                    except Exception:
+                        # Fallback for older macOS
+                        result = objc.allocateBuffer(4)
+                        SecTrustEvaluate(serverTrust, result)
+                        isTrusted = True  # If no exception, assume trusted
+
+                    # 🔎 Print certificate info
+                    cert = SecTrustGetCertificateAtIndex(serverTrust, 0)
+                    if cert:
+                        summary = SecCertificateCopySubjectSummary(cert)
+                        print("🔎 Certificate Subject:", summary)
+
+                    if isTrusted:
+                        print("✅ Certificate trusted")
+                    else:
+                        print("❌ Certificate NOT trusted")
+                        # 🔴 Mark address bar red if invalid cert
+                        self._owner.addr.setTextColor_(NSColor.systemRedColor())
+
+                # Continue loading (normal browser behavior)
+                completionHandler(
+                    NSURLSessionAuthChallengeUseCredential,
+                    NSURLCredential.credentialForTrust_(serverTrust)
+                )
+                return
+
+        except Exception as e:
+            print("[Cert Inspection Error]", e)
+
+        # Default fallback
+        completionHandler(
+            NSURLSessionAuthChallengePerformDefaultHandling,
+            None
+        )
 
     # -------------------------------------------------
-    # TLS / Load Failure
+    # Load Failure (No Red)
     # -------------------------------------------------
     def webView_didFailProvisionalNavigation_withError_(self, webView, nav, error):
         try:
-            self._owner.addr.setTextColor_(NSColor.systemRedColor())
+            self._owner.addr.setTextColor_(NSColor.whiteColor())
         except Exception:
             pass
-
 
 IS_MAC = sys.platform == "darwin"
 if not IS_MAC:
@@ -3015,12 +2951,6 @@ class Browser(NSObject):
                 except Exception as e:
                     print("Context menu popover error:", e)
                     
-            def textDidBeginEditing_(self, notification):
-                try:
-                    self.setTextColor_(NSColor.whiteColor())
-                except Exception:
-                    pass
-
         self.addr = AddressField.alloc().initWithFrame_owner_(((0, 0), (1080, 32)), self)
         try:
             cell = self.addr.cell()
