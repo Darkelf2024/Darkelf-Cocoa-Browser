@@ -64,7 +64,7 @@ Designed for privacy-conscious daily browsing without Tor complexity.
 
 # 🔒 Darkelf Cocoa -- Hardened Edition - Still in progress with Upgrades
 
-📄 `Darkelf Cocoa Hardened Browser 3.6.py`
+📄 `Darkelf Cocoa Hardened Browser 3.8.py`
 
 Designed for privacy research, fingerprint testing, and high-risk
 environments.
