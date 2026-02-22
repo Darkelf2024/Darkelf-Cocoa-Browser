@@ -43,7 +43,7 @@ Two editions are available:
 
 # 🟢 Darkelf Cocoa -- General Edition v4.0 Latest
 
-📄 `Darkelf_Cocoa_Browser_3.6.py`
+📄 `Darkelf_Cocoa_Browser_4.0.py`
 
 Designed for privacy-conscious daily browsing without Tor complexity.
 
