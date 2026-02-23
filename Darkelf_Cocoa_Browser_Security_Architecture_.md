@@ -56,8 +56,8 @@ It continuously analyzes browser activity and network behavior.
 -   Fingerprinting attempts
 -   HTTP blocks
 
-The engine provides live telemetry to the Threat Console without
-executing any external scripts.
+The engine provides live internal telemetry to the Threat Console without
+executing any external scripts. Reports are isolated in called Tab and Terminal only.
 
 ------------------------------------------------------------------------
 
