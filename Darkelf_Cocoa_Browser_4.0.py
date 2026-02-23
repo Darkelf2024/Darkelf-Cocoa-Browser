@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.0.1 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.0.2 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -74,6 +74,7 @@ import atexit
 import warnings
 import AppKit
 from Security import *
+from Quartz import CABasicAnimation
 from collections import deque
 from datetime import datetime
 from typing import Dict, List, Set, Optional
@@ -1860,7 +1861,7 @@ class _NavDelegate(NSObject):
                         color = NSColor.systemGreenColor()
 
             browser.addr.setTextColor_(color)
-
+                            
         except Exception as e:
             print(f"[NavDelegate] didFinish error: {e}")
 
@@ -1951,22 +1952,6 @@ class _NavDelegate(NSObject):
             # 🔁 Auto-upgrade HTTP → HTTPS
             # =====================================================
             if scheme == "http":
-
-                # 🔒 Report insecure attempt to MiniAI
-                if hasattr(self._owner, "mini_ai") and self._owner.mini_ai:
-                    self._owner.mini_ai.on_http_blocked(url_str)
-
-                https_url = url_str.replace("http://", "https://", 1)
-
-                decisionHandler(WKNavigationActionPolicyCancel)
-                handled = True
-
-                webView.loadRequest_(
-                    NSURLRequest.requestWithURL_(
-                        NSURL.URLWithString_(https_url)
-                    )
-                )
-                return
 
                 # 🔒 Report insecure attempt to MiniAI
                 if hasattr(self._owner, "mini_ai") and self._owner.mini_ai:
@@ -2664,6 +2649,19 @@ class Browser(NSObject):
     
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
         
+        self.btn_mini_ai.setTarget_(self)
+        self.btn_mini_ai.setAction_("openThreatReport:")
+        
+        from Foundation import NSTimer
+
+        self._mini_ai_timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+            2.0,                 # every 1 second
+            self,
+            "refreshMiniAI:",
+            None,
+            True
+        )
+
         self.window.setDelegate_(self)
         self._install_key_monitor()
 
@@ -2678,6 +2676,318 @@ class Browser(NSObject):
         except Exception:
             pass
             
+    def updateMiniAIIndicator(self):
+
+        stats = self.mini_ai.get_statistics()
+        locked = stats['lockdown']['active']
+
+        # Initialize state tracking once
+        if not hasattr(self, "_mini_ai_locked_state"):
+            self._mini_ai_locked_state = None
+
+        # Only update when lockdown state changes
+        if locked == self._mini_ai_locked_state:
+            return
+
+        self._mini_ai_locked_state = locked
+
+        if locked:
+            color = NSColor.systemRedColor()
+            tooltip = "LOCKDOWN ACTIVE"
+            self.startShieldPulse(color)
+        else:
+            color = NSColor.systemGreenColor()
+            tooltip = "System Monitoring"
+            self.stopShieldPulse()
+
+        self.btn_mini_ai.setContentTintColor_(color)
+        self.btn_mini_ai.setToolTip_(tooltip)
+
+    @objc.python_method
+    def startShieldPulse(self, color):
+
+        layer = self.btn_mini_ai.layer()
+        if not layer:
+            return
+
+        if getattr(self, "_shield_is_pulsing", False):
+            return
+
+        self._shield_is_pulsing = True
+        self._shield_current_color = color
+
+        self.btn_mini_ai.setWantsLayer_(True)
+        self.btn_mini_ai.setRefusesFirstResponder_(True)
+
+        # Subtle static glow (NOT animated)
+        layer.setShadowColor_(color.CGColor())
+        layer.setShadowRadius_(6.0)
+        layer.setShadowOpacity_(0.35)
+        layer.setShadowOffset_((0, 0))
+
+        # SAFE animation: scale instead of shadow
+        pulse = CABasicAnimation.animationWithKeyPath_("transform.scale")
+        pulse.setFromValue_(1.0)
+        pulse.setToValue_(1.05)
+        pulse.setDuration_(0.9)
+        pulse.setAutoreverses_(True)
+        pulse.setRepeatCount_(float('inf'))
+        pulse.setTimingFunction_(
+            CAMediaTimingFunction.functionWithName_("easeInEaseOut")
+        )
+
+        layer.addAnimation_forKey_(pulse, "shieldPulse")
+        
+    @objc.python_method
+    def stopShieldPulse(self):
+
+        layer = self.btn_mini_ai.layer()
+        if not layer:
+            return
+
+        if not getattr(self, "_shield_is_pulsing", False):
+            return
+
+        self._shield_is_pulsing = False
+        self._shield_current_color = None
+
+        layer.removeAnimationForKey_("shieldPulse")
+        layer.setShadowOpacity_(0.0)
+            
+    def open_threat_report_tab(self):
+
+        html = self._build_threat_report_html()
+
+        config = WKWebViewConfiguration.alloc().init()
+        config.setWebsiteDataStore_(
+            WKWebsiteDataStore.nonPersistentDataStore()
+        )
+
+        view = WKWebView.alloc().initWithFrame_configuration_(
+            self.window.contentView().bounds(),
+            config
+        )
+
+        view.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
+        view.loadHTMLString_baseURL_(html, None)
+
+        tab = Tab(view=view, data_store=config.websiteDataStore())
+        tab.url = "darkelf://report"
+        tab.host = "Threat Report"
+
+        self.tabs.append(tab)
+        self.active = len(self.tabs) - 1
+
+        # 🔥 THIS is what was missing
+        self._mount_webview(view)
+        self._update_tab_buttons()
+        self._style_tabs()
+        self._sync_addr()
+        
+    def _build_threat_report_html(self):
+
+        stats = self.mini_ai.get_statistics()
+
+        lockdown_color = "#ff3b30" if stats['lockdown']['active'] else "#34C759"
+
+        return f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+
+<meta http-equiv="Content-Security-Policy"
+content="
+default-src 'none';
+style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+font-src https://cdn.jsdelivr.net;
+img-src 'self' data:;
+connect-src 'none';
+script-src 'none';
+object-src 'none';
+frame-ancestors 'none';
+base-uri 'none';
+form-action 'none';
+">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="X-Content-Type-Options" content="nosniff">
+
+<title>Darkelf Threat Console</title>
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+
+<style>
+:root {{
+  --bg:#05060a;
+  --accent:#36ff9a;
+  --accent2:#00eaff;
+  --accent3:#b400ff;
+  --danger:#ff3b30;
+  --warn:#ffd36b;
+  --muted:#9db0be;
+  --card:rgba(255,255,255,.06);
+  --radius:18px;
+}}
+
+*{{box-sizing:border-box}}
+html,body{{margin:0;height:100%;font-family:ui-sans-serif,system-ui,-apple-system;}}
+
+body{{
+  background:
+    radial-gradient(1200px 800px at 15% -10%, rgba(0,234,255,.35), transparent 70%),
+    radial-gradient(900px 600px at 110% 0%, rgba(54,255,154,.35), transparent 70%),
+    radial-gradient(1200px 700px at 50% 120%, rgba(180,0,255,.35), transparent 70%),
+    var(--bg);
+  color:#eef2f6;
+}}
+
+.container {{
+  max-width:1100px;
+  margin:auto;
+  padding:100px 24px;
+}}
+
+.title {{
+  font-size:1.8rem;
+  font-weight:900;
+  letter-spacing:.12em;
+  background:linear-gradient(90deg,var(--accent),var(--accent2),var(--accent3));
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  text-shadow:0 0 18px rgba(0,234,255,.25);
+}}
+
+.badge {{
+  display:inline-block;
+  margin-top:18px;
+  padding:8px 16px;
+  border-radius:999px;
+  font-size:.7rem;
+  font-weight:800;
+  letter-spacing:.15em;
+  text-transform:uppercase;
+  background:{'var(--danger)' if stats['lockdown']['active'] else 'var(--accent)'};
+  color:#000;
+  box-shadow:0 0 12px {'rgba(255,59,48,.35)' if stats['lockdown']['active'] else 'rgba(54,255,154,.35)'};
+}}
+
+/* === TWO SEPARATE CARDS GRID === */
+.cards {{
+  margin-top:60px;
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:50px;
+}}
+
+.card {{
+  background:var(--card);
+  backdrop-filter:blur(20px);
+  padding:40px;
+  border-radius:var(--radius);
+  border:1px solid rgba(255,255,255,.12);
+  box-shadow:0 30px 60px rgba(0,0,0,.6);
+}}
+
+.section-title {{
+  font-size:.75rem;
+  letter-spacing:.25em;
+  text-transform:uppercase;
+  color:var(--muted);
+  margin-bottom:24px;
+}}
+
+.line {{
+  display:grid;
+  grid-template-columns:28px auto max-content;
+  align-items:center;
+  column-gap:14px;
+  margin:16px 0;
+}}
+
+.icon {{
+  font-size:1.2rem;
+  color:var(--accent2);
+  text-shadow:0 0 6px rgba(0,234,255,.35);
+}}
+
+.stat-label {{
+  color:#c3d2dd;
+}}
+
+.stat-value {{
+  font-weight:900;
+  font-size:1.15rem;
+}}
+
+.ok {{ color:var(--accent2); }}
+.warn {{ color:var(--warn); }}
+.danger {{ color:var(--danger); }}
+
+.footer {{
+  margin-top:80px;
+  text-align:center;
+  font-size:.8rem;
+  color:var(--muted);
+  opacity:.7;
+}}
+
+@media (max-width:900px) {{
+  .cards {{
+    grid-template-columns:1fr;
+    gap:40px;
+  }}
+}}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<div class="title">Darkelf MiniAI Threat Console</div>
+
+<div class="badge">
+{"LOCKDOWN ACTIVE" if stats['lockdown']['active'] else "SYSTEM MONITORING"}
+</div>
+
+<div class="cards">
+
+<!-- SESSION CARD -->
+<div class="card">
+<div class="section-title">Session Metrics</div>
+
+<div class="line"><i class="bi bi-clock-history icon"></i><span class="stat-label">Session Uptime</span><span class="stat-value ok">{stats['uptime_seconds']:.1f}s</span></div>
+<div class="line"><i class="bi bi-activity icon"></i><span class="stat-label">Total Events</span><span class="stat-value ok">{stats['total_events']}</span></div>
+<div class="line"><i class="bi bi-globe2 icon"></i><span class="stat-label">Unique Domains</span><span class="stat-value ok">{stats['unique_domains']}</span></div>
+<div class="line"><i class="bi bi-speedometer2 icon"></i><span class="stat-label">Events / Minute</span><span class="stat-value">{(stats['total_events']/(stats['uptime_seconds']/60)) if stats['uptime_seconds']>0 else 0:.1f}</span></div>
+<div class="line"><i class="bi bi-shield-check icon"></i><span class="stat-label">Blocking Effectiveness</span><span class="stat-value">{((stats['threats']['trackers']+stats['threats']['fingerprinting'])/stats['total_events']*100) if stats['total_events']>0 else 0:.0f}%</span></div>
+<div class="line"><i class="bi bi-lock-fill icon {'danger' if stats['lockdown']['active'] else 'ok'}"></i><span class="stat-label">Lockdown Status</span><span class="stat-value {'danger' if stats['lockdown']['active'] else 'ok'}">{'ACTIVE' if stats['lockdown']['active'] else 'Standby'}</span></div>
+</div>
+
+<!-- THREAT CARD -->
+<div class="card">
+<div class="section-title">Threat Analysis</div>
+
+<div class="line"><i class="bi bi-crosshair icon"></i><span class="stat-label">Trackers</span><span class="stat-value">{stats['threats']['trackers']}</span></div>
+<div class="line"><i class="bi bi-bullseye icon"></i><span class="stat-label">Intrusions</span><span class="stat-value">{stats['threats']['intrusions']}</span></div>
+<div class="line"><i class="bi bi-bug-fill icon danger"></i><span class="stat-label">Malware</span><span class="stat-value danger">{stats['threats']['malware']}</span></div>
+<div class="line"><i class="bi bi-lightning-charge-fill icon warn"></i><span class="stat-label">Exploits</span><span class="stat-value warn">{stats['threats']['exploits']}</span></div>
+<div class="line"><i class="bi bi-fingerprint icon"></i><span class="stat-label">Fingerprinting</span><span class="stat-value">{stats['threats']['fingerprinting']}</span></div>
+<div class="line"><i class="bi bi-arrow-left-right icon"></i><span class="stat-label">HTTP Blocks</span><span class="stat-value">{stats['threats']['http_blocks']}</span></div>
+</div>
+
+</div>
+
+<div class="footer">
+Darkelf Browser • MiniAI Sentinel • Hardened Runtime
+</div>
+
+</div>
+</body>
+</html>
+"""
+
     def update_security_indicator(self, trusted):
         try:
             cell = self.addr.cell()
@@ -2699,7 +3009,21 @@ class Browser(NSObject):
 
         except Exception as e:
             print("Security indicator error:", e)
-                        
+            
+    @objc.IBAction
+    def refreshMiniAI_(self, timer):
+
+        # If threat report tab is active, do nothing
+        if self.tabs and self.tabs[self.active].url == "darkelf://report":
+            return
+
+        self.updateMiniAIIndicator()
+
+    @objc.IBAction
+    def openThreatReport_(self, sender):
+        print("Threat report clicked")
+        self.open_threat_report_tab()
+
     def actToggleJS_(self, _):
         """Toggle JavaScript on/off and reload the active tab."""
         # Flip state
@@ -2856,7 +3180,7 @@ class Browser(NSObject):
                                         
     def _make_toolbar(self):
         tb = NSToolbar.alloc().initWithIdentifier_("DarkelfToolbar")
-        tb.setDisplayMode_(2)
+        tb.setDisplayMode_(1)
         tb.setSizeMode_(1)
 
         # --- Navigation + control buttons ---
@@ -2956,10 +3280,38 @@ class Browser(NSObject):
             (self.btn_zoom_out, 'actZoomOut:'),
             (self.btn_full, 'actFull:'),
             (self.btn_js, 'actToggleJS:'),
-            (self.btn_nuke, 'actNuke:'),
+            (self.btn_nuke, 'actNuke:')
         ]:
-            b.setTarget_(self); b.setAction_(sel)
+            b.setTarget_(self)
+            b.setAction_(sel)
 
+
+        # ==========================================================
+        # Darkelf MiniAI Button (OUTSIDE THE LOOP)
+        # ==========================================================
+
+        self.btn_mini_ai = NSButton.alloc().init()
+
+        img = NSImage.imageWithSystemSymbolName_accessibilityDescription_("shield.fill", None)
+        if img:
+            img.setTemplate_(True)
+            self.btn_mini_ai.setImage_(img)
+
+        self.btn_mini_ai.setTitle_("")                # NO TEXT
+        self.btn_mini_ai.setImagePosition_(2)         # Image only
+        self.btn_mini_ai.setBordered_(False)
+        self.btn_mini_ai.setEnabled_(True)            # clickable
+        self.btn_mini_ai.setToolTip_("Darkelf MiniAI Threat Report")
+
+        self.btn_mini_ai.setWantsLayer_(True)
+
+        if hasattr(self.btn_mini_ai, "setContentTintColor_"):
+            self.btn_mini_ai.setContentTintColor_(NSColor.systemGreenColor())
+
+        # Connect click action
+        self.btn_mini_ai.setTarget_(self)
+        self.btn_mini_ai.setAction_("openThreatReport:")
+                
         class AddressField(NSSearchField):
             def initWithFrame_owner_(self, frame, owner):
                 self = objc.super(AddressField, self).initWithFrame_(frame)
@@ -3017,7 +3369,8 @@ class Browser(NSObject):
         # Helper to wrap views
         def item(ident, view):
             it = NSToolbarItem.alloc().initWithItemIdentifier_(ident)
-            it.setView_(view); return it
+            it.setView_(view)
+            return it
 
         # --- Toolbar items order ---
         self.items = [
@@ -3033,6 +3386,8 @@ class Browser(NSObject):
             item('Full', self.btn_full),
             item('JS', self.btn_js),
             item('Nuke', self.btn_nuke),
+            item('MiniAI', self.btn_mini_ai),
+            
         ]
 
         owner = self
@@ -3734,11 +4089,16 @@ class Browser(NSObject):
             pass
                                                     
     def _mount_webview(self, wk):
-        """Mount the webview BELOW the tabbar so tabs never get covered."""
 
         cv = self.window.contentView()
         tab_h = 34.0
 
+        # Remove ALL existing WKWebViews immediately
+        for sub in list(cv.subviews()):
+            if isinstance(sub, WKWebView):
+                sub.removeFromSuperview()
+
+        # Compute frame
         try:
             clr = self.window.contentLayoutRect()
             web_rect = ((0, 0), (clr.size.width, max(0.0, clr.size.height - tab_h)))
@@ -3757,14 +4117,9 @@ class Browser(NSObject):
 
         wk.setFrame_(web_rect)
         wk.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
-        
-        try:
-            wk.enableCursorRects()
-        except Exception:
-            pass
-            
-        self._bring_tabbar_to_front()
 
+        self._bring_tabbar_to_front()
+        
     def _rebuild_active_webview(self):
     
             # --- never rebuild homepage ---
@@ -4127,23 +4482,34 @@ class Browser(NSObject):
         if not (0 <= idx < len(self.tabs)):
             return
 
+        # --- Remove the view from window if it's currently mounted ---
         try:
-            self._teardown_webview(self.tabs[idx].view)
+            view = self.tabs[idx].view
+            if view and view.superview():
+                view.removeFromSuperview()
         except Exception:
             pass
 
+        # --- Remove tab from list ---
         del self.tabs[idx]
 
+        # --- If no tabs left, create homepage ---
         if not self.tabs:
             self._add_tab(home=True)
             return
 
-        if self.active >= len(self.tabs):
-            self.active = len(self.tabs) - 1
+        # --- Adjust active index ---
+        if idx == self.active:
+            # If we closed the active tab,
+            # move to previous tab if possible
+            self.active = min(idx, len(self.tabs) - 1)
         elif idx < self.active:
             self.active -= 1
 
-        self._mount_webview(self.tabs[self.active].view)
+        # --- Mount the new active tab cleanly ---
+        wk = self.tabs[self.active].view
+        self._mount_webview(wk)
+
         self._update_tab_buttons()
         self._style_tabs()
         self._sync_addr()
@@ -4161,17 +4527,33 @@ class Browser(NSObject):
     def actFwd_(self, _):
         try: self.tabs[self.active].view.goForward_(None)
         except Exception: pass
+
     def actReload_(self, _):
         try:
-            wk = self.tabs[self.active].view
+            if not self.tabs:
+                return
+
+            tab = self.tabs[self.active]
+            wk = tab.view
+
+            # 🔥 SPECIAL CASE: Threat Report (fix white screen)
+            if tab.url == "darkelf://report":
+                html = self._build_threat_report_html()
+                wk.loadHTMLString_baseURL_(html, None)
+                return
+
+            # Existing logic preserved
             u = wk.URL()
-            cur = str(u.absoluteString()) if u is not None else (self.tabs[self.active].url or "")
+            cur = str(u.absoluteString()) if u is not None else (tab.url or "")
+
             if cur == HOME_URL:
                 self.actHome_(None)
             else:
                 wk.reload_(None)
+
         except Exception as e:
             print("[Reload] Failed:", e)
+
     def actHome_(self, _):
         try:
             wk = self.tabs[self.active].view
