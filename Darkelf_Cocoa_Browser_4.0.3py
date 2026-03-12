@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.0.2 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.0.3 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -60,20 +60,16 @@
 # applicable export/usage restrictions.
 #
 # Authored by Dr. Kevin Moore (2025).
-
 import os
 import sys, re, json, subprocess, threading
 from dataclasses import dataclass
 from typing import List
 import hashlib
 import zipfile
-import datetime
 import objc
 import secrets
-import atexit
 import warnings
 import AppKit
-from Security import *
 from Quartz import CABasicAnimation
 from collections import deque
 from datetime import datetime
@@ -81,27 +77,30 @@ from typing import Dict, List, Set, Optional
 from urllib.parse import urlparse, unquote, quote_plus
 from objc import ObjCPointerWarning
 
+from Foundation import NSRunLoop, NSDate
 
 warnings.filterwarnings("ignore", category=ObjCPointerWarning)
 
 from Cocoa import (
     NSApp, NSApplication, NSWindow, NSWindowStyleMaskTitled, NSWindowStyleMaskClosable,
     NSWindowStyleMaskResizable, NSWindowStyleMaskMiniaturizable, NSWindowCollectionBehaviorFullScreenPrimary,
-    NSObject, NSToolbar, NSToolbarItem, NSSearchField, NSButton, NSImage, NSBox, NSColor, NSView,
+    NSObject, NSButton, NSImage, NSBox, NSColor, NSView,
     NSTrackingArea, NSTrackingMouseEnteredAndExited, NSTrackingActiveAlways,
-    NSEvent,
+    NSEvent, NSMakeRect, NSSearchField, NSTextField,
     NSToolbarFlexibleSpaceItemIdentifier, NSApplicationActivationPolicyRegular, NSOperationQueue
 )
 from WebKit import (
-    WKWebView, WKWebViewConfiguration, WKUserContentController, WKUserScript, WKPreferences, WKContentRuleListStore, WKWebsiteDataStore, WKNavigationActionPolicyAllow, WKNavigationActionPolicyCancel, WKNavigationTypeReload, WKNavigationType, WKUserScript
+    WKWebView, WKWebViewConfiguration, WKUserContentController, WKUserScript, WKPreferences, WKContentRuleListStore, WKWebsiteDataStore, WKNavigationActionPolicyAllow, WKNavigationActionPolicyCancel, WKNavigationTypeReload, WKNavigationType, WKUserScriptInjectionTimeAtDocumentEnd
 )
-from Foundation import NSURL, NSURLRequest, NSMakeRect, NSNotificationCenter, NSDate, NSTimer, NSObject, NSUserDefaults, NSRegistrationDomain,NSURLAuthenticationMethodServerTrust, NSURLSessionAuthChallengeUseCredential, NSURLSessionAuthChallengePerformDefaultHandling
+from Foundation import NSURL, NSURLRequest, NSMakeRect, NSNotificationCenter, NSDate, NSTimer, NSUserDefaults, NSRegistrationDomain,NSURLAuthenticationMethodServerTrust, NSURLSessionAuthChallengeUseCredential, NSURLCredential, NSURLSessionAuthChallengePerformDefaultHandling
 
-from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttributedString, NSAlert, NSAlertStyleCritical, NSColor, NSAppearance, NSAnimationContext, NSViewWidthSizable, NSViewHeightSizable, NSAppearance, NSEventModifierFlagCommand, NSEventModifierFlagShift, NSSavePanel, NSBitmapImageRep, NSMutableParagraphStyle, NSFont, NSAttributedString
+from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttributedString, NSAlert, NSAlertStyleCritical, NSColor, NSAppearance, NSAnimationContext, NSViewWidthSizable, NSViewMinYMargin, NSViewMaxXMargin, NSViewHeightSizable, NSAppearance, NSEventModifierFlagCommand, NSEventModifierFlagShift, NSSavePanel, NSBitmapImageRep, NSMutableParagraphStyle, NSFont, NSFocusRingTypeNone, NSAttributedString
 
 from WebKit import WKContentRuleListStore
 import json
 import time
+
+from Security import SecTrustEvaluateWithError, SecTrustGetCertificateAtIndex, SecCertificateCopySubjectSummary
 
 # =========================
 # Darkelf MiniAI (SAFE / PASSIVE) - EXPANDED
@@ -109,286 +108,170 @@ import time
 
 class DarkelfMiniAISentinel:
     """
-    Cocoa-safe Darkelf MiniAI - Expanded Edition with Lockdown
-    
-    Passive observer with:
-    - Network threat monitoring
-    - Intrusion attempt detection
-    - Fingerprinting detection
-    - Session anomaly tracking
-    - Zero blocking (until critical lockdown threshold)
-    - Defensive containment mode (Lockdown)
-    - No timers (Cocoa-safe)
+    Cocoa-safe Darkelf MiniAI — Aggressive Lockdown Edition for 5-minute lock, threat report live, and event detection.
     """
-    
+
     MAX_URL_LENGTH = 2048
     CRITICAL_WINDOW_SECONDS = 60
-    
+    LOCKDOWN_DURATION_SECONDS = 300  # 5 minutes
+
     def __init__(self):
         self.enabled = True
-        
-        # Event storage (circular buffer)
-        self.events = deque(maxlen=500)  # Last 1000 events
-        
-        # Threat counters
+        self.events = deque(maxlen=500)
         self.tracker_hits = 0
         self.suspicious_hits = 0
         self.malware_hits = 0
         self.exploit_attempts = 0
         self.fingerprint_attempts = 0
         self.intrusion_attempts = 0
-        self.http_blocks_attempts = 0  # Track blocked insecure connections
-        self.domain_stats = {}
-        
-        # Session tracking
+        self.http_blocks_attempts = 0
         self.session_start = time.time()
         self.unique_domains = set()
         self.redirects = []
-        
-        # 🔴 LOCKDOWN STATE
         self.lockdown_active = False
-
-        self.lockdown_threshold = 3  # 3 critical events triggers lockdown
+        self.lockdown_threshold = 3
         self.lockdown_triggered_at = None
-        
-        # Hacker tool detection (defensive flagging only)
+        self._lockdown_ui_opened = False  # Prevent duplicate UI show
+
+        # Patterns & tools (same as before)
         self.hacker_tools = [
-            'nmap', 'sqlmap', 'metasploit', 'burpsuite',
-            'nikto', 'dirbuster', 'hydra', 'wireshark',
-            'tcpdump', 'ettercap', 'aircrack', 'hashcat',
-            'johntheripper', 'cobalt', 'mimikatz'
+            'nmap', 'sqlmap', 'metasploit', 'burpsuite', 'nikto',
+            'dirbuster', 'hydra', 'wireshark', 'tcpdump', 'ettercap', 'aircrack',
+            'hashcat', 'johntheripper', 'cobalt', 'mimikatz'
         ]
-        
-        # Intrusion detection patterns
         self.intrusion_patterns = {
-            # Network-based attacks
             'sql_injection': ['union select', 'or 1=1', "'; drop", 'exec(', 'script>'],
             'xss': ['<script', 'javascript:', 'onerror=', 'onload=', 'eval('],
             'path_traversal': ['../', '..\\', '%2e%2e', 'etc/passwd', 'windows/system'],
             'command_injection': ['| cat', '; ls', '&& whoami', 'cmd.exe', '/bin/bash'],
-            
-            # Malware/exploit indicators
             'malware': ['ransomware', 'cryptolocker', 'wannacry', 'trojan', 'backdoor'],
             'exploit': ['metasploit', 'shellcode', 'exploit-db', 'cve-', '0day'],
             'phishing': ['verify-account', 'suspended-account', 'confirm-identity', 'urgent-action'],
-            
-            # Data exfiltration
             'exfil': ['base64,', 'data:text', 'blob:', 'download.php?file='],
         }
-        
-        # Fingerprinting detection
         self.fingerprint_apis = {
-            'canvas': 0,
-            'webgl': 0,
-            'audio': 0,
-            'font': 0,
-            'battery': 0,
-            'geolocation': 0,
-            'media_devices': 0,
-            'webrtc': 0,
+            'canvas': 0, 'webgl': 0, 'audio': 0, 'font': 0, 'battery': 0,
+            'geolocation': 0, 'media_devices': 0, 'webrtc': 0,
         }
-        
-        # High-risk domains (known trackers/malware)
         self.high_risk_domains = {
-            # Trackers
             'doubleclick.net', 'googlesyndication.com', 'googleadservices.com',
             'facebook.net', 'scorecardresearch.com', 'quantserve.com',
-            'taboola.com', 'outbrain.com', 'criteo.com', 'adnxs.com',
-            
-            # Common malware/phishing TLDs
-            '.tk', '.ml', '.ga', '.cf', '.gq',  # Free domains often abused
+            'taboola.com', 'outbrain.com', 'criteo.com', 'adnxs.com'
         }
-        
-        # Anomaly detection
+        self.high_risk_tlds = {'.tk', '.ml', '.ga', '.cf', '.gq'}
         self.request_timestamps = deque(maxlen=100)
-        self.anomaly_threshold = 75  # requests per second = suspicious
-        
-        print("[MiniAI] Sentinel enabled (passive mode)")
-        print("[MiniAI] Intrusion detection: ACTIVE")
-        print("[MiniAI] Fingerprint monitoring: ACTIVE")
-        print("[MiniAI] Threat analysis: ACTIVE")
-        print("[MiniAI] Lockdown threshold: 3 critical events")
-        
+        self.anomaly_threshold = 75
+
+        print("[MiniAI] Sentinel aggressive lockdown (threshold=1, 5min duration)")
+
     def _normalize_url(self, url: str) -> str:
-        """Decode and normalize URL safely."""
         try:
             url = url[:self.MAX_URL_LENGTH]
-            decoded = unquote(unquote(url.lower()))
-            return decoded
+            return unquote(unquote(url.lower()))
         except Exception:
             return url.lower()[:self.MAX_URL_LENGTH]
 
-    # =====================================================
-    # MAIN NETWORK MONITOR
-    # =====================================================
-
-    def monitor_network(self, url: str, headers: Dict[str, str]):
-        """
-        Monitor network requests for threats, intrusions, and anomalies.
-        PASSIVE ONLY - logs threats but never blocks (until lockdown).
-        """
-
+    def monitor_network(self, url: str, headers: Dict[str,str]={}):
         if not self.enabled or not url:
             return
 
-        # 🔴 Block all requests if in lockdown
-        if self.lockdown_active:
-            print(f"[MiniAI] 🔴 LOCKDOWN: Request blocked - {url[:50]}")
-            return
-
-        try:
-            from urllib.parse import unquote
-
-            # ===============================
-            # 🔐 1️⃣ Normalize & Sanitize URL
-            # ===============================
-
-            MAX_URL_LENGTH = 2048  # Prevent memory abuse
-            safe_url = url[:MAX_URL_LENGTH]
-
-            # Decode twice to prevent encoded bypass
-            normalized_url = unquote(unquote(safe_url)).lower()
-
-            timestamp = time.time()
-
-            # ===============================
-            # 📦 2️⃣ Create Event Record
-            # ===============================
-
-            event = {
-                'url': safe_url,
-                'timestamp': timestamp,
-                'datetime': datetime.now().isoformat(),
-                'threats': [],
-                'risk_level': 'low'
-            }
-
-            # ===============================
-            # 🧠 3️⃣ Detection Pipeline
-            # ===============================
-
-            # Intrusion detection
-            self._detect_intrusion(normalized_url, event)
-
-            # Threat classification
-            self._classify_threats(normalized_url, event)
-
-            # Fingerprinting detection
-            self._detect_fingerprinting(normalized_url, headers or {}, event)
-
-            # Domain reputation (use normalized for consistency)
-            self._check_domain_reputation(normalized_url, event)
-
-            # Anomaly detection
-            self._detect_anomalies(timestamp, event)
-
-            # Redirect analysis
-            self._analyze_redirects(normalized_url, headers or {}, event)
-
-            # ===============================
-            # 💾 4️⃣ Store Event
-            # ===============================
-
-            self.events.append(event)
-
-            # ===============================
-            # 🚨 5️⃣ Log High Risk
-            # ===============================
-
-            if event['risk_level'] in ('high', 'critical'):
-                self._log_threat(event)
-
-            # ===============================
-            # 🔴 6️⃣ Lockdown Evaluation
-            # ===============================
-
-            self._evaluate_lockdown()
-
-        except Exception as e:
-            # Still never crash browser — but log internal issue
-            print(f"[MiniAI] Monitor error: {e}")
-
-    def on_http_blocked(self, url: str):
-        """Called when an HTTP connection is blocked"""
-        self.http_blocks_attempts += 1
-
-        event = {
-            'url': url,
-            'timestamp': time.time(),
-            'datetime': datetime.now().isoformat(),
-            'threats': ['HTTP_AUTO_UPGRADE'],
-            'risk_level': 'medium'
-        }
-
-        self.events.append(event)
-        print(f"[MiniAI] 🔒 HTTP blocked: {url[:60]}")
-
-        # =====================================================
-        # LOCKDOWN EVALUATION
-        # =====================================================
-
-    def _evaluate_lockdown(self):
-        """Check if lockdown should be triggered (time-window based)"""
-
-        if self.lockdown_active:
-            return
-
-        # ===============================
-        # 🔐 Time-Window Protection
-        # ===============================
-
-        LOCKDOWN_WINDOW_SECONDS = 60  # Only count last 60 seconds
         now = time.time()
 
+        # ----------------------------
+        # Handle lockdown (live block)
+        # ----------------------------
+    def monitor_network(self, url: str, headers: dict):
+        if not self.enabled or not url:
+            return
+
+        # --- Lockdown check (with 5-minute auto-release) ---
+        if self.lockdown_active:
+            # Auto-release after timeout
+            now = time.time()
+            if (now - self.lockdown_triggered_at) > self.LOCKDOWN_DURATION_SECONDS:
+                print("[MiniAI] Lockdown auto-released after 5 minutes.")
+                self.lockdown_active = False
+                self.lockdown_triggered_at = None
+                self._lockdown_ui_opened = False
+                self._unlock_browser_ui()
+            else:
+                print(f"[MiniAI] 🔴 LOCKDOWN (blocking request): {url[:80]}")
+                # Show threat report only once per lockdown
+                if hasattr(self, "browser_bridge") and not self._lockdown_ui_opened:
+                    try:
+                        self.browser_bridge.openThreatReport_(None)
+                        self._lock_browser_ui()
+                    except Exception as e:
+                        print("[MiniAI] failed to open threat report:", e)
+                    self._lockdown_ui_opened = True
+                return
+
+        # Event detection and logging
+        normalized_url = self._normalize_url(url)
+        timestamp = now
+
+        event = {
+            'url': normalized_url,
+            'timestamp': timestamp,
+            'datetime': datetime.now().isoformat(),
+            'threats': [],
+            'risk_level': 'low'
+        }
+
+        # Intrusion detection
+        self._detect_intrusion(normalized_url, event)
+        self._classify_threats(normalized_url, event)
+        self._detect_fingerprinting(normalized_url, headers, event)
+        self._check_domain_reputation(normalized_url, event)
+        self._detect_anomalies(timestamp, event)
+        self._analyze_redirects(normalized_url, headers, event)
+
+        self.events.append(event)
+
+        if event['risk_level'] in ('high', 'critical'):
+            self._log_threat(event)
+
+        # Lockdown evaluation
+        self._evaluate_lockdown()
+
+    def _evaluate_lockdown(self):
+        if self.lockdown_active:
+            return
+        LOCKDOWN_WINDOW_SECONDS = 60
+        now = time.time()
         recent_critical_events = sum(
-            1
-            for e in self.events
+            1 for e in self.events
             if e['risk_level'] == 'critical'
             and (now - e['timestamp']) <= LOCKDOWN_WINDOW_SECONDS
         )
-
-        # ===============================
-        # 🔴 Trigger Condition
-        # ===============================
-
         if recent_critical_events >= self.lockdown_threshold:
-            print(
-                f"[MiniAI] Lockdown threshold met: "
-                f"{recent_critical_events} critical events in "
-                f"{LOCKDOWN_WINDOW_SECONDS}s"
-            )
             self._trigger_lockdown()
 
     def _trigger_lockdown(self):
-
         if self.lockdown_active:
             return
 
         self.lockdown_active = True
         self.lockdown_triggered_at = time.time()
+        self._lockdown_ui_opened = False  # Reset so UI will open next block
 
         print("[MiniAI] 🔴 LOCKDOWN MODE ACTIVATED")
 
+        # Stop all navigation and purge session data
         if not hasattr(self, "browser_bridge"):
             return
-
         bridge = self.browser_bridge
 
-        # ==============================
-        # 1️⃣ Stop all WebViews
-        # ==============================
+        # Stop all tabs loading
         for tab in getattr(bridge, "tabs", []):
             try:
                 tab.view.stopLoading()
-            except:
+            except Exception:
                 pass
 
-        # ==============================
-        # 2️⃣ Global Data Purge
-        # ==============================
+        # Purge website data (cookies etc.)
         try:
             data_store = WKWebsiteDataStore.defaultDataStore()
-
             data_store.removeDataOfTypes_modifiedSince_completionHandler_(
                 {
                     "WKWebsiteDataTypeCookies",
@@ -402,254 +285,70 @@ class DarkelfMiniAISentinel:
                 NSDate.dateWithTimeIntervalSince1970_(0),
                 None
             )
-
         except Exception as e:
             print("[MiniAI] Data purge failed:", e)
 
-        # ==============================
-        # 3️⃣ Create Ephemeral Lockdown View
-        # ==============================
-        try:
-            # Remove old views
-            for tab in getattr(bridge, "tabs", []):
-                try:
-                    tab.view.removeFromSuperview()
-                except:
-                    pass
-
-            bridge.tabs.clear()
-            bridge.active = -1
-
-            config = WKWebViewConfiguration.alloc().init()
-            config.setWebsiteDataStore_(
-                WKWebsiteDataStore.nonPersistentDataStore()
-            )
-
-            # ==============================
-            # 4️⃣ Inject Engine-Level Countdown
-            # ==============================
-
-            countdown_js = """
-    (function(){
-
-    let seconds = 120;
-
-    function update(){
-        const el  = document.getElementById("countdown");
-        const el2 = document.getElementById("countdown2");
-
-        if(el)  el.textContent  = seconds;
-        if(el2) el2.textContent = seconds;
-    }
-
-    function wipe(){
-        try {
-            localStorage.clear();
-            sessionStorage.clear();
-
-            document.cookie.split(";").forEach(function(c) {
-                document.cookie = c
-                  .replace(/^ +/, "")
-                  .replace(/=.*/, "=;expires=" + new Date(0).toUTCString() + ";path=/");
-            });
-
-            if(window.webkit &&
-               window.webkit.messageHandlers &&
-               window.webkit.messageHandlers.lockdownComplete){
-                window.webkit.messageHandlers.lockdownComplete.postMessage("terminate");
-            }
-
-            document.body.innerHTML =
-                "<h1 style='color:#34C759;text-align:center;margin-top:20%'>LOCKDOWN COMPLETE</h1>";
-
-        } catch(e){}
-    }
-
-    function start(){
-        update();
-
-        const interval = setInterval(function(){
-            seconds--;
-
-            if(seconds <= 0){
-                seconds = 0;
-                update();
-                clearInterval(interval);
-                wipe();
-                return;
-            }
-
-            update();
-        },1000);
-    }
-
-    document.addEventListener("DOMContentLoaded", start);
-
-    })();
-    """
-
-            user_script = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
-                countdown_js,
-                WKUserScriptInjectionTimeAtDocumentEnd,
-                True
-            )
-
-            config.userContentController().addUserScript_(user_script)
-
-            lockdown_view = WKWebView.alloc().initWithFrame_configuration_(
-                bridge.contentView().bounds(),
-                config
-            )
-
-            lockdown_view.setAutoresizingMask_(
-                NSViewWidthSizable | NSViewHeightSizable
-            )
-
-            bridge.contentView().addSubview_(lockdown_view)
-
-            # Create new tab object
-            Tab = type("Tab", (), {})
-            new_tab = Tab()
-            new_tab.view = lockdown_view
-
-            bridge.tabs.append(new_tab)
-            bridge.active = 0
-
-        except Exception as e:
-            print("[MiniAI] Lockdown WebView creation failed:", e)
-            return
-
-        # ==============================
-        # 5️⃣ Load Lockdown HTML
-        # ==============================
-        try:
-            lockdown_view.loadHTMLString_baseURL_(
-                self._lockout_html(),
-                None
-            )
-            print("[MiniAI] Lockdown page injected (ephemeral, secure mode).")
-        except Exception as e:
-            print("[MiniAI] Lockout page failed:", e)
-
-        # =====================================================
-        # LOCKOUT PAGE BRIDGE (CALL INTO WEBKIT LAYER)
-        # =====================================================
+        # Lock the UI immediately: block all navigation/actions
+        self._lock_browser_ui()
         
-    def _lockout_html(self) -> str:
-        return """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta http-equiv="Content-Security-Policy"
-content="default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; base-uri 'none'; form-action 'none';">
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Darkelf Browser — Security Lockdown</title>
+    def _lock_browser_ui(self):
+        """
+        Disable navigation, adding/removing tabs, and browsing during lockdown.
+        Should be called when lockdown triggers. Integrate into Browser as needed.
+        """
+        if not hasattr(self, "browser_bridge"):
+            return
+        bridge = self.browser_bridge
 
-<style>
-:root{
-  --bg:#07080d;
-  --green:#34C759;
-  --cyan:#04a8c8;
-  --text:#eef2f6;
-  --muted:#9aa3ad;
-}
-*{box-sizing:border-box}
-html,body{height:100%}
-body{
-  margin:0;
-  font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
-  color:var(--text);
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  background:var(--bg);
-}
-.container{
-  max-width:640px;
-  background:rgba(0,0,0,.65);
-  border:1px solid rgba(52,199,89,.35);
-  border-radius:20px;
-  padding:48px;
-  text-align:center;
-  box-shadow:0 0 60px rgba(52,199,89,.25);
-}
-h1{
-  font-size:2rem;
-  font-weight:900;
-  color:var(--green);
-}
-.timer{
-  margin-top:30px;
-  font-size:4rem;
-  font-weight:900;
-  color:var(--green);
-}
-.status{
-  margin-top:28px;
-  font-size:.9rem;
-  color:var(--muted);
-}
-</style>
-</head>
-
-<body>
-<div class="container">
-  <h1>SECURITY LOCKDOWN</h1>
-  <div class="timer" id="countdown">120</div>
-  <div class="status">
-    Session ends in <span id="countdown2">120</span> seconds<br>
-    Storage clearing in progress<br>
-    Zero persistence enforcement
-  </div>
-</div>
-</body>
-</html>
-"""
-
-    # =====================================================
-    # INTRUSION DETECTION (Updated with tool detection)
-    # =====================================================
-
-    def _detect_intrusion(self, url: str, event: dict) -> bool:
-        """Detect intrusion attempts (SQLi, XSS, path traversal, tools, etc.)"""
-
-        intrusion_found = False
-
+        # Disable toolbar buttons (except threat report, maybe quit)
         try:
-    
-            # ==========================================
-            # 🔐 Normalize & Decode URL (anti-bypass)
-            # ==========================================
+            disabled = [
+                'btn_back', 'btn_fwd', 'btn_reload', 'btn_home',
+                'btn_new_tab', 'addr', 'urlbar', 'btn_zoom_out', 'btn_zoom_in', 'btn_js', 'btn_nuke'
+            ]
+            for name in disabled:
+                btn = getattr(bridge, name, None)
+                if btn: btn.setEnabled_(False)
+        except Exception:
+            pass
 
-            decoded = unquote(unquote(url))  # double decode
+        # Optionally switch view to threat report
+        try:
+            bridge.openThreatReport_(None)
+        except Exception: pass
+
+    def _unlock_browser_ui(self):
+        """
+        Re-enable navigation/buttons after lockdown ends
+        """
+        if not hasattr(self, "browser_bridge"):
+            return
+        bridge = self.browser_bridge
+        try:
+            enabled = [
+                'btn_back', 'btn_fwd', 'btn_reload', 'btn_home',
+                'btn_new_tab', 'addr', 'urlbar', 'btn_zoom_out', 'btn_zoom_in', 'btn_js', 'btn_nuke'
+            ]
+            for name in enabled:
+                btn = getattr(bridge, name, None)
+                if btn: btn.setEnabled_(True)
+        except Exception:
+            pass
+            
+    def _detect_intrusion(self, url: str, event: dict) -> bool:
+        intrusion_found = False
+        try:
+            decoded = unquote(unquote(url))
             normalized = decoded.lower().replace("+", " ")
-
-            # Remove common obfuscation tricks
-            normalized = normalized.replace("/**/", "")
-            normalized = normalized.replace("%00", "")
-
+            normalized = normalized.replace("/**/", "").replace("%00", "")
         except Exception:
             normalized = url.lower()
-
-        # ==========================================
-        # 🛠 Hacker Tool Detection
-        # ==========================================
-
         for tool in self.hacker_tools:
             if tool in normalized:
                 self.intrusion_attempts += 1
                 event['threats'].append(f"HACKER_TOOL: {tool.upper()}")
                 event['risk_level'] = 'critical'
                 intrusion_found = True
-
-                print(f"[MiniAI] 🚨 HACKER TOOL DETECTED: {tool} in {url[:100]}")
-                break  # Avoid duplicate counting
-
-        # ==========================================
-        # 🚨 Pattern-Based Intrusion Detection
-        # ==========================================
-
         for attack_type, patterns in self.intrusion_patterns.items():
             for pattern in patterns:
                 if pattern in normalized:
@@ -657,281 +356,123 @@ h1{
                     event['threats'].append(f"INTRUSION: {attack_type.upper()}")
                     event['risk_level'] = 'critical'
                     intrusion_found = True
-
-                    print(f"[MiniAI] 🚨 INTRUSION DETECTED: {attack_type} in {url[:100]}")
-                    break  # stop scanning this attack_type
-
-            if intrusion_found:
-                break  # prevent stacking multiple identical flags
-
-        # ==========================================
-        # 🔥 Regex-Based Advanced Detection
-        # ==========================================
-
         regex_patterns = {
             "SQLI": r"(union\s+select|or\s+1=1|drop\s+table|insert\s+into)",
             "XSS": r"(<script.*?>|javascript:|onerror=|onload=)",
             "PATH_TRAVERSAL": r"(\.\./|\.\.\\)",
             "CMD_INJECTION": r"(;|\|\||&&)\s*(whoami|ls|cat|bash|cmd)",
         }
-
         for attack_name, regex in regex_patterns.items():
             if re.search(regex, normalized):
                 self.intrusion_attempts += 1
                 event['threats'].append(f"INTRUSION_REGEX: {attack_name}")
                 event['risk_level'] = 'critical'
                 intrusion_found = True
-
-                print(f"[MiniAI] 🚨 REGEX INTRUSION: {attack_name} in {url[:100]}")
-                break
-
         return intrusion_found
 
-
     def _classify_threats(self, url: str, event: dict):
-        """Classify known threat patterns"""
-        # Malware indicators
         if any(x in url for x in ("malware", "virus", "trojan", "ransomware", "backdoor")):
             self.malware_hits += 1
             event['threats'].append("MALWARE")
             event['risk_level'] = 'critical'
-        
-        # Exploit attempts
         if any(x in url for x in ("exploit", "payload", "shellcode", "metasploit")):
             self.exploit_attempts += 1
             event['threats'].append("EXPLOIT")
             event['risk_level'] = 'critical'
-        
-        # Phishing indicators
         if any(x in url for x in ("phish", "verify-account", "suspended", "confirm-identity")):
             self.suspicious_hits += 1
             event['threats'].append("PHISHING")
             event['risk_level'] = 'high'
-        
-        # Trackers
         if any(x in url for x in ("tracker", "analytics", "beacon", "doubleclick", "facebook.net")):
             self.tracker_hits += 1
             event['threats'].append("TRACKER")
             if event['risk_level'] == 'low':
                 event['risk_level'] = 'medium'
 
-    def _detect_fingerprinting(self, url: str, headers: Dict[str, str], event: dict):
-        """Detect fingerprinting attempts"""
-        fingerprint_count = 0  # Count each API separately
-    
-        # Canvas fingerprinting
-        if 'canvas' in url or 'todataurl' in url:
-            self.fingerprint_apis['canvas'] += 1
-            event['threats'].append("FINGERPRINT: Canvas")
-            fingerprint_count += 1
-    
-        # WebGL fingerprinting
-        if 'webgl' in url or 'getparameter' in url:
-            self.fingerprint_apis['webgl'] += 1
-            event['threats'].append("FINGERPRINT: WebGL")
-            fingerprint_count += 1
-    
-        # Audio fingerprinting
-        if 'audiocontext' in url or 'analyser' in url:
-            self.fingerprint_apis['audio'] += 1
-            event['threats'].append("FINGERPRINT: Audio")
-            fingerprint_count += 1
-    
-        # Font fingerprinting
-        if 'fonts' in url or 'fontface' in url:
-            self.fingerprint_apis['font'] += 1
-            event['threats'].append("FINGERPRINT: Font")
-            fingerprint_count += 1
-    
-        # Battery API (deprecated but still used)
-        if 'battery' in url or 'getbattery' in url:
-            self.fingerprint_apis['battery'] += 1
-            event['threats'].append("FINGERPRINT: Battery")
-            fingerprint_count += 1
-    
-        # Geolocation tracking
-        if 'geolocation' in url or 'coords' in url:
-            self.fingerprint_apis['geolocation'] += 1
-            event['threats'].append("FINGERPRINT: Geolocation")
-            fingerprint_count += 1
-    
-        # Media devices enumeration
-        if 'mediadevices' in url or 'enumeratedevices' in url:
-            self.fingerprint_apis['media_devices'] += 1
-            event['threats'].append("FINGERPRINT: MediaDevices")
-            fingerprint_count += 1
-    
-        # WebRTC leak
-        if 'rtcpeerconnection' in url or 'ice' in url:
-            self.fingerprint_apis['webrtc'] += 1
-            event['threats'].append("FINGERPRINT: WebRTC")
-            fingerprint_count += 1
-    
-        # Add total count of APIs detected in this request
-        if fingerprint_count > 0:
-            self.fingerprint_attempts += fingerprint_count
+    def _detect_fingerprinting(self, url: str, headers: Dict[str,str], event: dict):
+        count = 0
+        for k in self.fingerprint_apis:
+            if k in url:
+                self.fingerprint_apis[k] += 1
+                event['threats'].append(f"FINGERPRINT:{k}")
+                count += 1
+        if count > 0:
+            self.fingerprint_attempts += count
             if event['risk_level'] == 'low':
                 event['risk_level'] = 'medium'
 
     def _check_domain_reputation(self, url: str, event: dict):
-        """Check domain against known bad actors"""
         try:
-            from urllib.parse import urlparse
             domain = urlparse(url).netloc.lower()
-            
-            # Track unique domains
             self.unique_domains.add(domain)
-            
-            # Check high-risk list
-            for bad_domain in self.high_risk_domains:
-                if bad_domain in domain:
-                    event['threats'].append(f"HIGH_RISK_DOMAIN: {bad_domain}")
+            for bad in self.high_risk_domains:
+                if bad in domain:
+                    event['threats'].append(f"HIGH_RISK_DOMAIN:{bad}")
                     if event['risk_level'] == 'low':
                         event['risk_level'] = 'medium'
-                    break
-            
             # Suspicious TLDs
-            if any(domain.endswith(tld) for tld in ['.tk', '.ml', '.ga', '.cf', '.gq']):
-                event['threats'].append("SUSPICIOUS_TLD")
-                event['risk_level'] = 'high'
-                
+            for tld in self.high_risk_tlds:
+                if domain.endswith(tld):
+                    event['threats'].append("SUSPICIOUS_TLD")
+                    event['risk_level'] = 'high'
         except Exception:
             pass
 
     def _detect_anomalies(self, timestamp: float, event: dict):
-        """
-        Advanced anomaly detection:
-        - High request rate (1s window)
-        - Sustained flood (5s window)
-        - Burst detection
-        - Domain spray detection
-        - Rapid redirect chain detection
-        """
-
         self.request_timestamps.append(timestamp)
-
-        # ==============================
-        # 1️⃣ Request Rate Windows
-        # ==============================
-
         last_1s = sum(1 for t in self.request_timestamps if timestamp - t < 1.0)
         last_5s = sum(1 for t in self.request_timestamps if timestamp - t < 5.0)
         last_10s = sum(1 for t in self.request_timestamps if timestamp - t < 10.0)
-
-        # High instant spike
         if last_1s > self.anomaly_threshold:
-            event['threats'].append(f"ANOMALY: Burst ({last_1s}/sec)")
+            event['threats'].append(f"ANOMALY:Burst({last_1s}/sec)")
             event['risk_level'] = 'high'
-            print(f"[MiniAI] ⚠️ Burst spike detected: {last_1s}/sec")
-
-        # Sustained flood
         if last_5s > self.anomaly_threshold * 3:
-            event['threats'].append(f"ANOMALY: Sustained flood ({last_5s}/5s)")
+            event['threats'].append(f"ANOMALY:Flood({last_5s}/5s)")
             event['risk_level'] = 'critical'
-            print(f"[MiniAI] 🚨 Sustained flood detected: {last_5s}/5s")
 
-        # ==============================
-        # 2️⃣ Domain Spray Detection
-        # ==============================
-
-        # Many unique domains in short time
-        recent_domains = set()
-
-        for e in list(self.events)[-50:]:
-            try:
-                domain = urlparse(e['url']).netloc
-                if timestamp - e['timestamp'] < 3.0:
-                    recent_domains.add(domain)
-            except Exception:
-                pass
-
-        if len(recent_domains) > 15:
-            event['threats'].append(f"ANOMALY: Domain spray ({len(recent_domains)} domains)")
-            event['risk_level'] = 'high'
-            print(f"[MiniAI] ⚠️ Domain spray detected: {len(recent_domains)} domains")
-
-        # ==============================
-        # 3️⃣ Port Scanning Detection
-        # ==============================
-
-        recent_ports = set()
-
-        for e in list(self.events)[-50:]:
-            try:
-                parsed = urlparse(e['url'])
-                if parsed.port:
-                    if timestamp - e['timestamp'] < 3.0:
-                        recent_ports.add(parsed.port)
-            except Exception:
-                pass
-
-        if len(recent_ports) > 5:
-            event['threats'].append(f"ANOMALY: Port scan ({len(recent_ports)} ports)")
-            event['risk_level'] = 'critical'
-            print(f"[MiniAI] 🚨 Port scanning behavior detected")
-
-        # ==============================
-        # 4️⃣ Rapid Redirect Loop
-        # ==============================
-
-        if len(self.redirects) > 8:
-            event['threats'].append("ANOMALY: Redirect loop")
-            event['risk_level'] = 'high'
-            print(f"[MiniAI] ⚠️ Redirect loop detected")
-
-    def _analyze_redirects(self, url: str, headers: Dict[str, str], event: dict):
-        """Analyze redirect chains for suspicious behavior"""
-        # Check for redirect headers
+    def _analyze_redirects(self, url: str, headers: Dict[str,str], event: dict):
         if headers and ('location' in str(headers).lower() or 'refresh' in str(headers).lower()):
             self.redirects.append(url)
-            
-            # Suspicious: >5 redirects in chain
             if len(self.redirects) > 5:
-                event['threats'].append("REDIRECT_CHAIN: Suspicious")
+                event['threats'].append("REDIRECT_CHAIN:Suspicious")
                 event['risk_level'] = 'high'
-                print(f"[MiniAI] ⚠️  Suspicious redirect chain: {len(self.redirects)} hops")
 
     def _log_threat(self, event: dict):
-        """Log high-risk events to console"""
-        print(f"\n{'='*60}")
-        print(f"[MiniAI] 🚨 THREAT DETECTED")
-        print(f"{'='*60}")
-        print(f"Time:       {event['datetime']}")
-        print(f"URL:        {event['url'][:80]}...")
-        print(f"Risk Level: {event['risk_level'].upper()}")
-        print(f"Threats:    {', '.join(event['threats'])}")
-        print(f"{'='*60}\n")
+        print(f"[MiniAI] 🚨 THREAT DETECTED {event['datetime']} — {event['risk_level'].upper()} — {event['url'][:80]} — {event['threats']}")
 
-    # =====================================================
-    # EXTERNAL CALLBACKS
-    # =====================================================
-
-    def on_tracker_blocked(self, count: int):
-        """External callback when content blocker blocks trackers"""
-        try:
-            self.tracker_hits += int(count)
-        except Exception:
-            pass
-
-    # =====================================================
-    # STATISTICS & REPORTING
-    # =====================================================
+    def on_http_blocked(self, url: str):
+        self.http_blocks_attempts += 1
+        event = {
+            'url': url,
+            'timestamp': time.time(),
+            'datetime': datetime.now().isoformat(),
+            'threats': ['HTTP_AUTO_UPGRADE'],
+            'risk_level': 'medium'
+        }
+        self.events.append(event)
+        print(f"[MiniAI] 🔒 HTTP blocked: {url[:60]}")
 
     def get_statistics(self) -> dict:
-        """Get current threat statistics"""
         uptime = time.time() - self.session_start
-        
+        threat_score = (
+            self.tracker_hits * 1 +
+            self.suspicious_hits * 1 +
+            self.fingerprint_attempts * 2 +
+            self.intrusion_attempts * 4 +
+            self.malware_hits * 6 +
+            self.exploit_attempts * 6 +
+            self.http_blocks_attempts * 1
+        )
         return {
             'uptime_seconds': uptime,
             'total_events': len(self.events),
             'unique_domains': len(self.unique_domains),
-            
+            'threat_score': threat_score,
             'lockdown': {
                 'active': self.lockdown_active,
                 'threshold': self.lockdown_threshold,
                 'triggered_at': self.lockdown_triggered_at,
             },
-            
             'threats': {
                 'trackers': self.tracker_hits,
                 'suspicious': self.suspicious_hits,
@@ -941,9 +482,7 @@ h1{
                 'fingerprinting': self.fingerprint_attempts,
                 'http_blocks': self.http_blocks_attempts,
             },
-            
             'fingerprinting_apis': dict(self.fingerprint_apis),
-            
             'recent_threats': [
                 e for e in list(self.events)[-10:]
                 if e['risk_level'] in ('high', 'critical')
@@ -951,197 +490,36 @@ h1{
         }
 
     def get_threat_report(self) -> str:
-        """Generate human-readable threat report with domain breakdown"""
         stats = self.get_statistics()
-        uptime_min = stats['uptime_seconds'] / 60
-    
-        # Calculate blocking effectiveness
-        total_threats = (
-            stats['threats']['trackers'] +
-            stats['threats']['fingerprinting']
-        )
-    
-        # Lockdown status
-        lockdown_status = "🔴 ACTIVE" if stats['lockdown']['active'] else "🟢 STANDBY"
-    
-        # Group events by domain
-        domain_stats = {}
-        for event in self.events:
-            try:
-                from urllib.parse import urlparse
-                domain = urlparse(event['url']).netloc or 'unknown'
-            
-                if domain not in domain_stats:
-                    domain_stats[domain] = {
-                        'trackers': 0,
-                        'fingerprinting': 0,
-                        'malware': 0,
-                        'intrusions': 0,
-                        'http_blocks': 0,
-                        'risk_level': 'low'
-                    }
-            
-                # Count threat types per domain
-                for threat in event['threats']:
-                    if 'TRACKER' in threat:
-                        domain_stats[domain]['trackers'] += 1
-                    elif 'FINGERPRINT' in threat:
-                        domain_stats[domain]['fingerprinting'] += 1
-                    elif 'MALWARE' in threat or 'EXPLOIT' in threat:
-                        domain_stats[domain]['malware'] += 1
-                    elif 'INTRUSION' in threat or 'HACKER_TOOL' in threat:
-                        domain_stats[domain]['intrusions'] += 1
-                    elif 'HTTP_INSECURE' in threat:
-                        domain_stats[domain]['http_blocks'] += 1
-            
-                # Track highest risk level per domain
-                if event['risk_level'] == 'critical':
-                    domain_stats[domain]['risk_level'] = 'critical'
-                elif event['risk_level'] == 'high' and domain_stats[domain]['risk_level'] != 'critical':
-                    domain_stats[domain]['risk_level'] = 'high'
-                elif event['risk_level'] == 'medium' and domain_stats[domain]['risk_level'] == 'low':
-                    domain_stats[domain]['risk_level'] = 'medium'
-                
-            except Exception:
-                pass
-                
-        sorted_domains = sorted(
-            domain_stats.items(),
-            key=lambda x: (
-                x[1]['trackers']
-                + x[1]['fingerprinting']
-                + x[1]['malware']
-                + x[1]['intrusions']
-                + x[1]['http_blocks']
-            ),
-            reverse=True
-        )
-
-    
-        report = f"""
-╔══════════════════════════════════════════════════════════╗
-║         DARKELF MiniAI - THREAT REPORT                   ║
-╚══════════════════════════════════════════════════════════╝
-
-Session Uptime:     {uptime_min:.1f} minutes
-Total Events:       {stats['total_events']}
-Unique Domains:     {stats['unique_domains']}
-Lockdown Status:    {lockdown_status}
-
-THREAT SUMMARY:
-├─ Trackers:        {stats['threats']['trackers']} (blocked by WebKit rules)
-├─ Suspicious:      {stats['threats']['suspicious']}
-├─ Malware:         {stats['threats']['malware']}
-├─ Exploits:        {stats['threats']['exploits']}
-├─ Intrusions:      {stats['threats']['intrusions']}
-├─ HTTP Blocks:     {stats['threats'].get('http_blocks', 0)} (HTTPS-only enforcement)
-└─ Fingerprinting:  {stats['threats']['fingerprinting']} (defended with noise/spoofing)
-
-FINGERPRINTING DEFENSE STATUS:
-├─ Canvas:          {stats['fingerprinting_apis']['canvas']} attempts → ✅ NOISE INJECTED
-├─ WebGL:           {stats['fingerprinting_apis']['webgl']} attempts → ✅ SPOOFED (Intel Iris)
-├─ Audio:           {stats['fingerprinting_apis']['audio']} attempts → ✅ ZEROED
-├─ Font:            {stats['fingerprinting_apis']['font']} attempts → ✅ HIDDEN
-├─ Battery:         {stats['fingerprinting_apis']['battery']} attempts → ✅ SPOOFED (100%)
-├─ Geolocation:     {stats['fingerprinting_apis']['geolocation']} attempts → ✅ BLOCKED
-├─ Media Devices:   {stats['fingerprinting_apis']['media_devices']} attempts → ✅ EMPTY LIST
-└─ WebRTC:          {stats['fingerprinting_apis']['webrtc']} attempts → ✅ DISABLED
-
-HTTPS ENFORCEMENT:
-├─ HTTP Blocks:     {stats['threats'].get('http_blocks', 0)}
-├─ Policy:          HTTPS-Only (no downgrade)
-└─ Exemptions:      localhost, 127.0.0.1 (dev mode)
-
-LOCKDOWN SYSTEM:
-├─ Status:          {lockdown_status}
-├─ Threshold:       {stats['lockdown']['threshold']} critical events
-├─ Critical Count:  {sum(1 for e in self.events if e['risk_level'] == 'critical')}
-└─ Auto-Wipe:       {"ENABLED" if stats['lockdown']['active'] else "ON STANDBY"}
-
-BLOCKING EFFECTIVENESS:
-├─ Total Threats Detected:    {total_threats}
-├─ Fingerprints Collected:    0 (all defended)
-├─ Insecure Connections:      0 (HTTPS enforced)
-└─ Real Data Leaked:          0%
-
-TOP 10 THREAT DOMAINS:
-"""
-    
-        # Add top 10 threatening domains
-        for i, (domain, threats) in enumerate(sorted_domains[:10], 1):
-            tracker_icon = "🔴" if threats['trackers'] > 0 else "⚪"
-            fp_icon = "🟡" if threats['fingerprinting'] > 0 else "⚪"
-            malware_icon = "🚨" if threats['malware'] > 0 else "⚪"
-            intrusion_icon = "⛔" if threats['intrusions'] > 0 else "⚪"
-            http_icon = "🔒" if threats['http_blocks'] > 0 else "⚪"
-        
-            risk_color = {
-                'critical': '🔴',
-                'high': '🟠',
-                'medium': '🟡',
-                'low': '⚪'
-            }.get(threats['risk_level'], '⚪')
-        
-            report += f"\n{i:2d}. {risk_color} {domain[:45]:<45}"
-            report += f"\n    Track: {tracker_icon} {threats['trackers']:3d} | "
-            report += f"FP: {fp_icon} {threats['fingerprinting']:2d} | "
-            report += f"Mal: {malware_icon} {threats['malware']:2d} | "
-            report += f"Intru: {intrusion_icon} {threats['intrusions']:2d}"
-            report += f"HTTP: {http_icon} {threats['http_blocks']:2d}"
-    
-        report += f"\n\nRECENT HIGH-RISK EVENTS: {len(stats['recent_threats'])}"
-    
-        for event in stats['recent_threats'][-5:]:
-            report += f"\n  • {event['datetime'][:19]} | {event['risk_level'].upper()} | {', '.join(event['threats'][:2])}"
-    
-        report += "\n\n" + "="*62
-        
-        if stats['lockdown']['active']:
-            report += f"\n  🔴 LOCKDOWN ACTIVE - All requests blocked"
-            report += f"\n  🔴 Browser data wipe in progress"
-        else:
-            report += f"\n  ✅ VERDICT: Your browser fingerprint was NOT collected."
-            report += f"\n  ✅ All {stats['threats']['fingerprinting']} fingerprinting attempts were defended."
-            report += f"\n  ✅ {stats['threats']['trackers']} trackers were blocked by native WebKit rules."
-            report += f"\n  🔒 {stats['threats'].get('http_blocks', 0)} insecure HTTP connections blocked."
-            report += f"\n  🛡️  Lockdown ready: {stats['lockdown']['threshold'] - sum(1 for e in self.events if e['risk_level'] == 'critical')} critical events remaining"
-        
-        report += "\n" + "="*62
-    
+        report = f"LOCKDOWN STATUS: {'ACTIVE' if stats['lockdown']['active'] else 'STANDBY'}\n"
+        report += f"Session Uptime: {stats['uptime_seconds']:.1f} seconds\n"
+        report += f"Total Events: {stats['total_events']} | Unique Domains: {stats['unique_domains']}\n"
+        report += f"Threat Score: {stats['threat_score']}\n"
+        # Add summaries etc. (for HTML use, refer to _build_threat_report_html)
         return report
-    
+
     def is_locked_down(self) -> bool:
-        """Check if system is in lockdown mode"""
         return self.lockdown_active
-    
+
     def reset_lockdown(self, admin_override: bool = False):
-        """
-        Reset lockdown (use with caution)
-        Requires admin_override = True for safety
-        """
         if not admin_override:
             print("[MiniAI] Lockdown reset requires admin_override=True")
             return False
-        
         self.lockdown_active = False
         self.lockdown_triggered_at = None
+        self._lockdown_ui_opened = False
         self.events.clear()
-        
         print("[MiniAI] 🟢 Lockdown reset - System restored")
         return True
-    
+
     def shutdown(self):
-        if not self.enabled:
-            return
-
+        if not self.enabled: return
         self.enabled = False
-
         try:
             print(self.get_threat_report())
         except Exception as e:
             print("[MiniAI] Report failed:", e)
 
-        
 HOME_URL = "darkelf://home"
         
 class ContentRuleManager:
@@ -1804,9 +1182,76 @@ LOCAL_WEBSOCKET_POLICY_VALUE = (
     "connect-src 'self' https: wss: "
     "https://*.googlevideo.com "
     "https://youtubei.googleapis.com "
-    "https://*.youtube.com;"
+    "https://*.youtube.com "
+    "https://i.ytimg.com "
+    "https://www.youtube.com;"
 )
 
+class _UIDelegate(NSObject):
+    def initWithOwner_(self, owner):
+        self = objc.super(_UIDelegate, self).init()
+        if self is None:
+            return None
+        self.owner = owner
+        return self
+
+    # Forward the methods you currently implemented on Browser:
+
+    def webView_createWebViewWithConfiguration_forNavigationAction_windowFeatures_(
+        self, webView, configuration, navigationAction, windowFeatures
+    ):
+        # block popups
+        print("[UIDelegate] Popup request blocked")
+        return None
+
+    def webView_runJavaScriptAlertPanelWithMessage_initiatedByFrame_completionHandler_(
+        self, webView, message, frame, completionHandler
+    ):
+        try:
+            print(f"[JS Alert] {message}")
+            alert = NSAlert.alloc().init()
+            alert.setMessageText_("JavaScript Alert")
+            alert.setInformativeText_(str(message))
+            alert.addButtonWithTitle_("OK")
+            alert.runModal()
+        finally:
+            completionHandler()
+
+    def webView_runJavaScriptConfirmPanelWithMessage_initiatedByFrame_completionHandler_(
+        self, webView, message, frame, completionHandler
+    ):
+        try:
+            print(f"[JS Confirm] {message}")
+            alert = NSAlert.alloc().init()
+            alert.setMessageText_("Confirm")
+            alert.setInformativeText_(str(message))
+            alert.addButtonWithTitle_("OK")
+            alert.addButtonWithTitle_("Cancel")
+            result = alert.runModal()
+            completionHandler(result == 1000)
+        except Exception as e:
+            print(f"[JS Confirm] Error: {e}")
+            completionHandler(False)
+
+    def webView_runJavaScriptTextInputPanelWithPrompt_defaultText_initiatedByFrame_completionHandler_(
+        self, webView, prompt, defaultText, frame, completionHandler
+    ):
+        try:
+            print(f"[JS Prompt] {prompt}")
+            completionHandler(None)
+        except Exception as e:
+            print(f"[JS Prompt] Error: {e}")
+            completionHandler(None)
+
+    def webView_requestMediaCapturePermissionForOrigin_initiatedByFrame_type_decisionHandler_(
+        self, webView, origin, frame, type, decisionHandler
+    ):
+        try:
+            print(f"[Media] 🔒 Denied media capture for: {origin}")
+            decisionHandler(0)
+        except Exception:
+            pass
+                
 class _NavDelegate(NSObject):
 
     # -------------------------------------------------
@@ -1816,26 +1261,44 @@ class _NavDelegate(NSObject):
         self = objc.super(_NavDelegate, self).init()
         if self is None:
             return None
-        self._owner = owner
+
+        self.owner = owner
         return self
+
 
     # -------------------------------------------------
     # Navigation Finished
     # -------------------------------------------------
     def webView_didFinishNavigation_(self, webView, nav):
+
+        owner = getattr(self, "owner", None)
+
+        if not owner:
+            return
+
+        if not getattr(owner, "tabs", None):
+            return
+
         try:
-            browser = self._owner
+            browser = getattr(self, "owner", None)
+            if not browser:
+                return
+
+            if not browser._is_tab_webview(webView):
+                return
+
             url = webView.URL()
             title = webView.title()
 
-            # --- Update matching tab ---
             for tab in browser.tabs:
                 if tab.view is webView:
 
                     if url and url.absoluteString() == HOME_URL:
                         tab.url = HOME_URL
                         tab.host = "Darkelf Home"
+
                     else:
+
                         if title:
                             tab.host = title
                         elif url:
@@ -1851,49 +1314,85 @@ class _NavDelegate(NSObject):
 
             color = NSColor.whiteColor()
 
-            if url and url.scheme():
-                scheme = str(url.scheme()).lower()
+            if url:
+                scheme = str(url.scheme() or "").lower()
 
                 if scheme == "https":
-                    # Only set green if not already red
                     current = browser.addr.textColor()
                     if current != NSColor.systemRedColor():
                         color = NSColor.systemGreenColor()
 
             browser.addr.setTextColor_(color)
-                            
+
         except Exception as e:
-            print(f"[NavDelegate] didFinish error: {e}")
+            print("[NavDelegate] didFinish error:", e)
+
 
     # -------------------------------------------------
-    # JS Bridge (MiniAI Network Monitor)
+    # JS Bridge
     # -------------------------------------------------
     def userContentController_didReceiveScriptMessage_(self, ucc, message):
+
         try:
-            if message.name() != "netlog":
+
+            # -------------------------
+            # FULLSCREEN BRIDGE
+            # -------------------------
+            if message.name() == "fullscreen":
+                try:
+                    win = message.webView().window()
+                    if win:
+                        print("[Fullscreen bridge triggered]")
+                        win.toggleFullScreen_(None)
+                except Exception as e:
+                    print("[Fullscreen error]", e)
                 return
 
-            body = message.body()
 
-            if isinstance(body, dict):
+            # -------------------------
+            # NETLOG HANDLER
+            # -------------------------
+            if message.name() == "netlog":
+
+                body = message.body()
+
+                if not isinstance(body, dict):
+                    return
+
+                owner = getattr(self, "owner", None)
+                if not owner:
+                    return
+
                 url = str(body.get("url", ""))
                 headers = body.get("headers", {}) or {}
 
-                if hasattr(self._owner, "mini_ai") and self._owner.mini_ai:
-                    self._owner.mini_ai.monitor_network(url, headers)
+                # your MiniAI monitor can run here
+                if hasattr(owner, "mini_ai"):
+                    owner.mini_ai.monitor_network(url, headers)
+
+                return
+
 
         except Exception as e:
             print("[NavDelegate ScriptMessage] Error:", e)
 
     # -------------------------------------------------
-    # Navigation Policy (HTTPS Enforcement Here)
+    # Navigation Policy
     # -------------------------------------------------
     def webView_decidePolicyForNavigationAction_decisionHandler_(
         self, webView, navAction, decisionHandler
     ):
+    
+        if not navAction or not navAction.request():
+            decisionHandler(WKNavigationActionPolicyAllow)
+            return
+            
         handled = False
 
         try:
+
+            owner = getattr(self, "owner", None)
+
             req = navAction.request()
             url = req.URL()
 
@@ -1905,11 +1404,19 @@ class _NavDelegate(NSObject):
                 url_str = str(url.absoluteString() or "").strip()
                 scheme = str(url.scheme() or "").lower()
                 host = str(url.host() or "")
+                
+            # --- MiniAI Network Monitor ---
+            owner = getattr(self, "owner", None)
 
-            # =====================================================
-            # 🚫 Invalid HTTP/HTTPS without host (e.g. "http://")
-            # =====================================================
+            if owner and hasattr(owner, "mini_ai"):
+                try:
+                    owner.mini_ai.monitor_network(url_str, {})
+                except Exception:
+                    pass
+                    
+            # Invalid URL
             if scheme in ("http", "https") and not host:
+
                 decisionHandler(WKNavigationActionPolicyCancel)
                 handled = True
 
@@ -1920,45 +1427,27 @@ class _NavDelegate(NSObject):
                 )
                 return
 
-            # =====================================================
-            # Feed MiniAI
-            # =====================================================
-            try:
-                if hasattr(self._owner, "mini_ai") and self._owner.mini_ai:
-                    headers = dict(req.allHTTPHeaderFields() or {})
-                    self._owner.mini_ai.monitor_network(url_str, headers)
-            except Exception:
-                pass
-
-            # =====================================================
-            # Lockdown Mode
-            # =====================================================
-            mini_ai = getattr(self._owner, "mini_ai", None)
-            if mini_ai and mini_ai.lockdown_active:
-                decisionHandler(WKNavigationActionPolicyCancel)
-                handled = True
-                webView.loadHTMLString_baseURL_(mini_ai._lockout_html(), None)
-                return
-
-            # =====================================================
-            # Block dangerous schemes
-            # =====================================================
+            # Dangerous schemes
             if scheme in ("data", "blob", "file", "ftp"):
+
                 decisionHandler(WKNavigationActionPolicyCancel)
                 handled = True
                 return
 
-            # =====================================================
-            # 🔁 Auto-upgrade HTTP → HTTPS
-            # =====================================================
-            if scheme == "http":
-
-                # 🔒 Report insecure attempt to MiniAI
-                if hasattr(self._owner, "mini_ai") and self._owner.mini_ai:
-                    self._owner.mini_ai.on_http_blocked(url_str)
+            # HTTP → HTTPS upgrade
+            if scheme == "http" and not url_str.startswith("https://"):
 
                 https_url = url_str.replace("http://", "https://", 1)
+                
+                                # --- MiniAI HTTP block detection ---
+                owner = getattr(self, "owner", None)
 
+                if owner and hasattr(owner, "mini_ai"):
+                    try:
+                        owner.mini_ai.on_http_blocked(url_str)
+                    except Exception:
+                        pass
+                        
                 decisionHandler(WKNavigationActionPolicyCancel)
                 handled = True
 
@@ -1968,55 +1457,51 @@ class _NavDelegate(NSObject):
                     )
                 )
                 return
-
+                
         except Exception as e:
-            print(f"[NavDelegate] Policy decision error: {e}")
+            print("[NavDelegate] Policy decision error:", e)
 
         finally:
             if not handled:
                 decisionHandler(WKNavigationActionPolicyAllow)
-                
+    # -------------------------------------------------
+    # TLS Certificate Inspection
+    # -------------------------------------------------
     def webView_didReceiveAuthenticationChallenge_completionHandler_(
         self, webView, challenge, completionHandler
     ):
+
         try:
+
+            owner = getattr(self, "owner", None)
+
             protectionSpace = challenge.protectionSpace()
             authMethod = protectionSpace.authenticationMethod()
 
-            # Only inspect TLS server trust
             if authMethod == NSURLAuthenticationMethodServerTrust:
+
                 serverTrust = protectionSpace.serverTrust()
-
                 isTrusted = False
-    
-                if serverTrust:
-                    # Evaluate trust (modern macOS)
-                    try:
-                        isTrusted = SecTrustEvaluateWithError(serverTrust, None)
-                    except Exception:
-                        # Fallback for older macOS
-                        result = objc.allocateBuffer(4)
-                        SecTrustEvaluate(serverTrust, result)
-                        isTrusted = True  # If no exception, assume trusted
 
-                    # 🔎 Print certificate info
+                if serverTrust:
+
+                    try:
+                        isTrusted = bool(SecTrustEvaluateWithError(serverTrust, None))
+                    except Exception as e:
+                        print("[TLS] Trust evaluation failed:", e)
+
                     cert = SecTrustGetCertificateAtIndex(serverTrust, 0)
+
                     if cert:
                         summary = SecCertificateCopySubjectSummary(cert)
                         print("🔎 Certificate Subject:", summary)
 
-                    if isTrusted:
-                        print("✅ Certificate trusted")
-                    else:
-                        print("❌ Certificate NOT trusted")
+                    if owner and hasattr(owner, "update_security_indicator"):
 
-                    # ✅ UPDATE SECURITY UI HERE (MAIN THREAD SAFE)
-                    if hasattr(self._owner, "update_security_indicator"):
                         NSOperationQueue.mainQueue().addOperationWithBlock_(
-                            lambda: self._owner.update_security_indicator(isTrusted)
+                            lambda: owner.update_security_indicator(isTrusted)
                         )
 
-                # Continue loading (normal browser behavior)
                 completionHandler(
                     NSURLSessionAuthChallengeUseCredential,
                     NSURLCredential.credentialForTrust_(serverTrust)
@@ -2026,259 +1511,174 @@ class _NavDelegate(NSObject):
         except Exception as e:
             print("[Cert Inspection Error]", e)
 
-        # Default fallback
         completionHandler(
             NSURLSessionAuthChallengePerformDefaultHandling,
             None
         )
+        
+        
+
 
     # -------------------------------------------------
-    # Load Failure (No Red)
+    # Load Failure
     # -------------------------------------------------
-    def webView_didFailProvisionalNavigation_withError_(self, webView, nav, error):
+    def webViewWebContentProcessDidTerminate_(self, webView):
+
+        print("[WebKit] WebContent process crashed")
+
         try:
-            self._owner.addr.setTextColor_(NSColor.whiteColor())
-        except Exception:
-            pass
-
+            owner = getattr(self, "owner", None)
+            if owner and owner._is_tab_webview(webView):
+                webView.loadRequest_(
+                    NSURLRequest.requestWithURL_(
+                        NSURL.URLWithString_(HOME_URL)
+                    )
+                )
+        except Exception as e:
+            print("[WebKit] Recovery failed:", e)
+            
 IS_MAC = sys.platform == "darwin"
 if not IS_MAC:
     print("[Darkelf] macOS only."); sys.exit(1)
 
 APP_NAME = "Darkelf"
 
-HOMEPAGE_HTML = """<!DOCTYPE html>
+HOMEPAGE_HTML = """
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta http-equiv="Content-Security-Policy"
-content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Darkelf Browser — Cocoa, Private, Hardened</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Darkelf Browser</title>
 
 <style>
+
 :root{
-  --bg:#07080d;
-  --green:#34C759;
-  --cyan:#04a8c8;
-  --border:rgba(255,255,255,.10);
-  --input-bg:#12141b;
+  --bg:#0a0b10;
+  --accent:#34C759;
   --text:#eef2f6;
-  --muted:#9aa3ad;
 }
 
-*{box-sizing:border-box}
-html,body{height:100%}
+*{box-sizing:border-box;}
+
+html,body{
+  height:100%;
+  margin:0;
+  overflow:hidden;
+}
 
 body{
-  margin:0;
-  font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
-  color:var(--text);
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  overflow:hidden;
-  background:var(--bg);
-}
-
-/* Aurora */
-body::before,
-body::after{
-  content:"";
-  position:absolute;
-  inset:-20%;
-  z-index:-2;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
   background:
-    radial-gradient(900px 500px at 20% 10%, rgba(4,168,200,.18), transparent 60%),
-    radial-gradient(800px 500px at 80% 20%, rgba(52,199,89,.22), transparent 60%),
-    radial-gradient(600px 400px at 50% 90%, rgba(52,199,89,.12), transparent 60%);
-  animation:drift 36s ease-in-out infinite;
-}
-body::after{
-  animation-duration:54s;
-  animation-direction:reverse;
-  opacity:.6;
-}
-@keyframes drift{
-  0%{transform:translate(0,0)}
-  50%{transform:translate(-6%,-4%)}
-  100%{transform:translate(0,0)}
-}
+    radial-gradient(1200px 600px at 20% -10%, rgba(52,199,89,.35), transparent 60%),
+    radial-gradient(1000px 600px at 120% 10%, rgba(52,199,89,.45), transparent 60%),
+    var(--bg);
 
-.vignette{
-  position:absolute;
-  inset:0;
-  pointer-events:none;
-  background:radial-gradient(circle at center, transparent 55%, rgba(0,0,0,.6));
-  z-index:-1;
-}
-
-.container{
   display:flex;
   flex-direction:column;
+  justify-content:center;
   align-items:center;
-  gap:20px;
-  padding:36px;
-  text-align:center;
+
+  color:var(--text);
 }
 
-.brand{
-  display:flex;
-  gap:12px;
-  align-items:center;
-  font-weight:900;
-  font-size:2.3rem;
-  color:var(--green);
+/* animated particle grid */
+
+.particles{
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+
+  background-image:
+    radial-gradient(rgba(52,199,89,.7) 1px, transparent 1px);
+
+  background-size:90px 90px;
+
+  opacity:.15;
+
+  animation:particleMove 80s linear infinite;
 }
-.brand svg{
-  width:2.6rem;
-  height:2.6rem;
-  filter:drop-shadow(0 0 18px rgba(52,199,89,.55));
+
+@keyframes particleMove{
+  from{transform:translateY(0);}
+  to{transform:translateY(-200px);}
+}
+
+/* logo */
+
+.brand{
+  font-size:3.7rem;
+  font-weight:800;
+  letter-spacing:-.02em;
+  color:#34C759;
+
+  text-shadow:
+    0 0 10px rgba(52,199,89,.8),
+    0 0 30px rgba(52,199,89,.5),
+    0 0 60px rgba(52,199,89,.25);
+
+  animation:pulse 3s ease-in-out infinite;
+}
+
+@keyframes pulse{
+
+  0%{
+    text-shadow:
+      0 0 10px rgba(52,199,89,.8),
+      0 0 30px rgba(52,199,89,.5),
+      0 0 60px rgba(52,199,89,.25);
+  }
+
+  50%{
+    text-shadow:
+      0 0 18px rgba(52,199,89,1),
+      0 0 50px rgba(52,199,89,.7),
+      0 0 90px rgba(52,199,89,.4);
+  }
+
+  100%{
+    text-shadow:
+      0 0 10px rgba(52,199,89,.8),
+      0 0 30px rgba(52,199,89,.5),
+      0 0 60px rgba(52,199,89,.25);
+  }
+
 }
 
 .tagline{
-  font-size:1.05rem;
-  font-weight:800;
-  letter-spacing:.28em;
+  margin-top:20px;
+  font-size:1rem;
+  letter-spacing:.25em;
   text-transform:uppercase;
   color:#cfd8e3;
-  margin-top:-6px;
 }
 
-.search-wrap{
-  display:flex;
-  gap:12px;
-  margin-top:18px;
-}
-.search-wrap input{
-  height:54px;
-  padding:0 18px;
-  width:min(720px,92vw);
-  border-radius:14px;
-  border:1px solid var(--border);
-  background:var(--input-bg);
-  color:#fff;
-  font-size:17px;
-  outline:none;
-}
-.search-wrap input:focus{
-  box-shadow:0 0 0 3px rgba(52,199,89,.35);
-  border-color:transparent;
-}
-.search-wrap button{
-  width:56px;
-  height:54px;
-  border-radius:14px;
-  border:none;
-  cursor:pointer;
-  font-size:20px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  color:#fff;
-  background:var(--green);
-  box-shadow:0 0 22px rgba(52,199,89,.55);
-}
-.search-wrap button svg{
-  width:20px;
-  height:20px;
+.ai{
+  position:absolute;
+  bottom:50px;
+  font-size:.85rem;
+  letter-spacing:.25em;
+  color:#34C759;
+  opacity:.8;
 }
 
-.ai-status{
-  margin-top:6px;
-  font-size:.78rem;
-  color:var(--muted);
-  opacity:.75;
-  letter-spacing:.06em;
-}
-
-.status-badges{
-  display:flex;
-  gap:12px;
-  margin-top:24px;
-  flex-wrap:wrap;
-  justify-content:center;
-}
-
-.status-chip{
-  display:flex;
-  align-items:center;
-  gap:6px;
-  padding:8px 14px;
-  border-radius:999px;
-  font-size:.75rem;
-  font-weight:700;
-  letter-spacing:.06em;
-  background:rgba(52,199,89,.12);
-  border:1px solid rgba(52,199,89,.35);
-  color:var(--green);
-}
-.status-chip svg{
-  width:14px;
-  height:14px;
-}
 </style>
 </head>
 
 <body>
 
-<div class="vignette"></div>
+<div class="particles"></div>
 
-<div class="container">
-  <div class="brand">
-    <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
-      <path d="M5.338 1.59a61.44 61.44 0 0 0-2.837.856.481.481 0 0 0-.328.39c-.554 4.157.726 7.19 2.253 9.188a10.725 10.725 0 0 0 2.287 2.233c.346.244.652.42.893.533.12.057.218.095.293.118a.55.55 0 0 0 .101.025.615.615 0 0 0 .1-.025c.076-.023.174-.061.294-.118.24-.113.547-.29.893-.533a10.726 10.726 0 0 0 2.287-2.233c1.527-1.997 2.807-5.031 2.253-9.188a.48.48 0 0 0-.328-.39c-.651-.213-1.75-.56-2.837-.855C9.552 1.29 8.531 1.067 8 1.067c-.53 0-1.552.223-2.662.524zM5.072.56C6.157.265 7.31 0 8 0s1.843.265 2.928.56c1.11.3 2.229.655 2.887.87a1.54 1.54 0 0 1 1.044 1.262c.596 4.477-.787 7.795-2.465 9.99a11.775 11.775 0 0 1-2.517 2.453 7.159 7.159 0 0 1-1.048.625c-.28.132-.581.24-.829.24s-.548-.108-.829-.24a7.158 7.158 0 0 1-1.048-.625 11.777 11.777 0 0 1-2.517-2.453C1.928 10.487.545 7.169 1.141 2.692A1.54 1.54 0 0 1 2.185 1.43 62.456 62.456 0 0 1 5.072.56z"/>
-      <path d="M9.5 6.5a1.5 1.5 0 0 1-1 1.415l.385 1.99a.5.5 0 0 1-.491.595h-.788a.5.5 0 0 1-.49-.595l.384-1.99a1.5 1.5 0 1 1 2-1.415z"/>
-    </svg>
-    <span>Darkelf Browser</span>
-  </div>
-  <div class="tagline">Cocoa • Private • Hardened</div>
+<div class="brand">
+Darkelf Browser
+</div>
 
-  <form class="search-wrap" action="https://lite.duckduckgo.com/lite/" method="get">
-    <input type="text" name="q" placeholder="Search DuckDuckGo" autofocus/>
-    <button type="submit">
-      <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
-        <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/>
-      </svg>
-    </button>
-  </form>
+<div class="tagline">
+Cocoa • Private • Hardened
+</div>
 
-  <div id="ai-status" class="ai-status">
-    Darkelf MiniAI Sentinel active — passive monitoring enabled
-  </div>
-
-  <div class="status-badges">
-    <div class="status-chip">
-      <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
-        <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/>
-      </svg>
-      CSP Active
-    </div>
-    <div class="status-chip">
-      <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
-        <path d="M8.06 6.5a.5.5 0 0 1 .5.5v.776a11.5 11.5 0 0 1-.552 3.519l-1.331 4.14a.5.5 0 0 1-.952-.305l1.331-4.141a10.5 10.5 0 0 0 .504-3.213V7a.5.5 0 0 1 .5-.5Z"/>
-        <path d="M6.06 7a2 2 0 1 1 4 0 .5.5 0 1 1-1 0 1 1 0 1 0-2 0v.332c0 .409-.022.816-.066 1.221A.5.5 0 0 1 6 8.447c.04-.37.06-.742.06-1.115V7Zm3.509 1a.5.5 0 0 1 .487.513 11.5 11.5 0 0 1-.587 3.339l-1.266 3.8a.5.5 0 0 1-.949-.317l1.267-3.8a10.5 10.5 0 0 0 .535-3.048A.5.5 0 0 1 9.569 8Zm-3.356 2.115a.5.5 0 0 1 .33.626L5.24 14.939a.5.5 0 1 1-.955-.296l1.303-4.199a.5.5 0 0 1 .625-.329Z"/>
-        <path d="M4.759 5.833A3.501 3.501 0 0 1 11.559 7a.5.5 0 0 1-1 0 2.5 2.5 0 0 0-4.857-.833.5.5 0 1 1-.943-.334Zm.3 1.67a.5.5 0 0 1 .449.546 10.72 10.72 0 0 1-.4 2.031l-1.222 4.072a.5.5 0 1 1-.958-.287L4.15 9.793a9.72 9.72 0 0 0 .363-1.842.5.5 0 0 1 .546-.449Zm6 .647a.5.5 0 0 1 .5.5c0 1.28-.213 2.552-.632 3.762l-1.09 3.145a.5.5 0 0 1-.944-.327l1.09-3.145c.382-1.105.578-2.266.578-3.435a.5.5 0 0 1 .5-.5Z"/>
-        <path d="M3.902 4.222a4.996 4.996 0 0 1 5.202-2.113.5.5 0 0 1-.208.979 3.996 3.996 0 0 0-4.163 1.69.5.5 0 0 1-.831-.556Zm6.72-.955a.5.5 0 0 1 .705-.052A4.99 4.99 0 0 1 13.059 7v1.5a.5.5 0 1 1-1 0V7a3.99 3.99 0 0 0-1.386-3.028.5.5 0 0 1-.051-.705ZM3.68 5.842a.5.5 0 0 1 .422.568c-.029.192-.044.39-.044.59 0 .71-.1 1.417-.298 2.1l-1.14 3.923a.5.5 0 1 1-.96-.279L2.8 8.821A6.531 6.531 0 0 0 3.058 7c0-.25.019-.496.054-.736a.5.5 0 0 1 .568-.422Zm8.882 3.66a.5.5 0 0 1 .456.54c-.084 1-.298 1.986-.64 2.934l-.744 2.068a.5.5 0 0 1-.941-.338l.745-2.07a10.51 10.51 0 0 0 .584-2.678.5.5 0 0 1 .54-.456Z"/>
-        <path d="M4.81 1.37A6.5 6.5 0 0 1 14.56 7a.5.5 0 1 1-1 0 5.5 5.5 0 0 0-8.25-4.765.5.5 0 0 1-.5-.865Zm-.89 1.257a.5.5 0 0 1 .04.706A5.478 5.478 0 0 0 2.56 7a.5.5 0 0 1-1 0c0-1.664.626-3.184 1.655-4.333a.5.5 0 0 1 .706-.04ZM1.915 8.02a.5.5 0 0 1 .346.616l-.779 2.767a.5.5 0 1 1-.962-.27l.778-2.767a.5.5 0 0 1 .617-.346Zm12.15.481a.5.5 0 0 1 .49.51c-.03 1.499-.161 3.025-.727 4.533l-.07.187a.5.5 0 0 1-.936-.351l.07-.187c.506-1.35.634-2.74.663-4.202a.5.5 0 0 1 .51-.49Z"/>
-      </svg>
-      FP Defense
-    </div>
-    <div class="status-chip">
-      <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
-        <path d="M5.338 1.59a61.44 61.44 0 0 0-2.837.856.481.481 0 0 0-.328.39c-.554 4.157.726 7.19 2.253 9.188a10.725 10.725 0 0 0 2.287 2.233c.346.244.652.42.893.533.12.057.218.095.293.118a.55.55 0 0 0 .101.025.615.615 0 0 0 .1-.025c.076-.023.174-.061.294-.118.24-.113.547-.29.893-.533a10.726 10.726 0 0 0 2.287-2.233c1.527-1.997 2.807-5.031 2.253-9.188a.48.48 0 0 0-.328-.39c-.651-.213-1.75-.56-2.837-.855C9.552 1.29 8.531 1.067 8 1.067c-.53 0-1.552.223-2.662.524zM5.072.56C6.157.265 7.31 0 8 0s1.843.265 2.928.56c1.11.3 2.229.655 2.887.87a1.54 1.54 0 0 1 1.044 1.262c.596 4.477-.787 7.795-2.465 9.99a11.775 11.775 0 0 1-2.517 2.453 7.159 7.159 0 0 1-1.048.625c-.28.132-.581.24-.829.24s-.548-.108-.829-.24a7.158 7.158 0 0 1-1.048-.625 11.777 11.777 0 0 1-2.517-2.453C1.928 10.487.545 7.169 1.141 2.692A1.54 1.54 0 0 1 2.185 1.43 62.456 62.456 0 0 1 5.072.56z"/>
-        <path d="M10.854 5.146a.5.5 0 0 1 0 .708l-3 3a.5.5 0 0 1-.708 0l-1.5-1.5a.5.5 0 1 1 .708-.708L7.5 7.793l2.646-2.647a.5.5 0 0 1 .708 0z"/>
-      </svg>
-      Tracker Block
-    </div>
-    <div class="status-chip">
-      <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
-        <path fill-rule="evenodd" d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4H1z"/>
-        <path d="M6.445 11.688V6.354h-.633A12.6 12.6 0 0 0 4.5 7.16v.695c.375-.257.969-.62 1.258-.777h.012v4.61h.675zm1.188-1.305c.047.64.594 1.406 1.703 1.406 1.258 0 2-1.066 2-2.871 0-1.934-.781-2.668-1.953-2.668-.926 0-1.797.672-1.797 1.809 0 1.16.824 1.77 1.676 1.77.746 0 1.23-.376 1.383-.79h.027c-.004 1.316-.461 2.164-1.305 2.164-.664 0-1.008-.45-1.05-.82h-.684zm2.953-2.317c0 .696-.559 1.18-1.184 1.18-.601 0-1.144-.383-1.144-1.2 0-.823.582-1.21 1.168-1.21.633 0 1.16.398 1.16 1.23z"/>
-      </svg>
-      Zero Persistence
-    </div>
-  </div>
+<div class="ai">
+Darkelf MiniAI Sentinel
 </div>
 
 </body>
@@ -2435,23 +1835,6 @@ AUDIO_DEFENSE_JS = r'''
 (function() {if (window.OfflineAudioContext) {var orig = window.OfflineAudioContext.prototype.getChannelData;window.OfflineAudioContext.prototype.getChannelData = function() {var data = orig.apply(this, arguments);for (var i = 0; i < data.length; i++) data[i] = 0;return data;};}})();
 '''
 
-BATTERY_DEFENSE_JS = r'''
-if ("getBattery" in navigator) {
-  navigator.getBattery = function() {
-    return Promise.resolve({
-      charging: true,
-      chargingTime: 0,
-      dischargingTime: Infinity,
-      level: 1,
-      addEventListener: function(){},
-      removeEventListener: function(){},
-      onchargingchange: null,
-      onlevelchange: null
-    });
-  };
-}
-'''
-
 PERFORMANCE_DEFENSE_JS = r'''
 (function() {
   if (window.performance && window.performance.now) {
@@ -2467,6 +1850,23 @@ PERFORMANCE_DEFENSE_JS = r'''
     }
   }
 })();
+'''
+
+BATTERY_DEFENSE_JS = r'''
+if ("getBattery" in navigator) {
+  navigator.getBattery = function() {
+    return Promise.resolve({
+      charging: true,
+      chargingTime: 0,
+      dischargingTime: Infinity,
+      level: 1,
+      addEventListener: function(){},
+      removeEventListener: function(){},
+      onchargingchange: null,
+      onlevelchange: null
+    });
+  };
+}
 '''
 
 CORE_JS = r'''
@@ -2552,6 +1952,42 @@ CORE_JS = r'''
 })();
 '''
 
+INDEXEDDB_DEFENSE_JS = r'''
+try{
+Object.defineProperty(window,"indexedDB",{get:()=>undefined});
+}catch(e){}
+'''
+
+WEBSQL_DEFENSE_JS = r'''
+try{
+Object.defineProperty(window,"openDatabase",{get:()=>undefined});
+}catch(e){}
+'''
+
+STORAGE_DEFENSE_JS = r'''
+(function(){
+
+function makeMemoryStorage(){
+
+ const store = new Map();
+
+ return {
+  get length(){return store.size},
+  key:(i)=>Array.from(store.keys())[i]||null,
+  getItem:(k)=>store.has(k)?store.get(k):null,
+  setItem:(k,v)=>store.set(String(k),String(v)),
+  removeItem:(k)=>store.delete(String(k)),
+  clear:()=>store.clear()
+ };
+
+}
+
+try{Object.defineProperty(window,"localStorage",{value:makeMemoryStorage()})}catch(e){}
+try{Object.defineProperty(window,"sessionStorage",{value:makeMemoryStorage()})}catch(e){}
+
+})();
+'''
+
 # ================= Helper widgets =================
 class HoverButton(NSButton):
     def init(self):
@@ -2561,10 +1997,11 @@ class HoverButton(NSButton):
         return self
         
     def updateTrackingAreas(self):
-        if self._hoverArea is not None:
+        if getattr(self, "_hoverArea", None) is not None:
             self.removeTrackingArea_(self._hoverArea)
         opts = NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways
-        self._hoverArea = NSTrackingArea.alloc().initWithRect_options_owner_userInfo_(self.bounds(), opts, self, None)
+        self._hoverArea = NSTrackingArea.alloc().initWithRect_options_owner_userInfo_(
+            self.bounds(), opts, self, None)
         self.addTrackingArea_(self._hoverArea)
         objc.super(HoverButton, self).updateTrackingAreas()
         
@@ -2585,33 +2022,95 @@ class Tab:
     url: str = ""
     host: str = "new"
     canvas_seed: int = None
-            
-class SearchHandler(objc.lookUpClass("NSObject")):
+
+# =============================================================================
+# ADD THIS NEW CLASS near _NavDelegate (top-level, not nested)
+# =============================================================================
+class _WindowDelegate(NSObject):
     def initWithOwner_(self, owner):
+        self = objc.super(_WindowDelegate, self).init()
+        if self is None:
+            return None
+        self.owner = owner
+        return self
+
+    # NSWindowDelegate hook
+    def windowWillClose_(self, notification):
+        try:
+            owner = getattr(self, "owner", None)
+            if owner is not None:
+                owner.windowWillClose_(notification)
+        except Exception as e:
+            print("[WindowDelegate] windowWillClose_ error:", e)
+
+# =============================================================================
+# FULL UPDATED SearchHandler (as-is, this part is already correct)
+# =============================================================================
+class SearchHandler(NSObject):
+    def initWithOwner_(self, owner): ...
+    def userContentController_didReceiveScriptMessage_(self, controller, message):
         self = objc.super(SearchHandler, self).init()
         if self is None:
             return None
         self.owner = owner
         return self
 
-def userContentController_didReceiveScriptMessage_(self, controller, message):
-    try:
-        body = message.body()
-        print("🔥 MESSAGE RECEIVED:", body)
+    def userContentController_didReceiveScriptMessage_(self, controller, message):
+        try:
+            owner = getattr(self, "owner", None)
+            if not owner or not getattr(owner, "tabs", None) or getattr(owner, "active", -1) < 0:
+                return
 
-        if body == "darkelf_native_fullscreen":
-            print("🔥 FULLSCREEN TRIGGERED")
-            self.owner.window.toggleFullScreen_(None)
-            return
+            body = message.body()
+            print("🔥 MESSAGE RECEIVED:", body)
 
-        # Normal search fallback
-        q = str(message.body())
-        url = "https://lite.duckduckgo.com/lite/?q=" + re.sub(r"\s+","+",q)
-        self.owner._add_tab(url)
-    except Exception as e:
-        print("SearchHandler error:", e)
+            if body == "darkelf_native_fullscreen":
+                print("🔥 FULLSCREEN TRIGGERED")
+                owner.window.toggleFullScreen_(None)
+                return
 
-# BROWSER CONTROLLER ===============
+            q = str(body)
+            # Only search if q is non-empty, longer than 1 character
+            if not q or len(q.strip()) < 2:
+                return  # Ignore short/no input
+
+            url = "https://lite.duckduckgo.com/lite/?q=" + re.sub(r"\s+", "+", q)
+            owner._add_tab(url)
+
+        except Exception as e:
+            print("SearchHandler error:", e)
+            
+def _clamp(v, lo, hi):
+    return max(lo, min(hi, v))
+    
+class AddressField(NSSearchField):
+
+    def initWithFrame_owner_(self, frame, owner):
+        self = objc.super(AddressField, self).initWithFrame_(frame)
+        if self is None:
+            return None
+        self._owner = owner
+        return self
+
+    def drawFocusRingMask(self):
+        pass
+
+    def focusRingMaskBounds(self):
+        return NSMakeRect(0,0,0,0)
+
+    def rightMouseDown_(self, event):
+        try:
+            loc = event.locationInWindow()
+            if hasattr(self, "_owner") and self._owner:
+                self._owner._show_context_popover(self, loc)
+            else:
+                objc.super(AddressField, self).rightMouseDown_(event)
+        except Exception as e:
+            print("Context menu popover error:", e)
+            
+# =============================================================================
+# FULL UPDATED Browser.init (critical changes marked)
+# =============================================================================
 class Browser(NSObject):
 
     def init(self):
@@ -2619,50 +2118,55 @@ class Browser(NSObject):
         if self is None:
             return None
 
+        # ---- Usual field setup ----
         self.cookies_enabled = False
         self.js_enabled = True
         self.tabs = []
         self.tab_btns = []
         self.tab_close_btns = []
         self.active = -1
+        self._window = []
 
+        # ---- 1. Create window ----
         self.window = self._make_window()
-        self.mini_ai = DarkelfMiniAISentinel()
         
-        self.mini_ai.browser_bridge = self
+        self.window.setCollectionBehavior_(128)  # NSWindowCollectionBehaviorFullScreenPrimary
         
-        # ✅ Compile WebKit content blocking rules ONCE at startup
+        # ---- 2. Strong refs for delegates/handlers ----
+        self._strong_refs = []
+
+        self._window_delegate = _WindowDelegate.alloc().initWithOwner_(self)
+        self._nav_delegate    = _NavDelegate.alloc().initWithOwner_(self)
+        self._ui_delegate     = _UIDelegate.alloc().initWithOwner_(self)
+        self._search_handler  = SearchHandler.alloc().initWithOwner_(self)
+
+        self._strong_refs.extend([
+            self._window_delegate,
+            self._nav_delegate,
+            self._ui_delegate,
+            self._search_handler
+        ])
+
+        self.window.setDelegate_(self._window_delegate)
+
         ContentRuleManager.load_rules()
-
+        
+        self.mini_ai = DarkelfMiniAISentinel()
+        self.mini_ai.browser_bridge = self
+        self.mini_ai.browser = self
+        
+        # ---- 4. Toolbar, Tabbar, UI wiring ----
         self.toolbar = self._make_toolbar()
-        self.window.setToolbar_(self.toolbar)
-        try:
-            self.window.toolbar().setVisible_(True)
-        except Exception:
-            pass
 
+        self._build_toolbar()
         self._build_tabbar()
         self._add_tab(home=True)
         self._bring_tabbar_to_front()
-        
+
         self.window.makeKeyAndOrderFront_(None)
-    
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
-        
-        self.btn_mini_ai.setTarget_(self)
-        self.btn_mini_ai.setAction_("openThreatReport:")
-        
-        from Foundation import NSTimer
-
-        self._mini_ai_timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-            2.0,                 # every 1 second
-            self,
-            "refreshMiniAI:",
-            None,
-            True
-        )
-
-        self.window.setDelegate_(self)
+                
+        # ---- 7. Keyboard monitor ----
         self._install_key_monitor()
 
         try:
@@ -2675,318 +2179,266 @@ class Browser(NSObject):
             )
         except Exception:
             pass
-            
-    def updateMiniAIIndicator(self):
 
-        stats = self.mini_ai.get_statistics()
-        locked = stats['lockdown']['active']
-
-        # Initialize state tracking once
-        if not hasattr(self, "_mini_ai_locked_state"):
-            self._mini_ai_locked_state = None
-
-        # Only update when lockdown state changes
-        if locked == self._mini_ai_locked_state:
-            return
-
-        self._mini_ai_locked_state = locked
-
-        if locked:
-            color = NSColor.systemRedColor()
-            tooltip = "LOCKDOWN ACTIVE"
-            self.startShieldPulse(color)
-        else:
-            color = NSColor.systemGreenColor()
-            tooltip = "System Monitoring"
-            self.stopShieldPulse()
-
-        self.btn_mini_ai.setContentTintColor_(color)
-        self.btn_mini_ai.setToolTip_(tooltip)
-
-    @objc.python_method
-    def startShieldPulse(self, color):
-
-        layer = self.btn_mini_ai.layer()
-        if not layer:
-            return
-
-        if getattr(self, "_shield_is_pulsing", False):
-            return
-
-        self._shield_is_pulsing = True
-        self._shield_current_color = color
-
-        self.btn_mini_ai.setWantsLayer_(True)
-        self.btn_mini_ai.setRefusesFirstResponder_(True)
-
-        # Subtle static glow (NOT animated)
-        layer.setShadowColor_(color.CGColor())
-        layer.setShadowRadius_(6.0)
-        layer.setShadowOpacity_(0.35)
-        layer.setShadowOffset_((0, 0))
-
-        # SAFE animation: scale instead of shadow
-        pulse = CABasicAnimation.animationWithKeyPath_("transform.scale")
-        pulse.setFromValue_(1.0)
-        pulse.setToValue_(1.05)
-        pulse.setDuration_(0.9)
-        pulse.setAutoreverses_(True)
-        pulse.setRepeatCount_(float('inf'))
-        pulse.setTimingFunction_(
-            CAMediaTimingFunction.functionWithName_("easeInEaseOut")
-        )
-
-        layer.addAnimation_forKey_(pulse, "shieldPulse")
+        return self
         
-    @objc.python_method
-    def stopShieldPulse(self):
-
-        layer = self.btn_mini_ai.layer()
-        if not layer:
+    @objc.IBAction
+    def refreshMiniAI_(self, timer):
+        # Always trigger a refresh to auto-release lockdown
+        self.mini_ai.monitor_network("")
+        # If threat report tab is active, do nothing else
+        if self.tabs and self.tabs[self.active].url == "darkelf://report":
             return
+        self.updateMiniAIIndicator()
+        
+    def openThreatReport_(self, sender):
 
-        if not getattr(self, "_shield_is_pulsing", False):
-            return
+        try:
+            if not hasattr(self, "mini_ai"):
+                return
 
-        self._shield_is_pulsing = False
-        self._shield_current_color = None
+            report_html = self._build_threat_report_html()
 
-        layer.removeAnimationForKey_("shieldPulse")
-        layer.setShadowOpacity_(0.0)
+            wk, store = self._new_wk()
+
+            wk.setNavigationDelegate_(self._nav_delegate)
             
-    def open_threat_report_tab(self):
+            self._mount_webview(wk)
 
-        html = self._build_threat_report_html()
+            tab = Tab(
+                view=wk,
+                data_store=store,
+                url="darkelf://report",
+                host="Threat Report",
+                canvas_seed=None
+            )
 
-        config = WKWebViewConfiguration.alloc().init()
-        config.setWebsiteDataStore_(
-            WKWebsiteDataStore.nonPersistentDataStore()
-        )
+            self.tabs.append(tab)
+            self.active = len(self.tabs) - 1
 
-        view = WKWebView.alloc().initWithFrame_configuration_(
-            self.window.contentView().bounds(),
-            config
-        )
+            wk.loadHTMLString_baseURL_(
+                report_html,
+                NSURL.URLWithString_("darkelf://report")
+            )
 
-        view.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
-        view.loadHTMLString_baseURL_(html, None)
+            self._update_tab_buttons()
+            self._sync_addr()
 
-        tab = Tab(view=view, data_store=config.websiteDataStore())
-        tab.url = "darkelf://report"
-        tab.host = "Threat Report"
-
-        self.tabs.append(tab)
-        self.active = len(self.tabs) - 1
-
-        # 🔥 THIS is what was missing
-        self._mount_webview(view)
-        self._update_tab_buttons()
-        self._style_tabs()
-        self._sync_addr()
+        except Exception as e:
+            print("[MiniAI] Threat report open failed:", e)
         
     def _build_threat_report_html(self):
 
         stats = self.mini_ai.get_statistics()
-
-        lockdown_color = "#ff3b30" if stats['lockdown']['active'] else "#34C759"
+        
+        # Optional: show recent HTTP upgrades
+        recent_upgrades = [
+            e for e in self.mini_ai.events
+            if "HTTP_AUTO_UPGRADE" in e.get("threats", [])
+        ][-5:]
 
         return f"""
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-
-<meta http-equiv="Content-Security-Policy"
-content="
-default-src 'none';
-style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
-font-src https://cdn.jsdelivr.net;
-img-src 'self' data:;
-connect-src 'none';
-script-src 'none';
-object-src 'none';
-frame-ancestors 'none';
-base-uri 'none';
-form-action 'none';
-">
-<meta name="referrer" content="no-referrer">
-<meta http-equiv="X-Content-Type-Options" content="nosniff">
-
-<title>Darkelf Threat Console</title>
-
-<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
-
-<style>
-:root {{
-  --bg:#05060a;
-  --accent:#36ff9a;
-  --accent2:#00eaff;
-  --accent3:#b400ff;
-  --danger:#ff3b30;
-  --warn:#ffd36b;
-  --muted:#9db0be;
-  --card:rgba(255,255,255,.06);
-  --radius:18px;
-}}
-
-*{{box-sizing:border-box}}
-html,body{{margin:0;height:100%;font-family:ui-sans-serif,system-ui,-apple-system;}}
-
-body{{
-  background:
-    radial-gradient(1200px 800px at 15% -10%, rgba(0,234,255,.35), transparent 70%),
-    radial-gradient(900px 600px at 110% 0%, rgba(54,255,154,.35), transparent 70%),
-    radial-gradient(1200px 700px at 50% 120%, rgba(180,0,255,.35), transparent 70%),
-    var(--bg);
-  color:#eef2f6;
-}}
-
-.container {{
-  max-width:1100px;
-  margin:auto;
-  padding:100px 24px;
-}}
-
-.title {{
-  font-size:1.8rem;
-  font-weight:900;
-  letter-spacing:.12em;
-  background:linear-gradient(90deg,var(--accent),var(--accent2),var(--accent3));
-  -webkit-background-clip:text;
-  -webkit-text-fill-color:transparent;
-  text-shadow:0 0 18px rgba(0,234,255,.25);
-}}
-
-.badge {{
-  display:inline-block;
-  margin-top:18px;
-  padding:8px 16px;
-  border-radius:999px;
-  font-size:.7rem;
-  font-weight:800;
-  letter-spacing:.15em;
-  text-transform:uppercase;
-  background:{'var(--danger)' if stats['lockdown']['active'] else 'var(--accent)'};
-  color:#000;
-  box-shadow:0 0 12px {'rgba(255,59,48,.35)' if stats['lockdown']['active'] else 'rgba(54,255,154,.35)'};
-}}
-
-/* === TWO SEPARATE CARDS GRID === */
-.cards {{
-  margin-top:60px;
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:50px;
-}}
-
-.card {{
-  background:var(--card);
-  backdrop-filter:blur(20px);
-  padding:40px;
-  border-radius:var(--radius);
-  border:1px solid rgba(255,255,255,.12);
-  box-shadow:0 30px 60px rgba(0,0,0,.6);
-}}
-
-.section-title {{
-  font-size:.75rem;
-  letter-spacing:.25em;
-  text-transform:uppercase;
-  color:var(--muted);
-  margin-bottom:24px;
-}}
-
-.line {{
-  display:grid;
-  grid-template-columns:28px auto max-content;
-  align-items:center;
-  column-gap:14px;
-  margin:16px 0;
-}}
-
-.icon {{
-  font-size:1.2rem;
-  color:var(--accent2);
-  text-shadow:0 0 6px rgba(0,234,255,.35);
-}}
-
-.stat-label {{
-  color:#c3d2dd;
-}}
-
-.stat-value {{
-  font-weight:900;
-  font-size:1.15rem;
-}}
-
-.ok {{ color:var(--accent2); }}
-.warn {{ color:var(--warn); }}
-.danger {{ color:var(--danger); }}
-
-.footer {{
-  margin-top:80px;
-  text-align:center;
-  font-size:.8rem;
-  color:var(--muted);
-  opacity:.7;
-}}
-
-@media (max-width:900px) {{
-  .cards {{
-    grid-template-columns:1fr;
-    gap:40px;
-  }}
-}}
-</style>
-</head>
-
-<body>
-
-<div class="container">
-
-<div class="title">Darkelf MiniAI Threat Console</div>
-
-<div class="badge">
-{"LOCKDOWN ACTIVE" if stats['lockdown']['active'] else "SYSTEM MONITORING"}
-</div>
-
-<div class="cards">
-
-<!-- SESSION CARD -->
-<div class="card">
-<div class="section-title">Session Metrics</div>
-
-<div class="line"><i class="bi bi-clock-history icon"></i><span class="stat-label">Session Uptime</span><span class="stat-value ok">{stats['uptime_seconds']:.1f}s</span></div>
-<div class="line"><i class="bi bi-activity icon"></i><span class="stat-label">Total Events</span><span class="stat-value ok">{stats['total_events']}</span></div>
-<div class="line"><i class="bi bi-globe2 icon"></i><span class="stat-label">Unique Domains</span><span class="stat-value ok">{stats['unique_domains']}</span></div>
-<div class="line"><i class="bi bi-speedometer2 icon"></i><span class="stat-label">Events / Minute</span><span class="stat-value">{(stats['total_events']/(stats['uptime_seconds']/60)) if stats['uptime_seconds']>0 else 0:.1f}</span></div>
-<div class="line"><i class="bi bi-shield-check icon"></i><span class="stat-label">Blocking Effectiveness</span><span class="stat-value">{((stats['threats']['trackers']+stats['threats']['fingerprinting'])/stats['total_events']*100) if stats['total_events']>0 else 0:.0f}%</span></div>
-<div class="line"><i class="bi bi-lock-fill icon {'danger' if stats['lockdown']['active'] else 'ok'}"></i><span class="stat-label">Lockdown Status</span><span class="stat-value {'danger' if stats['lockdown']['active'] else 'ok'}">{'ACTIVE' if stats['lockdown']['active'] else 'Standby'}</span></div>
-</div>
-
-<!-- THREAT CARD -->
-<div class="card">
-<div class="section-title">Threat Analysis</div>
-
-<div class="line"><i class="bi bi-crosshair icon"></i><span class="stat-label">Trackers</span><span class="stat-value">{stats['threats']['trackers']}</span></div>
-<div class="line"><i class="bi bi-bullseye icon"></i><span class="stat-label">Intrusions</span><span class="stat-value">{stats['threats']['intrusions']}</span></div>
-<div class="line"><i class="bi bi-bug-fill icon danger"></i><span class="stat-label">Malware</span><span class="stat-value danger">{stats['threats']['malware']}</span></div>
-<div class="line"><i class="bi bi-lightning-charge-fill icon warn"></i><span class="stat-label">Exploits</span><span class="stat-value warn">{stats['threats']['exploits']}</span></div>
-<div class="line"><i class="bi bi-fingerprint icon"></i><span class="stat-label">Fingerprinting</span><span class="stat-value">{stats['threats']['fingerprinting']}</span></div>
-<div class="line"><i class="bi bi-arrow-left-right icon"></i><span class="stat-label">HTTP Blocks</span><span class="stat-value">{stats['threats']['http_blocks']}</span></div>
-</div>
-
-</div>
-
-<div class="footer">
-Darkelf Browser • MiniAI Sentinel • Hardened Runtime
-</div>
-
-</div>
-</body>
-</html>
-"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <meta http-equiv="Content-Security-Policy"
+    content="
+    default-src 'none';
+    style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+    font-src https://cdn.jsdelivr.net;
+    img-src 'self' data:;
+    connect-src 'none';
+    script-src 'none';
+    object-src 'none';
+    frame-ancestors 'none';
+    base-uri 'none';
+    form-action 'none';
+    ">
+    <title>Darkelf Threat Console</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+    :root {{
+        --bg:#05060a;
+        --accent:#36ff9a;
+        --accent2:#00eaff;
+        --accent3:#b400ff;
+        --danger:#ff3b30;
+        --warn:#ffd36b;
+        --muted:#9db0be;
+        --card:rgba(255,255,255,.05);
+    }}
+    *{{box-sizing:border-box}}
+    html,body{{margin:0;height:100%;font-family:ui-sans-serif,system-ui,-apple-system;}}
+    body{{
+        background:
+            radial-gradient(1200px 800px at 15% -10%, rgba(0,234,255,.35), transparent 70%),
+            radial-gradient(900px 600px at 110% 0%, rgba(54,255,154,.35), transparent 70%),
+            radial-gradient(1200px 700px at 50% 120%, rgba(180,0,255,.35), transparent 70%),
+            var(--bg);
+        color:#eef2f6;
+    }}
+    body::before {{
+        content:"";
+        position:fixed;
+        inset:0;
+        background:
+            linear-gradient(rgba(0,255,180,.05) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(0,255,180,.05) 1px, transparent 1px);
+        background-size:40px 40px;
+        pointer-events:none;
+        opacity:.3;
+    }}
+    .scanline {{
+        position:fixed;
+        top:0;
+        left:0;
+        width:100%;
+        height:2px;
+        background:linear-gradient(90deg,transparent,var(--accent2),transparent);
+        animation:scan 5s linear infinite;
+        opacity:.5;
+    }}
+    @keyframes scan {{
+        0%{{transform:translateY(-20px)}}
+        100%{{transform:translateY(100vh)}}
+    }}
+    .container {{
+        max-width:1100px;
+        margin:auto;
+        padding:90px 24px;
+    }}
+    .title {{
+        font-size:1.8rem;
+        font-weight:900;
+        letter-spacing:.15em;
+        background:linear-gradient(90deg,var(--accent),var(--accent2),var(--accent3));
+        -webkit-background-clip:text;
+        -webkit-text-fill-color:transparent;
+    }}
+    .status-lights {{
+        margin-top:18px;
+        display:flex;
+        gap:10px;
+    }}
+    .light {{
+        width:10px;
+        height:10px;
+        border-radius:50%;
+    }}
+    .green {{background:#36ff9a;box-shadow:0 0 10px #36ff9a}}
+    .cyan {{background:#00eaff;box-shadow:0 0 10px #00eaff}}
+    .purple {{background:#b400ff;box-shadow:0 0 10px #b400ff}}
+    .badge {{
+        display:inline-flex;
+        align-items:center;
+        gap:10px;
+        margin-top:20px;
+        padding:8px 16px;
+        border-radius:999px;
+        font-size:.7rem;
+        font-weight:800;
+        letter-spacing:.15em;
+        background:{"#ff3b30" if stats['lockdown']['active'] else "#36ff9a"};
+        color:#000;
+    }}
+    .badge::before {{
+        content:"";
+        width:8px;
+        height:8px;
+        border-radius:50%;
+        background:#fff;
+        animation:pulse 1.5s infinite;
+    }}
+    @keyframes pulse {{
+        0%{{transform:scale(.7);opacity:.6}}
+        50%{{transform:scale(1.4);opacity:1}}
+        100%{{transform:scale(.7);opacity:.6}}
+    }}
+    .cards {{
+        margin-top:60px;
+        display:grid;
+        grid-template-columns:1fr 1fr;
+        gap:50px;
+    }}
+    .card {{
+        background:var(--card);
+        backdrop-filter:blur(20px);
+        padding:40px;
+        border-radius:18px;
+        border:1px solid rgba(255,255,255,.08);
+        box-shadow:0 30px 60px rgba(0,0,0,.6),0 0 40px rgba(0,234,255,.15);
+    }}
+    .section-title {{
+        font-size:.75rem;
+        letter-spacing:.25em;
+        text-transform:uppercase;
+        color:var(--muted);
+        margin-bottom:24px;
+    }}
+    .line {{
+        display:grid;
+        grid-template-columns:28px auto max-content;
+        align-items:center;
+        column-gap:14px;
+        margin:16px 0;
+    }}
+    .icon {{
+        font-size:1.2rem;
+        color:var(--accent2);
+    }}
+    .stat-label {{color:#c3d2dd}}
+    .stat-value {{
+        font-weight:900;
+        font-size:1.15rem;
+    }}
+    .footer {{
+        margin-top:80px;
+        text-align:center;
+        font-size:.8rem;
+        color:var(--muted);
+        opacity:.7;
+    }}
+    </style>
+    </head>
+    <body>
+    <div class="scanline"></div>
+    <div class="container">
+        <div class="title">Darkelf MiniAI Threat Console</div>
+        <div class="status-lights">
+            <div class="light green"></div>
+            <div class="light cyan"></div>
+            <div class="light purple"></div>
+        </div>
+        <div class="badge">
+            {"LOCKDOWN ACTIVE" if stats['lockdown']['active'] else "SYSTEM MONITORING"}
+        </div>
+        <div class="cards">
+            <div class="card">
+                <div class="section-title">Session Metrics</div>
+                <div class="line"><i class="bi bi-clock-history icon"></i><span class="stat-label">Session Uptime</span><span class="stat-value">{stats['uptime_seconds']:.1f}s</span></div>
+                <div class="line"><i class="bi bi-activity icon"></i><span class="stat-label">Total Events</span><span class="stat-value">{stats['total_events']}</span></div>
+                <div class="line"><i class="bi bi-globe2 icon"></i><span class="stat-label">Unique Domains</span><span class="stat-value">{stats['unique_domains']}</span></div>
+                <div class="line"><i class="bi bi-shield-exclamation icon"></i><span class="stat-label">Threat Score</span><span class="stat-value">{stats.get('threat_score', 0)}</span></div>
+            </div>
+            <div class="card">
+                <div class="section-title">Threat Analysis</div>
+                <div class="line"><i class="bi bi-crosshair icon"></i><span class="stat-label">Trackers</span><span class="stat-value">{stats['threats']['trackers']}</span></div>
+                <div class="line"><i class="bi bi-bullseye icon"></i><span class="stat-label">Intrusions</span><span class="stat-value">{stats['threats']['intrusions']}</span></div>
+                <div class="line"><i class="bi bi-bug-fill icon"></i><span class="stat-label">Malware</span><span class="stat-value">{stats['threats']['malware']}</span></div>
+                <div class="line"><i class="bi bi-lightning-charge-fill icon"></i><span class="stat-label">Exploits</span><span class="stat-value">{stats['threats']['exploits']}</span></div>
+                <div class="line"><i class="bi bi-fingerprint icon"></i><span class="stat-label">Fingerprinting</span><span class="stat-value">{stats['threats']['fingerprinting']}</span></div>
+                <div class="line"><i class="bi bi-arrow-left-right icon"></i><span class="stat-label">HTTP Blocks</span><span class="stat-value">{stats['threats']['http_blocks']}</span></div>
+            </div>
+        </div>
+        <div class="footer">
+            Darkelf Browser • MiniAI Sentinel • Hardened Runtime
+        </div>
+    </div>
+    </body>
+    </html>
+    """
 
     def update_security_indicator(self, trusted):
         try:
@@ -3019,66 +2471,12 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
 
         self.updateMiniAIIndicator()
 
-    @objc.IBAction
-    def openThreatReport_(self, sender):
-        print("Threat report clicked")
-        self.open_threat_report_tab()
-
-    def actToggleJS_(self, _):
-        """Toggle JavaScript on/off and reload the active tab."""
-        # Flip state
-        self.js_enabled = not bool(getattr(self, "js_enabled", True))
+    def _is_tab_webview(self, webview):
+        for tab in self.tabs:
+            if tab.view is webview:
+                return True
+        return False
     
-        try:
-            # Update icon + tooltip
-            sym = "bolt" if self.js_enabled else "bolt.slash"
-            img = NSImage.imageWithSystemSymbolName_accessibilityDescription_(sym, None)
-            if img:
-                img.setTemplate_(True)
-                self.btn_js.setImage_(img)
-                self.btn_js.setImagePosition_(2)
-            self.btn_js.setToolTip_(f"JavaScript: {'ON' if self.js_enabled else 'OFF'}")
-        
-            # Update button color
-            if hasattr(self.btn_js, "setContentTintColor_"):
-                if self.js_enabled:
-                    self.btn_js.setContentTintColor_(
-                        NSColor.colorWithCalibratedRed_green_blue_alpha_(52/255.0, 199/255.0, 89/255.0, 1.0)
-                    )
-                else:
-                    self.btn_js.setContentTintColor_(
-                        NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 59/255.0, 48/255.0, 1.0)
-                    )
-        except Exception as e:
-            print("[JS Toggle] Icon update error:", e)
-
-        # Apply JS setting to active webview and reload
-        try:
-            wk = self.tabs[self.active].view
-            prefs = wk.configuration().preferences()
-            prefs.setJavaScriptEnabled_(self.js_enabled)
-        
-            # Check if on homepage
-            try:
-                url = wk.URL()
-                if url and url.absoluteString() == HOME_URL:
-                    # Just update UI on homepage, don't rebuild
-                    js_update = f"""
-                        if (window.DarkelfStatus && window.DarkelfStatus.update) {{
-                            window.DarkelfStatus.update({{js: {str(self.js_enabled).lower()}}});
-                        }}
-                    """
-                    wk.evaluateJavaScript_completionHandler_(js_update, None)
-                    return
-            except Exception:
-                pass
-
-            # For external sites: reload
-            wk.reload()
-        
-        except Exception as e:
-            print("[JS Toggle] Reload error:", e)
-            
     def _is_home_context(self):
         try:
             if getattr(self, "loading_home", False):
@@ -3087,7 +2485,7 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
             return bool(u and u.absoluteString() == HOME_URL)
         except Exception:
             return False
-            
+
     def _make_window(self):
         rect = NSMakeRect(80, 80, 1280, 820)
         style = (
@@ -3100,7 +2498,9 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
             rect, style, 2, False
         )
         win.setTitle_(APP_NAME)
-        win.setDelegate_(self)
+
+        # ✅ IMPORTANT: do NOT call win.setDelegate_(...) here.
+        # The delegate is a weak ref and should be set after Browser.init is stable.
 
         try:
             win.setTitleVisibility_(1)
@@ -3135,7 +2535,6 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
         except Exception as e:
             print(f"[Window] ❌ Fullscreen behavior failed: {e}")
 
-        # CRITICAL: Enable fullscreen on the window's content view
         try:
             cv = win.contentView()
             cv.setWantsLayer_(True)
@@ -3150,7 +2549,332 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
         
     def actCloseTab_(self, _):
         self._close_tab()
+        
+    TOOLBAR_HEIGHT = 44
+    TABBAR_HEIGHT = 38
+    PADDING = 10
 
+    def _nscolor_hex(self, hex_str, alpha=1.0):
+        hs = hex_str.lstrip("#")
+        r = int(hs[0:2], 16) / 255.0
+        g = int(hs[2:4], 16) / 255.0
+        b = int(hs[4:6], 16) / 255.0
+        return NSColor.colorWithCalibratedRed_green_blue_alpha_(r, g, b, alpha)
+
+    def _style_button(self, btn, tooltip=None):
+        # Avoid fancy styles that sometimes misbehave across macOS versions
+        try:
+            btn.setBordered_(True)
+        except Exception:
+            pass
+        if tooltip:
+            try:
+                btn.setToolTip_(tooltip)
+            except Exception:
+                pass
+        return btn
+
+    def _build_toolbar(self):
+        bounds = self.window.contentView().bounds()
+        w = bounds.size.width
+
+        self.toolbar = NSView.alloc().initWithFrame_(
+            NSMakeRect(0, bounds.size.height - self.TOOLBAR_HEIGHT, w, self.TOOLBAR_HEIGHT)
+        )
+        self.toolbar.setAutoresizingMask_(NSViewWidthSizable)
+
+        self.toolbar.setWantsLayer_(True)
+        self.toolbar.layer().setBackgroundColor_(self._nscolor_hex("#0b0f14", 1.0).CGColor())
+
+        x = self.PADDING
+        y = 8
+        bw = 34
+        bh = 28
+        gap = 4
+                    
+    def _build_tabbar(self):
+        bounds = self.window.contentView().bounds()
+        w = bounds.size.width
+        h = bounds.size.height
+        top_y = h - self.TOOLBAR_HEIGHT - self.TABBAR_HEIGHT
+
+        self.tabbar = NSView.alloc().initWithFrame_(
+            NSMakeRect(0, top_y, w, self.TABBAR_HEIGHT)
+        )
+        self.tabbar.setAutoresizingMask_(NSViewWidthSizable | NSViewMinYMargin)
+        self.tabbar.setWantsLayer_(True)
+        self.tabbar.layer().setBackgroundColor_(
+            self._nscolor_hex("#0a0d12", 1.0).CGColor()
+        )
+
+        # container for tab buttons
+        self.tab_buttons_container = NSView.alloc().initWithFrame_(
+            NSMakeRect(0, 0, w, self.TABBAR_HEIGHT)
+        )
+        self.tab_buttons_container.setAutoresizingMask_(NSViewWidthSizable)
+        self.tabbar.addSubview_(self.tab_buttons_container)
+
+        self.window.contentView().addSubview_(self.tabbar)
+
+        # webview container
+        content_h = h - self.TOOLBAR_HEIGHT - self.TABBAR_HEIGHT
+        self.content_container = NSView.alloc().initWithFrame_(
+            NSMakeRect(0, 0, w, content_h)
+        )
+        self.content_container.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
+        self.content_container.setWantsLayer_(True)
+        self.content_container.layer().setBackgroundColor_(NSColor.blackColor().CGColor())
+
+        self.window.contentView().addSubview_(self.content_container)
+
+        if not hasattr(self, "tabs"):
+            self.tabs = []
+
+        if not hasattr(self, "active"):
+            self.active = -1
+
+        self._update_tab_buttons()
+
+    def _layout_topbars(self):
+        bounds = self.window.contentView().bounds()
+        w = bounds.size.width
+        h = bounds.size.height
+
+        if getattr(self, "toolbar", None):
+            self.toolbar.setFrame_(NSMakeRect(0, h - self.TOOLBAR_HEIGHT, w, self.TOOLBAR_HEIGHT))
+        if getattr(self, "tabbar", None):
+            self.tabbar.setFrame_(NSMakeRect(0, h - self.TOOLBAR_HEIGHT - self.TABBAR_HEIGHT, w, self.TABBAR_HEIGHT))
+        if getattr(self, "btn_new_tab", None):
+            self.btn_new_tab.setFrame_(NSMakeRect(w - 44, 6, 34, 26))
+        if getattr(self, "content_container", None):
+            self.content_container.setFrame_(NSMakeRect(0, 0, w, h - self.TOOLBAR_HEIGHT - self.TABBAR_HEIGHT))
+        
+    def windowDidResize_(self, notification):
+        self._layout_topbars()
+        self._update_tab_buttons()
+
+    def _update_tab_buttons(self):
+        if not getattr(self, "tab_buttons_container", None):
+            return
+
+        # Remove old generated tab controls
+        for v in list(self.tab_buttons_container.subviews() or []):
+            v.removeFromSuperview()
+
+        w = self.tab_buttons_container.bounds().size.width
+        y = 6
+        h = 32
+        gap = 6
+        min_tab_w = 110
+        max_tab_w = 180
+        close_w = 18
+        inner_pad = 10
+
+        # Leave space on the right for the "+" button
+        num_tabs = len(self.tabs)
+        if num_tabs <= 0:
+            return
+
+        available_w = max(
+            200,
+            w - (gap * max(0, num_tabs - 1)) - self.PADDING * 2
+        )
+
+        tab_w = max(min_tab_w, min(available_w // num_tabs, max_tab_w))
+
+        x = self.PADDING
+
+        for i, tab in enumerate(self.tabs):
+            selected = (i == self.active)
+
+            # outer tab shell
+            tab_shell = NSView.alloc().initWithFrame_(NSMakeRect(x, y, tab_w, h))
+            tab_shell.setWantsLayer_(True)
+            tab_shell.layer().setCornerRadius_(12.0)
+
+            if selected:
+                tab_shell.layer().setBackgroundColor_(self._nscolor_hex("#34C759", 0.25).CGColor())
+                tab_shell.layer().setBorderWidth_(2.0)
+                tab_shell.layer().setBorderColor_(self._nscolor_hex("#34C759", 1.0).CGColor())
+            else:
+                tab_shell.layer().setBackgroundColor_(self._nscolor_hex("#222830", 0.7).CGColor())
+                tab_shell.layer().setBorderWidth_(1.0)
+                tab_shell.layer().setBorderColor_(self._nscolor_hex("#3c454f", 0.7).CGColor())
+
+            # close button
+            close_btn = HoverButton.alloc().initWithFrame_(
+                NSMakeRect(tab_w - close_w - 8, 7, close_w, close_w)
+            )
+            close_btn.setTitle_("×")
+            close_btn.setBordered_(False)
+            close_btn.setTarget_(self)
+            close_btn.setAction_("actCloseTabIndex:")
+            close_btn.setTag_(i)
+            close_btn.setToolTip_("Close Tab")
+            close_btn.setFont_(NSFont.boldSystemFontOfSize_(13))
+            close_btn.setContentTintColor_(
+                self._nscolor_hex("#34C759", 1.0) if selected else NSColor.whiteColor()
+            )
+            
+            title = tab.host or "New Tab"
+            if len(title) > 18:
+                title = title[:18] + "…"
+                
+            title_btn = NSButton.alloc().initWithFrame_(
+                NSMakeRect(inner_pad, 0, tab_w - close_w - 20, h)
+            )
+            title_btn.setTitle_(title)
+            title_btn.setBordered_(False)
+            title_btn.setAlignment_(0)  # left
+            title_btn.setTarget_(self)
+            title_btn.setAction_("actSwitchTab:")
+            title_btn.setTag_(i)
+            title_btn.setContentTintColor_(
+                self._nscolor_hex("#34C759", 1.0) if selected else NSColor.whiteColor()
+            )
+
+            tab_shell.addSubview_(title_btn)
+            tab_shell.addSubview_(close_btn)
+            self.tab_buttons_container.addSubview_(tab_shell)
+
+            x += tab_w + gap
+        
+    # ================= TAB / NAV ACTIONS =================
+
+    @objc.IBAction
+    def tabClicked_(self, sender):
+        try:
+            idx = int(sender.tag())
+            self._select_tab(idx)
+        except Exception as e:
+            print("[Tabs] tabClicked_ error:", e)
+
+    @objc.IBAction
+    def actNewTab_(self, sender):
+        try:
+            self._add_tab(home=True)
+        except Exception as e:
+            print("[Tabs] actNewTab_ error:", e)
+
+    @objc.IBAction
+    def actBack_(self, sender):
+        tab = self._active_tab()
+        if tab and getattr(tab, "view", None):
+            try:
+                tab.view.goBack()
+            except Exception:
+                pass
+
+    @objc.IBAction
+    def actFwd_(self, sender):
+        tab = self._active_tab()
+        if tab and getattr(tab, "view", None):
+            try:
+                tab.view.goForward()
+            except Exception:
+                pass
+
+    @objc.IBAction
+    def actReload_(self, sender):
+        tab = self._active_tab()
+        if tab and getattr(tab, "view", None):
+            try:
+                tab.view.reload()
+            except Exception:
+                pass
+
+    @objc.IBAction
+    def actHome_(self, sender):
+        try:
+            self._add_tab(home=True)
+        except Exception as e:
+            print("[Nav] actHome_ error:", e)
+            
+    @objc.IBAction
+    def addrEntered_(self, sender):
+        try:
+            text = str(self.addr.stringValue() or "").strip()
+            if not text:
+                return
+
+            if "://" not in text and "." in text:
+                text = "https://" + text
+            elif "://" not in text:
+                text = "https://lite.duckduckgo.com/lite/?q=" + quote_plus(text)
+                
+            self._add_tab(home=False)
+
+            self._navigate_to(text)
+
+        except Exception as e:
+            print("[Nav] addrEntered error:", e)
+
+    # ================= TAB HELPERS =================
+
+    def _active_tab(self):
+        if not hasattr(self, "tabs"):
+            return None
+        if self.active < 0 or self.active >= len(self.tabs):
+            return None
+        return self.tabs[self.active]
+
+    def _select_tab(self, idx):
+        if idx < 0 or idx >= len(self.tabs):
+            return
+
+        self.active = idx
+
+        cv = self.window.contentView()
+
+        # Remove any existing WKWebViews from contentView
+        for sub in list(cv.subviews()):
+            if isinstance(sub, WKWebView):
+                sub.removeFromSuperview()
+
+        # Hide all tab WKWebViews except for the active one
+        for i, tab in enumerate(self.tabs):
+            view = getattr(tab, "view", None)
+            if not view:
+                continue
+            if i == self.active:
+                # Remount the active tab's WKWebView, ensure it's visible
+                self._mount_webview(view)
+                try:
+                    view.setHidden_(False)
+                except Exception:
+                    pass
+            else:
+                try:
+                    view.setHidden_(True)
+                except Exception:
+                    pass
+
+        self._sync_addr()
+        self._update_tab_buttons()
+
+    def _sync_addr(self):
+        tab = self._active_tab()
+        if not tab or not getattr(self, "addr", None):
+            return
+
+        try:
+            self.addr.setStringValue_(getattr(tab, "url", "") or "")
+        except Exception:
+            pass
+
+    def _navigate_to(self, url_str):
+        tab = self._active_tab()
+        if not tab or not getattr(tab, "view", None):
+            return
+
+        try:
+            nsurl = NSURL.URLWithString_(url_str)
+            tab.view.loadRequest_(NSURLRequest.requestWithURL_(nsurl))
+            tab.url = url_str
+            self._sync_addr()
+        except Exception as e:
+            print("[Nav] navigate error:", e)
+            
     # ----- Toolbar -----
     def _mk_btn(self, symbol, tooltip):
         b = HoverButton.alloc().init()
@@ -3178,519 +2902,280 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
             b.setContentTintColor_(NSColor.whiteColor())
         return b
                                         
+# -------------------------------------------------------------------
+# Replace your existing _make_toolbar + _build_shadow_toolbar with this
+# -------------------------------------------------------------------
     def _make_toolbar(self):
-        tb = NSToolbar.alloc().initWithIdentifier_("DarkelfToolbar")
-        tb.setDisplayMode_(1)
-        tb.setSizeMode_(1)
-
-        # --- Navigation + control buttons ---
-        # Larger icons: increase point size (44 recommended)
-        def big_btn(symbol, tooltip):
-
-            b = HoverButton.alloc().init()
-            try:
-                img = NSImage.imageWithSystemSymbolName_accessibilityDescription_(symbol, None)
-                cfg = NSImageSymbolConfiguration.configurationWithPointSize_weight_scale_(54.0, 2, 2)
-                if img and hasattr(img, "imageByApplyingSymbolConfiguration_"):
-                    img = img.imageByApplyingSymbolConfiguration_(cfg)
-                if img:
-                    try: img.setTemplate_(True)
-                    except Exception: pass
-                    b.setImage_(img)
-            except Exception: pass
-            try: b.setBordered_(False); b.setBezelStyle_(1); b.setToolTip_(tooltip or "")
-            except Exception: pass
-            if hasattr(b, "setContentTintColor_"): b.setContentTintColor_(NSColor.whiteColor())
-            return b
-
-        self.btn_back   = big_btn("chevron.backward", "Back")
-        self.btn_fwd    = big_btn("chevron.forward", "Forward")
-        self.btn_reload = big_btn("arrow.clockwise", "Reload")
-        self.btn_home   = big_btn("house", "Home")
-        self.btn_newtab = big_btn("plus", "New Tab")
-        self.btn_close  = big_btn("xmark", "Close Tab")
-        self.btn_zoom_in  = big_btn("plus.magnifyingglass", "Zoom In")
-        self.btn_zoom_out = big_btn("minus.magnifyingglass", "Zoom Out")
-        self.btn_full   = big_btn("arrow.up.left.and.arrow.down.right", "Fullscreen")
-        self.btn_js     = big_btn("bolt.slash", "Toggle JavaScript")
-                
-        # JS button coloring
-        img = NSImage.imageWithSystemSymbolName_accessibilityDescription_("bolt", None)
-        if img:
-            img.setTemplate_(True)
-            self.btn_js.setImage_(img)
-            self.btn_js.setImagePosition_(2)    # Image only
-        self.btn_js.setTitle_("")               # <-- This removes the "Button" text
-        self.btn_js.setToolTip_(f"JavaScript: {'ON' if self.js_enabled else 'OFF'}")
-        if hasattr(self.btn_js, "setContentTintColor_"):
-            if self.js_enabled:
-                self.btn_js.setContentTintColor_(
-                    NSColor.colorWithCalibratedRed_green_blue_alpha_(52/255.0, 199/255.0, 89/255.0, 1.0)
-                )
-            else:
-                self.btn_js.setContentTintColor_(
-                    NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 59/255.0, 48/255.0, 1.0)
-            )
-            
-        # --- Nuke / Clear All Data ---
-        def _load_symbol_with_fallback(symbols):
-            for s in symbols:
-                im = NSImage.imageWithSystemSymbolName_accessibilityDescription_(s, None)
-                if im:
-                    try:
-                        cfg = NSImageSymbolConfiguration.configurationWithPointSize_weight_scale_(54.0, 2, 2)
-                        if hasattr(im, "imageByApplyingSymbolConfiguration_"):
-                            im = im.imageByApplyingSymbolConfiguration_(cfg)
-                        im.setTemplate_(True)
-                    except Exception:
-                        pass
-                    return im, s
-            return None, None
-
-        self.btn_nuke = big_btn("skull.fill", "Clear All Data")
-        try:
-            if not self.btn_nuke.image():
-                im, used = _load_symbol_with_fallback([
-                    "skull.fill",
-                    "xmark.octagon.fill",
-                    "flame.fill",
-                    "trash.fill"
-                ])
-                if im:
-                    self.btn_nuke.setImage_(im)
-            self.btn_nuke.setImagePosition_(2)
-            self.btn_nuke.setTitle_("")
-            if hasattr(self.btn_nuke, "setContentTintColor_"):
-                danger_syms = {"xmark.octagon.fill", "flame.fill"}
-                tint = (1.0, 0.25, 0.25, 1.0) if 'used' in locals() and used in danger_syms else (52/255.0, 199/255.0, 89/255.0, 1.0)
-                self.btn_nuke.setContentTintColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(*tint))
-        except Exception:
-            pass
-
-        self.btn_nuke.setTarget_(self)
-        self.btn_nuke.setAction_("actNuke:")
-        
-        # Attach actions to each button
-        for b, sel in [
-            (self.btn_back, 'actBack:'),
-            (self.btn_fwd, 'actFwd:'),
-            (self.btn_reload, 'actReload:'),
-            (self.btn_home, 'actHome:'),
-            (self.btn_zoom_in, 'actZoomIn:'),
-            (self.btn_zoom_out, 'actZoomOut:'),
-            (self.btn_full, 'actFull:'),
-            (self.btn_js, 'actToggleJS:'),
-            (self.btn_nuke, 'actNuke:')
-        ]:
-            b.setTarget_(self)
-            b.setAction_(sel)
-
-
-        # ==========================================================
-        # Darkelf MiniAI Button (OUTSIDE THE LOOP)
-        # ==========================================================
-
-        self.btn_mini_ai = NSButton.alloc().init()
-
-        img = NSImage.imageWithSystemSymbolName_accessibilityDescription_("shield.fill", None)
-        if img:
-            img.setTemplate_(True)
-            self.btn_mini_ai.setImage_(img)
-
-        self.btn_mini_ai.setTitle_("")                # NO TEXT
-        self.btn_mini_ai.setImagePosition_(2)         # Image only
-        self.btn_mini_ai.setBordered_(False)
-        self.btn_mini_ai.setEnabled_(True)            # clickable
-        self.btn_mini_ai.setToolTip_("Darkelf MiniAI Threat Report")
-
-        self.btn_mini_ai.setWantsLayer_(True)
-
-        if hasattr(self.btn_mini_ai, "setContentTintColor_"):
-            self.btn_mini_ai.setContentTintColor_(NSColor.systemGreenColor())
-
-        # Connect click action
-        self.btn_mini_ai.setTarget_(self)
-        self.btn_mini_ai.setAction_("openThreatReport:")
-                
-        class AddressField(NSSearchField):
-            def initWithFrame_owner_(self, frame, owner):
-                self = objc.super(AddressField, self).initWithFrame_(frame)
-                if self is None: return None
-                self._owner = owner   # back-reference to Browser
-                return self
-            def rightMouseDown_(self, event):
-                try:
-                    loc = event.locationInWindow()
-                    if hasattr(self, "_owner") and self._owner:
-                        self._owner._show_context_popover(self, loc)
-                    else:
-                        objc.super(AddressField, self).rightMouseDown_(event)
-                except Exception as e:
-                    print("Context menu popover error:", e)
-                    
-        self.addr = AddressField.alloc().initWithFrame_owner_(((0, 0), (1080, 32)), self)
-        try:
-            cell = self.addr.cell()
-            cell.setPlaceholderString_("Search or enter URL")
-            if hasattr(cell, "setSendsWholeSearchString_"):
-                cell.setSendsWholeSearchString_(True)
-            if hasattr(cell, "setSendsSearchStringImmediately_"):
-                cell.setSendsSearchStringImmediately_(False)
-        except Exception: pass
-        self.addr.setTarget_(self); self.addr.setAction_("actGo:")
-        
-        # Green border on focus (see your snippet)
-        try:
-            self.addr.setFocusRingType_(1)  # NSFocusRingTypeNone
-            self.addr.setWantsLayer_(True)
-            self.addr.layer().setBorderColor_(
-                NSColor.colorWithCalibratedRed_green_blue_alpha_(52/255.0, 199/255.0, 89/255.0, 1.0)
-            )
-            self.addr.layer().setBorderWidth_(2.0)
-        except Exception:
-            pass
-
-        # --- Keep address field text white in both Dark and Light macOS modes ---
-        try:
-            darkAqua = NSAppearance.appearanceNamed_("NSAppearanceNameDarkAqua")
-            if darkAqua and hasattr(self.addr, "setAppearance_"):
-                self.addr.setAppearance_(darkAqua)
-            if hasattr(self.addr, "setTextColor_"):
-                self.addr.setTextColor_(NSColor.whiteColor())
-        except Exception as e:
-            print("[AddrBar] appearance lock failed:", e)
-
-        # Wrap in NSToolbarItem so AppKit respects width
-        addr_item = NSToolbarItem.alloc().initWithItemIdentifier_("Addr")
-        addr_item.setView_(self.addr)
-        addr_item.setMinSize_((700, 32))     # match search field height
-        addr_item.setMaxSize_((1600, 32))    # allow very long
-
-        # Helper to wrap views
-        def item(ident, view):
-            it = NSToolbarItem.alloc().initWithItemIdentifier_(ident)
-            it.setView_(view)
-            return it
-
-        # --- Toolbar items order ---
-        self.items = [
-            item('Back', self.btn_back),
-            item('Fwd', self.btn_fwd),
-            item('Reload', self.btn_reload),
-            item('Home', self.btn_home),
-            "NSToolbarFlexibleSpaceItem",
-            addr_item,
-            "NSToolbarFlexibleSpaceItem",
-            item('ZoomIn', self.btn_zoom_in),
-            item('ZoomOut', self.btn_zoom_out),
-            item('Full', self.btn_full),
-            item('JS', self.btn_js),
-            item('Nuke', self.btn_nuke),
-            item('MiniAI', self.btn_mini_ai),
-            
-        ]
-
-        owner = self
-        class Delegate(NSObject):
-            def initWithOwner_(self, owner_):
-                self = objc.super(Delegate, self).init(); self.owner = owner_; return self
-            def toolbarAllowedItemIdentifiers_(self, tb):
-                return [*(i if isinstance(i, str) else i.itemIdentifier() for i in self.owner.items)]
-            def toolbarDefaultItemIdentifiers_(self, tb):
-                return [*(i if isinstance(i, str) else i.itemIdentifier() for i in self.owner.items)]
-            def toolbar_itemForItemIdentifier_willBeInsertedIntoToolbar_(self, tb, ident, flag):
-                for i in self.owner.items:
-                    if not isinstance(i, str) and i.itemIdentifier() == ident:
-                        # --- Always update JS button tooltip and color when inserted ---
-                        if ident == 'JS':
-                            btn = i.view()
-                            if btn:
-                                btn.setToolTip_(f"JavaScript: {'ON' if self.owner.js_enabled else 'OFF'}")
-                                if hasattr(btn, "setContentTintColor_"):
-                                    if self.owner.js_enabled:
-                                        btn.setContentTintColor_(
-                                            NSColor.colorWithCalibratedRed_green_blue_alpha_(
-                                                52/255.0, 199/255.0, 89/255.0, 1.0
-                                            )
-                                        )
-                                    else:
-                                        btn.setContentTintColor_(
-                                            NSColor.colorWithCalibratedRed_green_blue_alpha_(
-                                                1.0, 59/255.0, 48/255.0, 1.0
-                                            )
-                                        )
-                        return i
-                return None
-        self._toolbar_delegate = Delegate.alloc().initWithOwner_(self)
-        tb.setDelegate_(self._toolbar_delegate)
-        return tb
-
-    # ----- Tab strip -----
-    def _build_tabbar(self):
         cv = self.window.contentView()
 
-        # Compute tabbar frame just below title/toolbar
-        tab_h = 36.0
-        tab_btn_height = tab_h - 8
+        # Determine a reliable top Y using contentLayoutRect (safe with titlebars/toolbars)
         try:
             clr = self.window.contentLayoutRect()
-            y = clr.origin.y + clr.size.height - tab_h
-            w = clr.size.width
+            top_y = clr.origin.y + clr.size.height
+            width = clr.size.width
         except Exception:
-            f = cv.frame(); title_h = 40.0
-            y = f.size.height - title_h - tab_h; w = f.size.width
+            f = cv.frame()
+            top_y = f.size.height
+            width = f.size.width
 
-        # Use NSView instead of NSBox to prevent unwanted title label
-        self.tabbar = NSView.alloc().initWithFrame_(((0, y), (w, tab_h)))
-        self.tabbar.setWantsLayer_(True)
-        self.tabbar.layer().setBackgroundColor_(
-            NSColor.colorWithCalibratedRed_green_blue_alpha_(0.07, 0.09, 0.12, 1.0).CGColor()
+        bar_h = 52.0
+        y = top_y - bar_h
+
+        # Container
+        self.toolbar_container = NSView.alloc().initWithFrame_(NSMakeRect(0, y, width, bar_h))
+        self.toolbar_container.setAutoresizingMask_(10)  # width sizable + stick to top
+        self.toolbar_container.setWantsLayer_(True)
+
+        # Modern dark background
+        self.toolbar_container.layer().setBackgroundColor_(
+            NSColor.colorWithCalibratedRed_green_blue_alpha_(0.05, 0.06, 0.08, 1.0).CGColor()
         )
-        self.tabbar.setAutoresizingMask_(10)  # width + stick to top
 
-        cv.addSubview_(self.tabbar)
-
-        # "+" button (image-only)
-        self.btn_tab_add = HoverButton.alloc().init()
+        # subtle bottom border
         try:
-            img = NSImage.imageWithSystemSymbolName_accessibilityDescription_("plus", None)
-            cfg = NSImageSymbolConfiguration.configurationWithPointSize_weight_scale_(18.0, 1, 1)
-            if img:
-                img = img.imageByApplyingSymbolConfiguration_(cfg)
-                img.setTemplate_(True)
-                self.btn_tab_add.setImage_(img)
-        except Exception:
-            pass
-        try:
-            self.btn_tab_add.setTitle_(None)          # image-only
-            self.btn_tab_add.setImagePosition_(0)   # NSImageOnly
-            self.btn_tab_add.setBordered_(False)
-            self.btn_tab_add.setBezelStyle_(1)
-            self.btn_tab_add.setTitle_("+")
-            
-            if hasattr(self.btn_tab_add, "setImageScaling_"):
-                self.btn_tab_add.setImageScaling_(1)  # NSImageScaleProportionallyDown
-        except Exception:
-            pass
-        if hasattr(self.btn_tab_add, "setContentTintColor_"):
-            self.btn_tab_add.setContentTintColor_(NSColor.whiteColor())
-        self.btn_tab_add.setTarget_(self)
-        self.btn_tab_add.setAction_("actNewTab:")
-        self.tabbar.addSubview_(self.btn_tab_add)
-
-        # Initial layout + z-order
-        self._layout()
-        self._bring_tabbar_to_front()
-
-    def _bring_tabbar_to_front(self):
-        """Ensure tabbar is visible above the webview."""
-        try:
-            cv = self.window.contentView()
-            if self.tabbar.superview() is not None:
-                self.tabbar.removeFromSuperview()
-            cv.addSubview_(self.tabbar)  # last added == topmost
-            self.tabbar.displayIfNeeded()
-        except Exception: pass
-
-    def onResize_(self, note): self._layout()
-
-    def _layout(self):
-        """Lay out the tabbar and its buttons consistently with contentLayoutRect."""
-        try:
-            cv = self.window.contentView()
-
-            tab_h = 36.0
-            tab_btn_height = tab_h - 8.0
-            close_btn_height = tab_btn_height
-            tab_w = 180.0
-            gap = 8.0
-            close_w = 14.0
-            inset = 10.0
-
-            try:
-                clr = self.window.contentLayoutRect()
-                y = clr.origin.y + clr.size.height - tab_h
-                w = clr.size.width
-            except Exception:
-                f = cv.frame()
-                title_h = 40.0
-                y = f.size.height - title_h - tab_h
-                w = f.size.width
-
-            self.tabbar.setAutoresizingMask_(10)
-            self.tabbar.setFrame_(((0, y), (w, tab_h)))
-
-            tb = self.tabbar.frame()
-
-            # Position "+" directly after the last tab
-            self.btn_tab_add.setFrame_(
-                ((tb.size.width - 32.0, (tab_h - tab_btn_height) / 2.0),
-                 (28.0, tab_btn_height))
+            self.toolbar_container.layer().setBorderWidth_(1.0)
+            self.toolbar_container.layer().setBorderColor_(
+                NSColor.colorWithCalibratedWhite_alpha_(1.0, 0.08).CGColor()
             )
+        except Exception:
+            pass
 
-            x = 8.0
+        cv.addSubview_(self.toolbar_container)
 
-            for b, close in zip(self.tab_btns, self.tab_close_btns):
-                b.setFrame_(
-                    ((x, (tab_h - tab_btn_height) / 2.0),
-                     (tab_w, tab_btn_height))
-                )
+        # ----------------------------
+        # Helpers: button factory
+        # ----------------------------
+        def make_icon_btn(symbol, tooltip, tint=None, size=18.0):
+            b = HoverButton.alloc().init()
+            b.setBordered_(False)
+            b.setBezelStyle_(1)
+            b.setTitle_("")
+            b.setToolTip_(tooltip or "")
 
-                close.setFrame_(
-                    ((x + inset,
-                      (tab_h - close_btn_height) / 2.0),
-                     (close_w, close_btn_height))
-                )
-
-                close.removeFromSuperview()
-                self.tabbar.addSubview_positioned_relativeTo_(close, 1, b)
-
-                close.setHidden_(False)
-                close.setEnabled_(True)
-
-                x += tab_w + gap
-                
-                # Position "+" right after last tab
-                self.btn_tab_add.setFrame_(
-                    ((x, (tab_h - tab_btn_height) / 2.0),
-                     (28.0, tab_btn_height))
-                )
-
-        except Exception as e:
-            print("Layout error:", e)
-
-    def _update_tab_buttons(self):
-        for btn in getattr(self, "tab_btns", []):
-            try: btn.removeFromSuperview()
-            except Exception: pass
-        for btn in getattr(self, "tab_close_btns", []):
-            try: btn.removeFromSuperview()
-            except Exception: pass
-        self.tab_btns, self.tab_close_btns = [], []
-
-        def middle_ellipsis(text, max_len=26):
-            if len(text) <= max_len:
-                return text
-            keep = max_len - 1
-            head = keep // 2
-            tail = keep - head
-            return text[:head] + "…" + text[-tail:]
-
-        for idx, t in enumerate(self.tabs):
-            close = HoverButton.alloc().init()
+            img = None
             try:
-                from AppKit import NSFont, NSMutableParagraphStyle, NSAttributedString, NSColor
-                style = NSMutableParagraphStyle.alloc().init()
-                style.setAlignment_(1)
+                img = NSImage.imageWithSystemSymbolName_accessibilityDescription_(symbol, None)
+                if img:
+                    cfg = NSImageSymbolConfiguration.configurationWithPointSize_weight_scale_(size, 2, 2)
+                    if hasattr(img, "imageByApplyingSymbolConfiguration_"):
+                        img = img.imageByApplyingSymbolConfiguration_(cfg)
+                    try:
+                        img.setTemplate_(True)
+                    except Exception:
+                        pass
+            except Exception:
+                img = None
 
-                close.setImage_(None)
-                close.setAttributedTitle_(NSAttributedString.alloc().initWithString_attributes_(
-                    "x",
-                    {
-                        "NSFont": NSFont.boldSystemFontOfSize_(14.0),
-                        "NSParagraphStyle": style,
-                        "NSColor": NSColor.whiteColor(),
-                    }
-                ))
-                close.setBordered_(False)
-                close.setBezelStyle_(1)
-                close.setToolTip_("Close Tab")
+            if img:
+                b.setImage_(img)
+                b.setImagePosition_(2)  # image-only
+
+            if hasattr(b, "setContentTintColor_"):
+                if tint:
+                    b.setContentTintColor_(tint)
+                else:
+                    b.setContentTintColor_(NSColor.whiteColor())
+
+            b.setWantsLayer_(True)
+            try:
+                b.layer().setCornerRadius_(10.0)
             except Exception:
                 pass
 
-            close.setTarget_(self)
-            close.setAction_("actCloseTabIndex:")
-            close.setTag_(idx)
-            close.setTransparent_(False)
+            return b
 
-            host = t.host or f"tab {idx+1}"
-            if host == "home" or t.url in (
-                "about:home", "about:blank", "about:blank#blocked", "about://home"
-            ):
-                label = "Home"
-            else:
-                import re as _re
-                host = _re.sub(r"^\s*www\.", "", host, flags=_re.IGNORECASE)
-                label = host
+        # ----------------------------
+        # Left buttons
+        # ----------------------------
+        self.btn_back   = make_icon_btn("chevron.backward", "Back")
+        self.btn_fwd    = make_icon_btn("chevron.forward", "Forward")
+        self.btn_reload = make_icon_btn("arrow.clockwise", "Reload")
+        self.btn_home   = make_icon_btn("house.fill", "Home")
 
-            label = middle_ellipsis(label, 26)
-
-            b = HoverButton.alloc().init()
-            try:
-                style = NSMutableParagraphStyle.alloc().init()
-                style.setAlignment_(1)
-                style.setFirstLineHeadIndent_(26.0)
-                style.setHeadIndent_(26.0)
-                style.setLineBreakMode_(4)
-
-                font = NSFont.systemFontOfSize_(12.0)
-                attrs = {
-                    "NSFont": font,
-                    "NSParagraphStyle": style,
-                }
-
-                b.setAttributedTitle_(NSAttributedString.alloc().initWithString_attributes_(
-                    label, attrs
-                ))
-                b.setBordered_(False)
-                b.setBezelStyle_(1)
-                b.setToolTip_(label)
-            except Exception:
-                try: b.setTitle_(label)
-                except Exception: pass
-
+        for b, sel in [
+            (self.btn_back,   "actBack:"),
+            (self.btn_fwd,    "actFwd:"),
+            (self.btn_reload, "actReload:"),
+            (self.btn_home,   "actHome:"),
+        ]:
             b.setTarget_(self)
-            b.setAction_("actSwitchTab:")
-            b.setTag_(idx)
+            b.setAction_(sel)
+            self.toolbar_container.addSubview_(b)
 
-            self.tabbar.addSubview_(b)
-            self.tabbar.addSubview_(close)
+        # ----------------------------
+        # URL bar
+        # ----------------------------
+        self.urlbar = AddressField.alloc().initWithFrame_owner_(NSMakeRect(200, 10, 720, 32), self)
+        self.addr = self.urlbar
 
-            self.tab_btns.append(b)
-            self.tab_close_btns.append(close)
+        self.urlbar.setBezeled_(True)
 
-        self._style_tabs()
-        self._layout()
+        self.urlbar.setFocusRingType_(0)
+        self.urlbar.cell().setFocusRingType_(0)
 
-    def _style_tabs(self):
-        """Active tab neon green background; others clear."""
-        neon_green = NSColor.colorWithCalibratedRed_green_blue_alpha_(15/255.0, 255/255.0, 80/255.0, 1.0)
-        neon_green_cg = neon_green.CGColor()
-        clear_color = NSColor.clearColor()
-        clear_color_cg = clear_color.CGColor()
-        for idx, (b, _) in enumerate(zip(self.tab_btns, self.tab_close_btns)):
-            if hasattr(b, "setWantsLayer_"):
-                b.setWantsLayer_(True)
-            try:
-                layer = b.layer()
-            except Exception:
-                layer = None
+        # THIS is the real fix
+        self.urlbar.cell().setShowsFirstResponder_(False)
 
-            if self.active == idx:
-                if layer:
-                    layer.setCornerRadius_(11.0)
-                    layer.setBackgroundColor_(neon_green_cg)
-                try:
-                    b.setContentTintColor_(NSColor.blackColor())
-                except Exception:
-                    pass
-            else:
-                if layer:
-                    layer.setBackgroundColor_(clear_color_cg)
-                try:
-                    b.setContentTintColor_(NSColor.whiteColor())
-                except Exception:
-                    pass
+        self.urlbar.setDrawsBackground_(False)
 
-    def _install_local_hsts(self, ucc):
-        """
-        Injects a <meta http-equiv="Strict-Transport-Security"> for pages we control.
-        Limited to HTTPS and file:// origins to avoid breaking third-party sites.
-        """
+        self.urlbar.setPlaceholderString_("Search or enter URL")
+        self.urlbar.setTarget_(self)
+        self.urlbar.setAction_("addrEntered:")
+
+        self.urlbar.cell().setSendsWholeSearchString_(True)
+        self.urlbar.cell().setSendsSearchStringImmediately_(False)
+
+        self.urlbar.setAutoresizingMask_(2)
+
+        self.toolbar_container.addSubview_(self.urlbar)
+        
+        # ----------------------------
+        # Right-side buttons
+        # ----------------------------
+        self.btn_zoom_out = make_icon_btn("minus.magnifyingglass", "Zoom Out")
+        self.btn_zoom_in  = make_icon_btn("plus.magnifyingglass", "Zoom In")
+        self.btn_full     = make_icon_btn("arrow.up.left.and.arrow.down.right", "Fullscreen")
+        self.btn_js       = make_icon_btn("bolt.fill" if self.js_enabled else "bolt.slash.fill",
+                                          f"JavaScript: {'ON' if self.js_enabled else 'OFF'}",
+                                          tint=NSColor.systemGreenColor() if self.js_enabled else NSColor.systemRedColor())
+
+        self.btn_nuke     = make_icon_btn("trash.fill", "Clear All Data", tint=NSColor.systemRedColor())
+        self.btn_mini_ai  = make_icon_btn("shield.fill", "MiniAI Threat Report", tint=NSColor.systemGreenColor())
+
+        for b, sel in [
+            (self.btn_zoom_out, "actZoomOut:"),
+            (self.btn_zoom_in,  "actZoomIn:"),
+            (self.btn_full,     "actFull:"),
+            (self.btn_js,       "actToggleJS:"),
+            (self.btn_nuke,     "actNuke:"),
+            (self.btn_mini_ai,  "openThreatReport:"),
+        ]:
+            b.setTarget_(self)
+            b.setAction_(sel)
+            self.toolbar_container.addSubview_(b)
+
+        # layout pass
+        self._layout_toolbar()
+        return self.toolbar_container
+
+    def _layout_toolbar(self):
+        """Called on startup + window resize to keep toolbar aligned."""
+        if not getattr(self, "toolbar_container", None):
+            return
+
+        cv = self.window.contentView()
         try:
-            some_call()
+            clr = self.window.contentLayoutRect()
+            top_y = clr.origin.y + clr.size.height
+            width = clr.size.width
+        except Exception:
+            f = cv.frame()
+            top_y = f.size.height
+            width = f.size.width
+
+        bar_h = 52.0
+        y = top_y - bar_h
+        self.toolbar_container.setFrame_(NSMakeRect(0, y, width, bar_h))
+
+        # geometry
+        pad = 10.0
+        btn = 32.0
+        gap = 10.0
+
+        # left cluster
+        x = pad
+        for b in [self.btn_back, self.btn_fwd, self.btn_reload, self.btn_home]:
+            b.setFrame_(NSMakeRect(x, 10, btn, btn))
+            x += btn + 6
+
+        left_end = x + 10
+
+        # right cluster
+        right_buttons = [self.btn_zoom_out, self.btn_zoom_in, self.btn_full, self.btn_js, self.btn_nuke, self.btn_mini_ai]
+        right_x = width - pad - (len(right_buttons) * btn + (len(right_buttons) - 1) * 6)
+
+        rx = right_x
+        for b in right_buttons:
+            b.setFrame_(NSMakeRect(rx, 10, btn, btn))
+            rx += btn + 6
+
+        right_start = right_x - 10
+
+        # urlbar fills remaining
+        url_x = left_end
+        url_w = max(260.0, right_start - url_x)
+        self.urlbar.setFrame_(NSMakeRect(url_x, 10, url_w, 32))
+
+    # Make sure your existing onResize_ calls _layout() AND _layout_toolbar()
+    def onResize_(self, note):
+        try:
+            self._layout_toolbar()
         except Exception:
             pass
+        try:
+            self._layout()
+        except Exception:
+            pass
+
+    def _bring_tabbar_to_front(self):
+        try:
+            cv = self.window.contentView()
+
+            # keep toolbar on top
+            if getattr(self, "toolbar_container", None):
+                # Only remove if it's attached elsewhere
+                if self.toolbar_container.superview() is not None and self.toolbar_container.superview() != cv:
+                    try:
+                        self.toolbar_container.removeFromSuperview()
+                    except Exception:
+                        pass
+                # Only add if not already attached to contentView
+                if self.toolbar_container.superview() != cv:
+                    cv.addSubview_(self.toolbar_container)
+
+            # keep tabbar above webview
+            if getattr(self, "tabbar", None):
+                if self.tabbar.superview() is not None and self.tabbar.superview() != cv:
+                    try:
+                        self.tabbar.removeFromSuperview()
+                    except Exception:
+                        pass
+                if self.tabbar.superview() != cv:
+                    cv.addSubview_(self.tabbar)
+                self.tabbar.displayIfNeeded()
+        except Exception:
+            pass
+
+    # In actToggleJS_, after toggling, also update JS button icon/tint:
+    def actToggleJS_(self, _):
+        self.js_enabled = not bool(getattr(self, "js_enabled", True))
+
+        # update UI button
+        try:
+            sym = "bolt.fill" if self.js_enabled else "bolt.slash.fill"
+            img = NSImage.imageWithSystemSymbolName_accessibilityDescription_(sym, None)
+            if img:
+                cfg = NSImageSymbolConfiguration.configurationWithPointSize_weight_scale_(18.0, 2, 2)
+                if hasattr(img, "imageByApplyingSymbolConfiguration_"):
+                    img = img.imageByApplyingSymbolConfiguration_(cfg)
+                img.setTemplate_(True)
+                self.btn_js.setImage_(img)
+            self.btn_js.setToolTip_(f"JavaScript: {'ON' if self.js_enabled else 'OFF'}")
+            if hasattr(self.btn_js, "setContentTintColor_"):
+                self.btn_js.setContentTintColor_(NSColor.systemGreenColor() if self.js_enabled else NSColor.systemRedColor())
+        except Exception:
+            pass
+
+        # apply to active webview + reload
+        try:
+            wk = self.tabs[self.active].view
+            prefs = wk.configuration().preferences()
+            prefs.setJavaScriptEnabled_(self.js_enabled)
+            wk.reload()
+        except Exception as e:
+            print("[JS Toggle] Reload error:", e)
+
+    def _install_local_hsts(self, ucc):
 
         js = f"""
         (() => {{
@@ -3719,14 +3204,6 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
             print("[HSTS] Injector add failed:", e)
             
     def _install_local_referrer_policy(self, ucc):
-        """
-        Injects a <meta name="referrer" content="strict-origin-when-cross-origin">
-        for pages we control. Limited to file:// and HTTPS origins.
-        """
-        try:
-            some_call()
-        except Exception:
-            pass
 
         js = f"""
         setTimeout(() => {{
@@ -3756,15 +3233,6 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
             print("[ReferrerPolicy] Injector add failed:", e)
             
     def _install_local_websocket_policy(self, ucc):
-        """
-        Injects a <meta http-equiv="Content-Security-Policy"> specifically for connect-src 'self'.
-        This restricts WebSocket and EventSource endpoints to the same origin.
-        Limited to file:// and HTTPS origins to avoid breaking third-party sites.
-        """
-        try:
-            some_call()
-        except Exception:
-            pass
 
         js = f"""
         setTimeout(() => {{
@@ -3798,6 +3266,7 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
             
     @objc.python_method
     def _inject_core_scripts(self, ucc):
+    
         try:
             seed = getattr(self, "_current_canvas_seed", None)
             if seed is None:
@@ -3813,7 +3282,7 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
                     ucc.addUserScript_(skr)
                 except Exception as e:
                     print("[Inject] addUserScript_ failed:", e)
-
+                            
             _add(WEBRTC_DEFENSE_JS)
             _add(WEBGL_DEFENSE_JS)
             _add(canvas_script)
@@ -3824,6 +3293,7 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
             _add(BATTERY_DEFENSE_JS)
             _add(PERFORMANCE_DEFENSE_JS)
             _add(CORE_JS)
+            _add(STORAGE_DEFENSE_JS)
             
             if ENABLE_LOCAL_HSTS:
                 self._install_local_hsts(ucc)
@@ -3908,31 +3378,20 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
         except Exception as e:
             print(f"[Inject] Core script injection failed: {e}")
             
-    def _new_wk(self) -> WKWebView:
-
-        # ---------------------------------------
-        # Determine if this is homepage
-        # ---------------------------------------
+    def _new_wk(self):
         is_home = bool(getattr(self, "loading_home", False))
 
-        # ---------------------------------------
-        # Configuration
-        # ---------------------------------------
+        # ---- config first ----
         cfg = WKWebViewConfiguration.alloc().init()
-
-        # ---------------------------------------
-        # Per-Tab Ephemeral Data Store
-        # ---------------------------------------
-
+                
         tab_store = WKWebsiteDataStore.nonPersistentDataStore()
         cfg.setWebsiteDataStore_(tab_store)
-
+        
+        cfg.setMediaTypesRequiringUserActionForPlayback_(0)
+        
         if tab_store.isPersistent():
             raise RuntimeError("Darkelf security failure: persistent data store detected")
 
-    # ---------------------------------------
-    # JavaScript State
-    # ---------------------------------------
         js_enabled = True if is_home else bool(getattr(self, "js_enabled", True))
 
         prefs = WKPreferences.alloc().init()
@@ -3940,103 +3399,74 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
         prefs.setJavaScriptCanOpenWindowsAutomatically_(True)
         cfg.setPreferences_(prefs)
 
-        print(f"[WKPrefs] JS={'ON' if js_enabled else 'OFF'} (home={is_home})")
-
-        try:
-            cfg.setLimitsNavigationsToAppBoundDomains_(False)
-        except Exception:
-            pass
-
-    # ---------------------------------------
-    # User Content Controller
-    # ---------------------------------------
         ucc = WKUserContentController.alloc().init()
 
-        #Attach compiled adblock rules
         if ContentRuleManager._rule_list:
             ucc.addContentRuleList_(ContentRuleManager._rule_list)
-            print("[AdBlock] Rule list attached")
 
-    # ---------------------------------------
-    # Message Handlers
-    # ---------------------------------------
-        try:
-            ucc.removeScriptMessageHandlerForName_("netlog")
-        except Exception:
-            pass
+        # ---- delegates must already exist & be strongly held ----
+        # nav delegate (already created in init, appended to _strong_refs)
+        ucc.addScriptMessageHandler_name_(self._nav_delegate, "netlog")
 
-        if hasattr(self, "_nav"):
-            ucc.addScriptMessageHandler_name_(self._nav, "netlog")
-            print("[Init] Netlog handler registered")
-
-        self._search_handler = getattr(self, "_search_handler", None) or SearchHandler.alloc().initWithOwner_(self)
+        # search handler (created ONCE in init; always present!)
+        # REMOVE any conditional/creation logic here---just use what's in self._search_handler!
         ucc.addScriptMessageHandler_name_(self._search_handler, "search")
-
-    # ---------------------------------------
-    # Script Injection Logic
-    # ---------------------------------------
+        
+        ucc.addScriptMessageHandler_name_(self._nav_delegate, "fullscreen")
+        
+        # Inject scripts
         if is_home or js_enabled:
+            self._inject_core_scripts(ucc)
 
-            current_url = str(getattr(self, "current_url", ""))
-
-            if "youtube.com" not in current_url:
-                self._inject_core_scripts(ucc)
-                print("[Inject] Core defense scripts added")
-            else:
-                print("[Inject] Skipped defense scripts for YouTube")
-
-        else:
-            print("[Inject] JS disabled → applying killswitch")
-
-            js_killswitch = r"""
-            (function(){
-                window.eval = function(){ return null; };
-                window.Function = function(){ throw new Error("JS blocked"); };
-                window.setTimeout = function(){ return 0; };
-                window.setInterval = function(){ return 0; };
-                window.requestAnimationFrame = function(){ return 0; };
-                document.write = function(){};
-            })();
-            """
-
-            ks = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
-                js_killswitch,
-                0,
-                False
-            )
-            ucc.addUserScript_(ks)
-
-            # Native script resource blocking
-            store = WKContentRuleListStore.defaultStore()
-
-    # ---------------------------------------
-    # Finalize Configuration
-    # ---------------------------------------
         cfg.setUserContentController_(ucc)
 
+        # ---- create webview LAST ----
         frame = self.window.contentView().bounds()
         web = WKWebView.alloc().initWithFrame_configuration_(frame, cfg)
 
-        web.setUIDelegate_(self)
+        # UI delegate: use the one from init()
+        web.setNavigationDelegate_(self._nav_delegate)
+        web.setUIDelegate_(self._ui_delegate)
+        
+        print("UIDelegate:", web.UIDelegate())
+        
+        fullscreen_bridge = """
+        (function(){
 
-        try:
-            web.setAllowsMagnification_(True)
-        except Exception:
-            pass
+        function send(type){
+            if(window.webkit &&
+                window.webkit.messageHandlers &&
+                window.webkit.messageHandlers.fullscreen){
+                 window.webkit.messageHandlers.fullscreen.postMessage(type);
+            }
+        }
 
+        document.addEventListener("fullscreenchange", function(){
+            if(!document.fullscreenElement){
+                send("exit");
+            }
+        });
+
+        const orig = Element.prototype.requestFullscreen;
+
+        Element.prototype.requestFullscreen = function(){
+            send("enter");
+            if(orig) orig.call(this);
+        };
+
+        })();
+        """
+
+        script = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
+            fullscreen_bridge,
+            WKUserScriptInjectionTimeAtDocumentEnd,
+            True
+        )
+
+        ucc.addUserScript_(script)
+        
         return web, tab_store
         
-    def webView_requestFullscreenForElement_completionHandler_(self, webview, element, completionHandler):
-        print("🔥 WebKit requested element fullscreen")
-        completionHandler(True)
-
-    def webView_createWebViewWithConfiguration_forNavigationAction_windowFeatures_(
-        self, webView, configuration, navigationAction, windowFeatures
-    ):
-        """Handle window.open() and popup windows"""
-        print("[UIDelegate] Popup request blocked")
-        return None
-
     def webView_runJavaScriptAlertPanelWithMessage_initiatedByFrame_completionHandler_(
         self, webView, message, frame, completionHandler
     ):
@@ -4089,37 +3519,70 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
             pass
                                                     
     def _mount_webview(self, wk):
-
         cv = self.window.contentView()
-        tab_h = 34.0
 
         # Remove ALL existing WKWebViews immediately
         for sub in list(cv.subviews()):
-            if isinstance(sub, WKWebView):
+            if "WKWebView" in str(type(sub)):
                 sub.removeFromSuperview()
 
-        # Compute frame
+        # ====== Ensure Navigation and UI Delegates are set ======
+        if getattr(self, "_nav_delegate", None):
+            wk.setNavigationDelegate_(self._nav_delegate)
+        if getattr(self, "ui_delegate", None):
+            wk.setUIDelegate_(self._ui_delegate)
+
+        # Compute frame: subtract both toolbar and tabbar height!
         try:
             clr = self.window.contentLayoutRect()
-            web_rect = ((0, 0), (clr.size.width, max(0.0, clr.size.height - tab_h)))
-        except Exception:
+            min_height = 100
+            total_ui_height = self.TOOLBAR_HEIGHT + self.TABBAR_HEIGHT
+            w = clr.size.width
+            h = clr.size.height - total_ui_height
+
+            if h < min_height:
+                f = cv.frame()
+                h = max(min_height, f.size.height - total_ui_height)
+                print("[WKWebView] Fallback to cv.frame(), height =", h)
+
+            web_rect = NSMakeRect(0, 0, w, h)
+            print(f"[WKWebView] Set frame: width={w}, height={h}")
+
+        except Exception as e:
             f = cv.frame()
-            title_h = 40.0
-            web_rect = ((0, 0), (f.size.width, max(0.0, f.size.height - (title_h + tab_h))))
+            min_height = 100
+            h = max(min_height, f.size.height - (self.TOOLBAR_HEIGHT + self.TABBAR_HEIGHT))
+            w = f.size.width
+            web_rect = NSMakeRect(0, 0, w, h)
+            print(f"[WKWebView] Exception fallback. Set frame: width={w}, height={h}. Error: {e}")
 
         cv.addSubview_(wk)
 
+        # FIXED BACKGROUND HANDLING
         try:
-            wk.setDrawsBackground_(True)
+            wk.setOpaque_(True)
             wk.setBackgroundColor_(NSColor.blackColor())
-        except Exception:
-            pass
+        except Exception as e:
+            print("[WKWebView] Failed to set background:", e)
 
         wk.setFrame_(web_rect)
         wk.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
 
+        # Always re-add toolbar and tabbar after mounting webview!
+        try:
+            if getattr(self, "toolbar_container", None):
+                if self.toolbar_container.superview() != cv:
+                    cv.addSubview_(self.toolbar_container)
+
+            if getattr(self, "tabbar", None):
+                if self.tabbar.superview() != cv:
+                    cv.addSubview_(self.tabbar)
+
+        except Exception as e:
+            print("[WKWebView] Failed to re-add toolbar/tabbar:", e)
+            
         self._bring_tabbar_to_front()
-        
+                    
     def _rebuild_active_webview(self):
     
             # --- never rebuild homepage ---
@@ -4184,7 +3647,11 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
             self.webView = WKWebView.alloc().initWithFrame_configuration_(
                 self.bounds(), config
             )
-                
+
+            # attach delegates
+            webview.setUIDelegate_(self.ui_delegate)
+            webview.setNavigationDelegate_(self)
+
             # --- Set JS enabled or disabled ---
             prefs = WKPreferences.alloc().init()
             try:
@@ -4232,16 +3699,13 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
             except Exception:
                 pass
 
-            # --- Attach a delegate ---
             try:
-                self._nav_delegate = _NavDelegate.alloc().initWithOwner_(self)
-            except Exception:
-                self._nav_delegate = None
+                frame = old.frame() if hasattr(old, "frame") else ((0, 0), (1200, 760))
 
-            try:
-                frame = old.frame() if hasattr(old, "frame") else ((0, 0), (800, 600))
                 wk = WKWebView.alloc().initWithFrame_configuration_(frame, config)
 
+                wk.setFrame_(NSMakeRect(0, 0, 1200, 760))
+                
                 if getattr(self, "_nav_delegate", None) is not None:
                     wk.setNavigationDelegate_(self._nav_delegate)
                 if getattr(self, "_ui_delegate", None) is not None:
@@ -4303,6 +3767,8 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
             except Exception:
                 pass
                 
+    
+                
     def _add_tab(self, url: str = "", home: bool = False):
         self.loading_home = bool(home)
 
@@ -4312,18 +3778,23 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
 
         print(f"[AddTab] Seed = {seed}")
 
-        self._nav = _NavDelegate.alloc().initWithOwner_(self)
+        wk, store = self._new_wk()
 
-        wk, store = self._new_wk()   # injection happens here
-
-        wk.setNavigationDelegate_(self._nav)
-
+        wk.setNavigationDelegate_(self._nav_delegate)
+        
         if 0 <= self.active < len(self.tabs):
             try:
-                self.tabs[self.active].view.removeFromSuperview()
+                old_view = self.tabs[self.active].view
+
+                old_view.stopLoading()
+                old_view.setNavigationDelegate_(None)
+                old_view.setUIDelegate_(None)
+
+                old_view.removeFromSuperview()
+
             except Exception:
                 pass
-
+                
         self._mount_webview(wk)
         self._bring_tabbar_to_front()
         
@@ -4337,12 +3808,19 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
 
         self.tabs.append(tab)
         self.active = len(self.tabs) - 1
-        
+
+        # --- MiniAI reset for new session ---
+        if hasattr(self, "mini_ai"):
+            try:
+                self.mini_ai.unique_domains.clear()
+            except Exception:
+                pass
+
         self._current_canvas_seed = None
     
         if home:
             try:
-                self.addr.setStringValue_("")
+                self.urlbar.setStringValue_("")
             except Exception:
                 pass
 
@@ -4378,7 +3856,6 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
                 tab.host = "new"
                     
         self._update_tab_buttons()
-        self._style_tabs()
         self._sync_addr()
 
     def _teardown_webview(self, wk):
@@ -4428,7 +3905,7 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
             if ucc:
                 try: ucc.removeAllUserScripts()
                 except Exception: pass
-                for name in ("netlog","search","mini_ai"):
+                for name in ("netlog","search"):
                     try:
                         ucc.removeScriptMessageHandlerForName_(name)
                     except Exception:
@@ -4455,22 +3932,32 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
             idx = int(sender.tag())
         except Exception:
             return
-    
+
         if not (0 <= idx < len(self.tabs)) or idx == self.active:
             return
-    
+
         cv = self.window.contentView()
+
         for subview in list(cv.subviews()):
             try:
                 if isinstance(subview, WKWebView):
                     subview.removeFromSuperview()
             except Exception:
                 pass
-    
+
+        # 🔹 update active tab
         self.active = idx
+
+        # 🔹 mount correct webview
         self._mount_webview(self.tabs[idx].view)
+
+        # 🔹 bring UI layers back
         self._bring_tabbar_to_front()
-        self._style_tabs()
+
+        # 🔹 refresh tab highlight
+        self._update_tab_buttons()
+
+        # 🔹 sync address bar
         self._sync_addr()
                 
     def actCloseTabIndex_(self, sender):
@@ -4479,10 +3966,11 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
         except Exception:
             return
 
+        print("Close tab index:", idx)  # Debug
+
         if not (0 <= idx < len(self.tabs)):
             return
 
-        # --- Remove the view from window if it's currently mounted ---
         try:
             view = self.tabs[idx].view
             if view and view.superview():
@@ -4490,28 +3978,21 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
         except Exception:
             pass
 
-        # --- Remove tab from list ---
         del self.tabs[idx]
 
-        # --- If no tabs left, create homepage ---
+        # If no tabs left, create homepage
         if not self.tabs:
             self._add_tab(home=True)
             return
 
-        # --- Adjust active index ---
         if idx == self.active:
-            # If we closed the active tab,
-            # move to previous tab if possible
             self.active = min(idx, len(self.tabs) - 1)
         elif idx < self.active:
             self.active -= 1
 
-        # --- Mount the new active tab cleanly ---
         wk = self.tabs[self.active].view
         self._mount_webview(wk)
-
         self._update_tab_buttons()
-        self._style_tabs()
         self._sync_addr()
 
     def _close_tab(self):
@@ -4607,7 +4088,7 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
             if not text:
                 return
 
-            # Build URL (your existing logic)
+            # Build URL
             if "://" not in text and "." not in text:
                 q = quote_plus(text)
                 url = "https://lite.duckduckgo.com/lite/?q=" + q
@@ -4616,8 +4097,9 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
             else:
                 url = text
 
-            self._add_tab(url)
-        
+            # FIX: Use _navigate_to instead of _add_tab
+            self._navigate_to(url)
+
         except Exception as e:
             print("[Go] Failed:", e)
 
@@ -4718,7 +4200,7 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
             ):
                 v = ""
 
-            self.addr.setStringValue_(v)
+            self.urlbar.setStringValue_(v)
 
         except Exception:
             pass
@@ -4756,7 +4238,7 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
 
                 # ⌘ + L
                 if ch == "l":
-                    self.window.makeFirstResponder_(self.addr)
+                    self.window.makeFirstResponder_(self.urlbar)
                     return None
 
                 # 🔥 ⌘ + S  → Snapshot
@@ -4786,42 +4268,27 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
 
         NSEvent.addLocalMonitorForEventsMatchingMask_handler_(1 << 10, handler)
         
-    def __del__(self):
-        try:
-            print("[Browser] __del__ called, cleaning up timers and observers.")
-        except Exception:
-            pass
-
-        # Remove resize notification observer
-        try:
-            nc = NSNotificationCenter.defaultCenter()
-            nc.removeObserver_(self)
-        except Exception as e:
-            print("[Browser] Failed to remove observer in __del__:", e)
-
-        # Remove all JS message handlers from active webview
-        try:
-            if hasattr(self, "tabs") and len(self.tabs) > 0:
-                for tab in self.tabs:
-                    wk = getattr(tab, "view", None)
-                    if wk:
-                        ucc = wk.configuration().userContentController()
-                        for name in ("netlog", "search", "mini_ai"):
-                            try:
-                                ucc.removeScriptMessageHandlerForName_(name)
-                            except Exception:
-                                pass
-        except Exception as e:
-            print("[Browser] Failed to remove JS handlers in __del__:", e)
-
-        # ✅ Shutdown MiniAI Sentinel
-        try:
-            if hasattr(self, "mini_ai") and self.mini_ai:
-                self.mini_ai.shutdown()
-                print("[MiniAI] Sentinel shutdown")
-        except Exception as e:
-            print("[MiniAI] Shutdown failed:", e)
-                                
+    def safe_shutdown(self):
+ 
+        if hasattr(self, "window"):
+            try:
+                nc = NSNotificationCenter.defaultCenter()
+                nc.removeObserver_(self)
+            except Exception:
+                pass
+    
+        if hasattr(self, "tabs"):
+            for tab in self.tabs:
+                view = getattr(tab, "view", None)
+                if view:
+                    try:
+                        ucc = view.configuration().userContentController()
+                        for name in ("netlog", "search"):
+                            ucc.removeScriptMessageHandlerForName_(name)
+                        view.removeFromSuperview()
+                    except Exception:
+                        pass
+                        
     def _wipe_all_site_data(self):
         """
         Fully reset browser session:
@@ -4857,15 +4324,6 @@ Darkelf Browser • MiniAI Sentinel • Hardened Runtime
             print("wipe error:", e)
 
     def windowWillClose_(self, notification):
-
-        print("[Darkelf] 🔴 Window close triggered — FULL TERMINATION")
-
-        try:
-            # Shutdown MiniAI cleanly
-            if hasattr(self, "mini_ai") and self.mini_ai:
-                self.mini_ai.shutdown()
-        except Exception:
-            pass
 
         try:
             # Stop all webviews
@@ -4920,70 +4378,10 @@ class AppDelegate(NSObject):
     
         try:
             if hasattr(self, "browser") and self.browser is not None:
-            
-                # ═══════════════════════════════════════════════════════════
-                # 1. MINI AI THREAT REPORT & SHUTDOWN
-                # ═══════════════════════════════════════════════════════════
-                try:
-                    if hasattr(self.browser, "mini_ai") and self.browser.mini_ai:
-                        print("[MiniAI] Generating final threat report...\n")
-                    
-                        # ✅ Check if enhanced report method exists
-                        if hasattr(self.browser.mini_ai, 'shutdown'):
-                            # Display full threat report
-                            self.browser.mini_ai.shutdown()
-                        else:
-                            # Fallback to basic statistics
-                            print("[MiniAI] Enhanced report not available, showing basic stats:")
-                            stats = self.browser.mini_ai.get_statistics()
-                        
-                            uptime_min = stats['uptime_seconds'] / 60
-                            print(f"\nSession Uptime:     {uptime_min:.1f} minutes")
-                            print(f"Total Events:       {stats['total_events']}")
-                            print(f"Unique Domains:     {stats['unique_domains']}")
-                            print(f"\nTHREAT SUMMARY:")
-                            print(f"├─ Trackers:        {stats['threats']['trackers']}")
-                            print(f"├─ Suspicious:      {stats['threats']['suspicious']}")
-                            print(f"├─ Malware:         {stats['threats']['malware']}")
-                            print(f"├─ Exploits:        {stats['threats']['exploits']}")
-                            print(f"├─ Intrusions:      {stats['threats']['intrusions']}")
-                            print(f"└─ Fingerprinting:  {stats['threats']['fingerprinting']}")
-                            print(f"\nFINGERPRINTING ATTEMPTS:")
-                            for api, count in stats['fingerprinting_apis'].items():
-                                print(f"├─ {api.title()}: {count}")
-                    
-                        # Get statistics for warnings
-                        stats = self.browser.mini_ai.get_statistics()
-                    
-                        # Warn about critical threats
-                        critical_count = sum(
-                            1 for e in stats.get('recent_threats', [])
-                            if e.get('risk_level') == 'critical'
-                        )
-                    
-                        if critical_count > 0:
-                            print(f"\n⚠️  WARNING: {critical_count} CRITICAL threat(s) detected during session\n")
-                    
-                        # Shutdown sentinel
-                        if hasattr(self.browser.mini_ai, 'shutdown'):
-                            self.browser.mini_ai.shutdown()
-                        else:
-                            self.browser.mini_ai.enabled = False
-                    
-                        print("[Quit] MiniAI Sentinel shutdown")
-                
-                except Exception as e:
-                    print("[Quit] MiniAI shutdown failed:", e)
         
                 # ═══════════════════════════════════════════════════════════
                 # 2. STOP COOKIE SCRUBBER
                 # ═══════════════════════════════════════════════════════════
-                try:
-                    self.browser._stop_cookie_scrubber()
-                    print("[Quit] Cookie scrubber stopped")
-                except Exception as e:
-                    print("[Quit] Failed to stop cookie scrubber:", e)
-        
                 print("\n" + "="*70)
                 print("[Darkelf] Shutdown complete - all data wiped")
                 print("="*70 + "\n")
@@ -4997,7 +4395,6 @@ def main():
         print("[Prefs] NSUserDefaults set to volatile (RAM-only).")
     except Exception as e:
         print("[Prefs] Failed to set volatile domain:", e)
-
 
     app = NSApplication.sharedApplication()
     
