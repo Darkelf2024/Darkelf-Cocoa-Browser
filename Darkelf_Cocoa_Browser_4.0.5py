@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.0.3 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.0.5 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -76,8 +76,8 @@ from datetime import datetime
 from typing import Dict, List, Set, Optional
 from urllib.parse import urlparse, unquote, quote_plus
 from objc import ObjCPointerWarning
-
-from Foundation import NSRunLoop, NSDate
+import shutil
+from Foundation import NSRunLoop, NSDate,  NSOperationQueue
 
 warnings.filterwarnings("ignore", category=ObjCPointerWarning)
 
@@ -90,7 +90,12 @@ from Cocoa import (
     NSToolbarFlexibleSpaceItemIdentifier, NSApplicationActivationPolicyRegular, NSOperationQueue
 )
 from WebKit import (
-    WKWebView, WKWebViewConfiguration, WKUserContentController, WKUserScript, WKPreferences, WKContentRuleListStore, WKWebsiteDataStore, WKNavigationActionPolicyAllow, WKNavigationActionPolicyCancel, WKNavigationTypeReload, WKNavigationType, WKUserScriptInjectionTimeAtDocumentEnd
+    WKWebView, WKWebViewConfiguration, WKUserContentController, WKUserScript,
+    WKPreferences, WKContentRuleListStore, WKWebsiteDataStore,
+    WKNavigationActionPolicyAllow, WKNavigationActionPolicyCancel,
+    WKNavigationResponsePolicyAllow, WKNavigationResponsePolicyDownload,
+    WKNavigationTypeReload, WKNavigationType,
+    WKUserScriptInjectionTimeAtDocumentEnd
 )
 from Foundation import NSURL, NSURLRequest, NSMakeRect, NSNotificationCenter, NSDate, NSTimer, NSUserDefaults, NSRegistrationDomain,NSURLAuthenticationMethodServerTrust, NSURLSessionAuthChallengeUseCredential, NSURLCredential, NSURLSessionAuthChallengePerformDefaultHandling
 
@@ -101,23 +106,40 @@ import json
 import time
 
 from Security import SecTrustEvaluateWithError, SecTrustGetCertificateAtIndex, SecCertificateCopySubjectSummary
+import tempfile
 
-# =========================
-# Darkelf MiniAI (SAFE / PASSIVE) - EXPANDED
-# =========================
+def _safe_download_dir():
+    desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+    folder = os.path.join(desktop, "Darkelf Temp Folder")
+    os.makedirs(folder, exist_ok=True)
+    return folder
+    
+def _randomized_filename(name):
+    name = (name or "download").strip()
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", name)[:120]
+
+    base, ext = os.path.splitext(name)
+
+    token = secrets.token_hex(6)
+
+    base = base[:60] or "download"
+    ext = ext[:12]
+
+    return f"{base}_{token}{ext}"
 
 class DarkelfMiniAISentinel:
-    """
-    Cocoa-safe Darkelf MiniAI — Aggressive Lockdown Edition for 5-minute lock, threat report live, and event detection.
-    """
 
     MAX_URL_LENGTH = 2048
     CRITICAL_WINDOW_SECONDS = 60
-    LOCKDOWN_DURATION_SECONDS = 300  # 5 minutes
+    LOCKDOWN_DURATION_SECONDS = 120
 
     def __init__(self):
+
         self.enabled = True
+        self.browser = None
+
         self.events = deque(maxlen=500)
+
         self.tracker_hits = 0
         self.suspicious_hits = 0
         self.malware_hits = 0
@@ -125,401 +147,666 @@ class DarkelfMiniAISentinel:
         self.fingerprint_attempts = 0
         self.intrusion_attempts = 0
         self.http_blocks_attempts = 0
+
+        # IDS detections
+        self.scraper_attempts = 0
+        self.credential_stuffing_attempts = 0
+        self.vuln_scanner_attempts = 0
+        self.bruteforce_attempts = 0
+        self.automation_attempts = 0
+
+        self.login_attempt_tracker = {}
+        self.scraper_tracker = {}
+
         self.session_start = time.time()
         self.unique_domains = set()
+        self.first_party_domain = None
         self.redirects = []
+
         self.lockdown_active = False
         self.lockdown_threshold = 3
         self.lockdown_triggered_at = None
-        self._lockdown_ui_opened = False  # Prevent duplicate UI show
+        self._lockdown_ui_opened = False
 
-        # Patterns & tools (same as before)
-        self.hacker_tools = [
-            'nmap', 'sqlmap', 'metasploit', 'burpsuite', 'nikto',
-            'dirbuster', 'hydra', 'wireshark', 'tcpdump', 'ettercap', 'aircrack',
-            'hashcat', 'johntheripper', 'cobalt', 'mimikatz'
-        ]
-        self.intrusion_patterns = {
-            'sql_injection': ['union select', 'or 1=1', "'; drop", 'exec(', 'script>'],
-            'xss': ['<script', 'javascript:', 'onerror=', 'onload=', 'eval('],
-            'path_traversal': ['../', '..\\', '%2e%2e', 'etc/passwd', 'windows/system'],
-            'command_injection': ['| cat', '; ls', '&& whoami', 'cmd.exe', '/bin/bash'],
-            'malware': ['ransomware', 'cryptolocker', 'wannacry', 'trojan', 'backdoor'],
-            'exploit': ['metasploit', 'shellcode', 'exploit-db', 'cve-', '0day'],
-            'phishing': ['verify-account', 'suspended-account', 'confirm-identity', 'urgent-action'],
-            'exfil': ['base64,', 'data:text', 'blob:', 'download.php?file='],
-        }
-        self.fingerprint_apis = {
-            'canvas': 0, 'webgl': 0, 'audio': 0, 'font': 0, 'battery': 0,
-            'geolocation': 0, 'media_devices': 0, 'webrtc': 0,
-        }
-        self.high_risk_domains = {
-            'doubleclick.net', 'googlesyndication.com', 'googleadservices.com',
-            'facebook.net', 'scorecardresearch.com', 'quantserve.com',
-            'taboola.com', 'outbrain.com', 'criteo.com', 'adnxs.com'
-        }
-        self.high_risk_tlds = {'.tk', '.ml', '.ga', '.cf', '.gq'}
         self.request_timestamps = deque(maxlen=100)
-        self.anomaly_threshold = 75
+        self.anomaly_threshold = 800
 
-        print("[MiniAI] Sentinel aggressive lockdown (threshold=1, 5min duration)")
+        # 🔧 throttling (prevents UI queue flooding)
+        self._last_scan_time = 0
+        self._last_lockdown_eval = 0
+
+        self.hacker_tools = [
+            "nmap","sqlmap","metasploit","burpsuite","nikto",
+            "dirbuster","hydra","wireshark","tcpdump","ettercap",
+            "aircrack","hashcat","johntheripper","cobalt","mimikatz"
+        ]
+
+        self.high_risk_domains = {
+            "doubleclick.net","googlesyndication.com","googleadservices.com",
+            "facebook.net","scorecardresearch.com","quantserve.com",
+            "taboola.com","outbrain.com","criteo.com","adnxs.com"
+        }
+
+        self.high_risk_tlds = {".tk",".ml",".ga",".cf",".gq"}
+
+        self.fingerprint_apis = {
+            "canvas":0,"webgl":0,"audio":0,"font":0,
+            "battery":0,"geolocation":0,"media_devices":0,"webrtc":0
+        }
+
+        print("[MiniAI] Sentinel initialized")
+
+
+    # --------------------------------------------------
+    # URL NORMALIZATION
+    # --------------------------------------------------
 
     def _normalize_url(self, url: str) -> str:
+
         try:
             url = url[:self.MAX_URL_LENGTH]
             return unquote(unquote(url.lower()))
         except Exception:
-            return url.lower()[:self.MAX_URL_LENGTH]
+            return (url or "").lower()
 
-    def monitor_network(self, url: str, headers: Dict[str,str]={}):
-        if not self.enabled or not url:
+
+    # --------------------------------------------------
+    # MAIN NETWORK MONITOR
+    # --------------------------------------------------
+
+    def monitor_network(self, url: str, headers=None):
+
+        if not url or not self.enabled:
             return
 
         now = time.time()
 
-        # ----------------------------
-        # Handle lockdown (live block)
-        # ----------------------------
-    def monitor_network(self, url: str, headers: dict):
-        if not self.enabled or not url:
+        # 🔧 throttle heavy request bursts (GitHub / SPA pages)
+        if now - self._last_scan_time < 0.005:
+            return
+        self._last_scan_time = now
+
+        normalized = self._normalize_url(url)
+
+        if not normalized:
             return
 
-        # --- Lockdown check (with 5-minute auto-release) ---
-        if self.lockdown_active:
-            # Auto-release after timeout
-            now = time.time()
-            if (now - self.lockdown_triggered_at) > self.LOCKDOWN_DURATION_SECONDS:
-                print("[MiniAI] Lockdown auto-released after 5 minutes.")
-                self.lockdown_active = False
-                self.lockdown_triggered_at = None
-                self._lockdown_ui_opened = False
-                self._unlock_browser_ui()
-            else:
-                print(f"[MiniAI] 🔴 LOCKDOWN (blocking request): {url[:80]}")
-                # Show threat report only once per lockdown
-                if hasattr(self, "browser_bridge") and not self._lockdown_ui_opened:
-                    try:
-                        self.browser_bridge.openThreatReport_(None)
-                        self._lock_browser_ui()
-                    except Exception as e:
-                        print("[MiniAI] failed to open threat report:", e)
-                    self._lockdown_ui_opened = True
+        headers = headers or {}
+
+        try:
+            host = urlparse(normalized).hostname or ""
+            # determine first-party domain
+            if not self.first_party_domain and host:
+                self.first_party_domain = host
+            
+        except Exception:
+            host = ""
+
+        # safe hosts
+        SAFE_HOSTS = (
+            "github.com",
+            "githubassets.com",
+            "githubusercontent.com",
+            "avatars.githubusercontent.com"
+        )
+
+        for safe in SAFE_HOSTS:
+            if host.endswith(safe):
                 return
 
-        # Event detection and logging
-        normalized_url = self._normalize_url(url)
-        timestamp = now
+        # --------------------------------------------------
+        # Skip static assets
+        # --------------------------------------------------
+
+        STATIC_EXT = (
+            ".png",".jpg",".jpeg",".gif",".svg",".webp",
+            ".css",".woff",".woff2",".ttf",".eot",".ico",
+            ".map",".mp4",".webm",".mp3",".ogg"
+        )
+
+        if normalized.split("?")[0].endswith(STATIC_EXT):
+
+            try:
+                host = urlparse(normalized).hostname or ""
+                for domain in self.high_risk_domains:
+                    if host == domain or host.endswith("." + domain):
+                        break
+                else:
+                    return
+            except Exception:
+                return
+                
+        # track domain
+        if host:
+            self.unique_domains.add(host)
+
+        # lockdown logic
+        if self.lockdown_active:
+
+            self._maybe_auto_unlock(now)
+
+            if self.lockdown_active:
+
+                print("[MiniAI] LOCKDOWN BLOCK:", normalized)
+
+                if self.browser and not self._lockdown_ui_opened:
+                    NSOperationQueue.mainQueue().addOperationWithBlock_(
+                        self._show_threat_report_ui
+                    )
+
+                return
 
         event = {
-            'url': normalized_url,
-            'timestamp': timestamp,
-            'datetime': datetime.now().isoformat(),
-            'threats': [],
-            'risk_level': 'low'
+            "url": normalized,
+            "timestamp": now,
+            "datetime": datetime.now().isoformat(),
+            "threats": [],
+            "risk_level": "low"
         }
 
-        # Intrusion detection
-        self._detect_intrusion(normalized_url, event)
-        self._classify_threats(normalized_url, event)
-        self._detect_fingerprinting(normalized_url, headers, event)
-        self._check_domain_reputation(normalized_url, event)
-        self._detect_anomalies(timestamp, event)
-        self._analyze_redirects(normalized_url, headers, event)
+        # detection engines
+        self._detect_intrusion(normalized, event)
+        self._detect_fingerprinting(normalized, headers, event)
+        self._check_domain_reputation(normalized, event)
+        self._detect_anomalies(now, event)
+        self._detect_ids_activity(normalized, headers, event)
 
         self.events.append(event)
 
-        if event['risk_level'] in ('high', 'critical'):
+        if event["risk_level"] in ("high","critical"):
             self._log_threat(event)
 
-        # Lockdown evaluation
-        self._evaluate_lockdown()
+        # 🔧 throttle UI lockdown checks
+        if now - self._last_lockdown_eval > 1.0:
+            self._last_lockdown_eval = now
+            NSOperationQueue.mainQueue().addOperationWithBlock_(
+                self._evaluate_lockdown
+            )
+
+
+    # --------------------------------------------------
+    # DETECT INTRUSION
+    # --------------------------------------------------
+
+    def _detect_intrusion(self, url, event):
+
+        for tool in self.hacker_tools:
+
+            if tool in url:
+
+                event["threats"].append("intrusion")
+                event["risk_level"] = "critical"
+
+                self.intrusion_attempts += 1
+                return
+
+
+    # --------------------------------------------------
+    # DOMAIN REPUTATION
+    # --------------------------------------------------
+    def _check_domain_reputation(self, url, event):
+
+        try:
+            host = urlparse(url).hostname or ""
+        except Exception:
+            host = ""
+
+        # ------------------------------------
+        # Known tracker domain list
+        # ------------------------------------
+        for domain in self.high_risk_domains:
+
+            if host == domain or host.endswith("." + domain):
+
+                event["threats"].append("tracker")
+                self.tracker_hits += 1
+
+                if event["risk_level"] == "low":
+                    event["risk_level"] = "medium"
+
+                return
+
+
+        # ------------------------------------
+        # Automatic third-party tracker detection
+        # ------------------------------------
+        if getattr(self, "first_party_domain", None) and host:
+
+            if not host.endswith(self.first_party_domain):
+
+                # ignore common CDNs
+                cdn_whitelist = (
+                    "cloudflare.com",
+                    "cloudfront.net",
+                    "akamai.net",
+                    "fastly.net",
+                    "gstatic.com",
+                    "fonts.gstatic.com"
+                )
+
+                for cdn in cdn_whitelist:
+                    if host.endswith(cdn):
+                        break
+                else:
+
+                    event["threats"].append("tracker")
+                    self.tracker_hits += 1
+
+                    if event["risk_level"] == "low":
+                        event["risk_level"] = "medium"
+
+                    return
+
+
+        # ------------------------------------
+        # Suspicious TLD detection
+        # ------------------------------------
+        for tld in self.high_risk_tlds:
+
+            if host.endswith(tld):
+
+                event["threats"].append("suspicious_domain")
+                self.suspicious_hits += 1
+
+                if event["risk_level"] == "low":
+                    event["risk_level"] = "medium"
+
+
+    # --------------------------------------------------
+    # FINGERPRINT DETECTION
+    # --------------------------------------------------
+
+    def _detect_fingerprinting(self, url, headers, event):
+
+        keywords = ["fingerprint","canvas","webgl","audiofingerprint"]
+
+        for k in keywords:
+
+            if k in url:
+
+                event["threats"].append("fingerprinting")
+                self.fingerprint_attempts += 1
+
+                if event["risk_level"] == "low":
+                    event["risk_level"] = "medium"
+
+                return
+
+
+    # --------------------------------------------------
+    # TRAFFIC ANOMALY
+    # --------------------------------------------------
+
+    def _detect_anomalies(self, now, event):
+
+        self.request_timestamps.append(now)
+
+        window = [
+            t for t in self.request_timestamps
+            if now - t < self.CRITICAL_WINDOW_SECONDS
+        ]
+
+        if len(self.unique_domains) > 120:
+
+            event["threats"].append("domain_scanner")
+
+            if event["risk_level"] == "low":
+                event["risk_level"] = "high"
+
+            self.vuln_scanner_attempts += 1
+
+        if len(window) > self.anomaly_threshold:
+
+            event["threats"].append("traffic_anomaly")
+            event["risk_level"] = "high"
+
+            self.suspicious_hits += 1
+
+
+    # --------------------------------------------------
+    # IDS DETECTION
+    # --------------------------------------------------
+
+    def _detect_ids_activity(self, url, headers, event):
+
+        now = time.time()
+
+        try:
+            parsed = urlparse(url)
+            host = parsed.hostname or ""
+            path = parsed.path or ""
+        except:
+            host = ""
+            path = ""
+
+        ua = str(headers.get("user-agent","")).lower()
+
+        # scraper detection
+        if host:
+
+            history = self.scraper_tracker.setdefault(host,[])
+            history.append(now)
+
+            history = [t for t in history if now - t < 10]
+            self.scraper_tracker[host] = history
+
+            if len(history) > 10:
+                event["threats"].append("scraping_bot")
+                event["risk_level"] = "high"
+                self.scraper_attempts += 1
+
+        # credential stuffing
+        if any(x in path for x in ["login","signin","auth"]):
+
+            key = host
+
+            attempts = self.login_attempt_tracker.setdefault(key,[])
+            attempts.append(now)
+
+            attempts = [t for t in attempts if now - t < 60]
+            self.login_attempt_tracker[key] = attempts
+
+            if len(attempts) > 10:
+                event["threats"].append("credential_stuffing")
+                event["risk_level"] = "high"
+                self.credential_stuffing_attempts += 1
+
+
+        scanner_patterns = [
+            "wp-admin",".env","phpmyadmin",
+            "config.php","backup.sql","/cgi-bin/","/admin/"
+        ]
+
+        for p in scanner_patterns:
+            if p in path:
+
+                event["threats"].append("vulnerability_scanner")
+                event["risk_level"] = "high"
+                self.vuln_scanner_attempts += 1
+                break
+
+
+        if "password" in path or "login" in path:
+
+            key = f"bf_{host}"
+
+            attempts = self.login_attempt_tracker.setdefault(key,[])
+            attempts.append(now)
+
+            attempts = [t for t in attempts if now - t < 30]
+            self.login_attempt_tracker[key] = attempts
+
+            if len(attempts) > 15:
+                event["threats"].append("bruteforce_login")
+                event["risk_level"] = "critical"
+                self.bruteforce_attempts += 1
+
+
+        automation_signatures = [
+            "headless","selenium","phantomjs",
+            "puppeteer","playwright","curl/","python-requests"
+        ]
+
+        for sig in automation_signatures:
+
+            if sig in ua:
+
+                event["threats"].append("automation_framework")
+                event["risk_level"] = "medium"
+                self.automation_attempts += 1
+                break
+    # --------------------------------------------------
+    # HTTP BLOCK DETECTION
+    # --------------------------------------------------
+
+    def on_http_blocked(self, url):
+
+        self.http_blocks_attempts += 1
+
+        print("[MiniAI] HTTP blocked:", url)
+
+
+    # --------------------------------------------------
+    # THREAT LOGGING
+    # --------------------------------------------------
+
+    def _log_threat(self, event):
+
+        print(
+            "[MiniAI] THREAT:",
+            event["risk_level"],
+            event["url"],
+            event["threats"]
+        )
+
+
+    # --------------------------------------------------
+    # LOCKDOWN EVALUATION
+    # --------------------------------------------------
 
     def _evaluate_lockdown(self):
+
+        # Already in lockdown
         if self.lockdown_active:
             return
-        LOCKDOWN_WINDOW_SECONDS = 60
-        now = time.time()
-        recent_critical_events = sum(
-            1 for e in self.events
-            if e['risk_level'] == 'critical'
-            and (now - e['timestamp']) <= LOCKDOWN_WINDOW_SECONDS
+
+        # Critical threats only
+        critical_score = (
+            self.intrusion_attempts +
+            self.malware_hits +
+            self.exploit_attempts
         )
-        if recent_critical_events >= self.lockdown_threshold:
+
+        # Trigger lockdown if threshold reached
+        if critical_score >= self.lockdown_threshold:
+
+            print("[MiniAI] Critical threat threshold reached:", critical_score)
+
             self._trigger_lockdown()
 
+    # --------------------------------------------------
+    # STATS FOR UI
+    # --------------------------------------------------
+
+    def get_statistics(self):
+
+        uptime = time.time() - self.session_start
+
+        threat_score = (
+            self.tracker_hits +
+            self.suspicious_hits +
+            self.fingerprint_attempts*2 +
+            self.intrusion_attempts*4 +
+            self.malware_hits*6 +
+            self.exploit_attempts*6 +
+            self.http_blocks_attempts
+        )
+
+        return {
+
+            "uptime_seconds": uptime,
+
+            "total_events": len(self.events),
+
+            "unique_domains": len(self.unique_domains),
+
+            "threat_score": threat_score,
+
+            "lockdown": {
+                "active": self.lockdown_active,
+                "threshold": self.lockdown_threshold,
+                "triggered_at": self.lockdown_triggered_at,
+            },
+
+            "threats": {
+                "trackers": self.tracker_hits,
+                "suspicious": self.suspicious_hits,
+                "malware": self.malware_hits,
+                "exploits": self.exploit_attempts,
+                "intrusions": self.intrusion_attempts,
+                "fingerprinting": self.fingerprint_attempts,
+                "http_blocks": self.http_blocks_attempts,
+            },
+            
+            "ids": {
+                "scrapers": self.scraper_attempts,
+                "credential_stuffing": self.credential_stuffing_attempts,
+                "vulnerability_scanners": self.vuln_scanner_attempts,
+                "bruteforce_logins": self.bruteforce_attempts,
+                "automation_frameworks": self.automation_attempts
+            }
+        }
+    # --------------------------------------------------
+    # LOCKDOWN TRIGGER
+    # --------------------------------------------------
     def _trigger_lockdown(self):
+
         if self.lockdown_active:
             return
 
         self.lockdown_active = True
         self.lockdown_triggered_at = time.time()
-        self._lockdown_ui_opened = False  # Reset so UI will open next block
+        self._lockdown_ui_opened = False
 
-        print("[MiniAI] 🔴 LOCKDOWN MODE ACTIVATED")
+        print("[MiniAI] 🔴 LOCKDOWN ACTIVATED")
 
-        # Stop all navigation and purge session data
-        if not hasattr(self, "browser_bridge"):
+        if not self.browser:
+            print("[MiniAI] No browser bridge")
             return
-        bridge = self.browser_bridge
 
-        # Stop all tabs loading
-        for tab in getattr(bridge, "tabs", []):
+        # Stop all tab loading
+        for tab in getattr(self.browser, "tabs", []):
             try:
                 tab.view.stopLoading()
             except Exception:
                 pass
 
-        # Purge website data (cookies etc.)
         try:
-            data_store = WKWebsiteDataStore.defaultDataStore()
-            data_store.removeDataOfTypes_modifiedSince_completionHandler_(
-                {
-                    "WKWebsiteDataTypeCookies",
-                    "WKWebsiteDataTypeDiskCache",
-                    "WKWebsiteDataTypeMemoryCache",
-                    "WKWebsiteDataTypeLocalStorage",
-                    "WKWebsiteDataTypeSessionStorage",
-                    "WKWebsiteDataTypeIndexedDBDatabases",
-                    "WKWebsiteDataTypeServiceWorkerRegistrations"
-                },
-                NSDate.dateWithTimeIntervalSince1970_(0),
-                None
-            )
+            self.browser.start_lockdown_timer()
         except Exception as e:
-            print("[MiniAI] Data purge failed:", e)
+            print("[MiniAI] timer error:", e)
 
-        # Lock the UI immediately: block all navigation/actions
-        self._lock_browser_ui()
-        
-    def _lock_browser_ui(self):
-        """
-        Disable navigation, adding/removing tabs, and browsing during lockdown.
-        Should be called when lockdown triggers. Integrate into Browser as needed.
-        """
-        if not hasattr(self, "browser_bridge"):
-            return
-        bridge = self.browser_bridge
-
-        # Disable toolbar buttons (except threat report, maybe quit)
-        try:
-            disabled = [
-                'btn_back', 'btn_fwd', 'btn_reload', 'btn_home',
-                'btn_new_tab', 'addr', 'urlbar', 'btn_zoom_out', 'btn_zoom_in', 'btn_js', 'btn_nuke'
-            ]
-            for name in disabled:
-                btn = getattr(bridge, name, None)
-                if btn: btn.setEnabled_(False)
-        except Exception:
-            pass
-
-        # Optionally switch view to threat report
-        try:
-            bridge.openThreatReport_(None)
-        except Exception: pass
-
-    def _unlock_browser_ui(self):
-        """
-        Re-enable navigation/buttons after lockdown ends
-        """
-        if not hasattr(self, "browser_bridge"):
-            return
-        bridge = self.browser_bridge
-        try:
-            enabled = [
-                'btn_back', 'btn_fwd', 'btn_reload', 'btn_home',
-                'btn_new_tab', 'addr', 'urlbar', 'btn_zoom_out', 'btn_zoom_in', 'btn_js', 'btn_nuke'
-            ]
-            for name in enabled:
-                btn = getattr(bridge, name, None)
-                if btn: btn.setEnabled_(True)
-        except Exception:
-            pass
-            
-    def _detect_intrusion(self, url: str, event: dict) -> bool:
-        intrusion_found = False
-        try:
-            decoded = unquote(unquote(url))
-            normalized = decoded.lower().replace("+", " ")
-            normalized = normalized.replace("/**/", "").replace("%00", "")
-        except Exception:
-            normalized = url.lower()
-        for tool in self.hacker_tools:
-            if tool in normalized:
-                self.intrusion_attempts += 1
-                event['threats'].append(f"HACKER_TOOL: {tool.upper()}")
-                event['risk_level'] = 'critical'
-                intrusion_found = True
-        for attack_type, patterns in self.intrusion_patterns.items():
-            for pattern in patterns:
-                if pattern in normalized:
-                    self.intrusion_attempts += 1
-                    event['threats'].append(f"INTRUSION: {attack_type.upper()}")
-                    event['risk_level'] = 'critical'
-                    intrusion_found = True
-        regex_patterns = {
-            "SQLI": r"(union\s+select|or\s+1=1|drop\s+table|insert\s+into)",
-            "XSS": r"(<script.*?>|javascript:|onerror=|onload=)",
-            "PATH_TRAVERSAL": r"(\.\./|\.\.\\)",
-            "CMD_INJECTION": r"(;|\|\||&&)\s*(whoami|ls|cat|bash|cmd)",
-        }
-        for attack_name, regex in regex_patterns.items():
-            if re.search(regex, normalized):
-                self.intrusion_attempts += 1
-                event['threats'].append(f"INTRUSION_REGEX: {attack_name}")
-                event['risk_level'] = 'critical'
-                intrusion_found = True
-        return intrusion_found
-
-    def _classify_threats(self, url: str, event: dict):
-        if any(x in url for x in ("malware", "virus", "trojan", "ransomware", "backdoor")):
-            self.malware_hits += 1
-            event['threats'].append("MALWARE")
-            event['risk_level'] = 'critical'
-        if any(x in url for x in ("exploit", "payload", "shellcode", "metasploit")):
-            self.exploit_attempts += 1
-            event['threats'].append("EXPLOIT")
-            event['risk_level'] = 'critical'
-        if any(x in url for x in ("phish", "verify-account", "suspended", "confirm-identity")):
-            self.suspicious_hits += 1
-            event['threats'].append("PHISHING")
-            event['risk_level'] = 'high'
-        if any(x in url for x in ("tracker", "analytics", "beacon", "doubleclick", "facebook.net")):
-            self.tracker_hits += 1
-            event['threats'].append("TRACKER")
-            if event['risk_level'] == 'low':
-                event['risk_level'] = 'medium'
-
-    def _detect_fingerprinting(self, url: str, headers: Dict[str,str], event: dict):
-        count = 0
-        for k in self.fingerprint_apis:
-            if k in url:
-                self.fingerprint_apis[k] += 1
-                event['threats'].append(f"FINGERPRINT:{k}")
-                count += 1
-        if count > 0:
-            self.fingerprint_attempts += count
-            if event['risk_level'] == 'low':
-                event['risk_level'] = 'medium'
-
-    def _check_domain_reputation(self, url: str, event: dict):
-        try:
-            domain = urlparse(url).netloc.lower()
-            self.unique_domains.add(domain)
-            for bad in self.high_risk_domains:
-                if bad in domain:
-                    event['threats'].append(f"HIGH_RISK_DOMAIN:{bad}")
-                    if event['risk_level'] == 'low':
-                        event['risk_level'] = 'medium'
-            # Suspicious TLDs
-            for tld in self.high_risk_tlds:
-                if domain.endswith(tld):
-                    event['threats'].append("SUSPICIOUS_TLD")
-                    event['risk_level'] = 'high'
-        except Exception:
-            pass
-
-    def _detect_anomalies(self, timestamp: float, event: dict):
-        self.request_timestamps.append(timestamp)
-        last_1s = sum(1 for t in self.request_timestamps if timestamp - t < 1.0)
-        last_5s = sum(1 for t in self.request_timestamps if timestamp - t < 5.0)
-        last_10s = sum(1 for t in self.request_timestamps if timestamp - t < 10.0)
-        if last_1s > self.anomaly_threshold:
-            event['threats'].append(f"ANOMALY:Burst({last_1s}/sec)")
-            event['risk_level'] = 'high'
-        if last_5s > self.anomaly_threshold * 3:
-            event['threats'].append(f"ANOMALY:Flood({last_5s}/5s)")
-            event['risk_level'] = 'critical'
-
-    def _analyze_redirects(self, url: str, headers: Dict[str,str], event: dict):
-        if headers and ('location' in str(headers).lower() or 'refresh' in str(headers).lower()):
-            self.redirects.append(url)
-            if len(self.redirects) > 5:
-                event['threats'].append("REDIRECT_CHAIN:Suspicious")
-                event['risk_level'] = 'high'
-
-    def _log_threat(self, event: dict):
-        print(f"[MiniAI] 🚨 THREAT DETECTED {event['datetime']} — {event['risk_level'].upper()} — {event['url'][:80]} — {event['threats']}")
-
-    def on_http_blocked(self, url: str):
-        self.http_blocks_attempts += 1
-        event = {
-            'url': url,
-            'timestamp': time.time(),
-            'datetime': datetime.now().isoformat(),
-            'threats': ['HTTP_AUTO_UPGRADE'],
-            'risk_level': 'medium'
-        }
-        self.events.append(event)
-        print(f"[MiniAI] 🔒 HTTP blocked: {url[:60]}")
-
-    def get_statistics(self) -> dict:
-        uptime = time.time() - self.session_start
-        threat_score = (
-            self.tracker_hits * 1 +
-            self.suspicious_hits * 1 +
-            self.fingerprint_attempts * 2 +
-            self.intrusion_attempts * 4 +
-            self.malware_hits * 6 +
-            self.exploit_attempts * 6 +
-            self.http_blocks_attempts * 1
+        NSOperationQueue.mainQueue().addOperationWithBlock_(
+            self._show_threat_report_ui
         )
-        return {
-            'uptime_seconds': uptime,
-            'total_events': len(self.events),
-            'unique_domains': len(self.unique_domains),
-            'threat_score': threat_score,
-            'lockdown': {
-                'active': self.lockdown_active,
-                'threshold': self.lockdown_threshold,
-                'triggered_at': self.lockdown_triggered_at,
-            },
-            'threats': {
-                'trackers': self.tracker_hits,
-                'suspicious': self.suspicious_hits,
-                'malware': self.malware_hits,
-                'exploits': self.exploit_attempts,
-                'intrusions': self.intrusion_attempts,
-                'fingerprinting': self.fingerprint_attempts,
-                'http_blocks': self.http_blocks_attempts,
-            },
-            'fingerprinting_apis': dict(self.fingerprint_apis),
-            'recent_threats': [
-                e for e in list(self.events)[-10:]
-                if e['risk_level'] in ('high', 'critical')
-            ]
-        }
 
-    def get_threat_report(self) -> str:
-        stats = self.get_statistics()
-        report = f"LOCKDOWN STATUS: {'ACTIVE' if stats['lockdown']['active'] else 'STANDBY'}\n"
-        report += f"Session Uptime: {stats['uptime_seconds']:.1f} seconds\n"
-        report += f"Total Events: {stats['total_events']} | Unique Domains: {stats['unique_domains']}\n"
-        report += f"Threat Score: {stats['threat_score']}\n"
-        # Add summaries etc. (for HTML use, refer to _build_threat_report_html)
-        return report
+        NSOperationQueue.mainQueue().addOperationWithBlock_(
+            self._lock_browser_ui
+        )
 
-    def is_locked_down(self) -> bool:
-        return self.lockdown_active
+    # --------------------------------------------------
+    # AUTO UNLOCK
+    # --------------------------------------------------
+    def _maybe_auto_unlock(self, now):
 
-    def reset_lockdown(self, admin_override: bool = False):
-        if not admin_override:
-            print("[MiniAI] Lockdown reset requires admin_override=True")
-            return False
+        if not self.lockdown_active:
+            return
+
+        if not self.lockdown_triggered_at:
+            return
+
+        if now - self.lockdown_triggered_at < self.LOCKDOWN_DURATION_SECONDS:
+            return
+
+        print("[MiniAI] Lockdown expired")
+
         self.lockdown_active = False
         self.lockdown_triggered_at = None
         self._lockdown_ui_opened = False
+        self.intrusion_attempts = 0
         self.events.clear()
-        print("[MiniAI] 🟢 Lockdown reset - System restored")
-        return True
 
-    def shutdown(self):
-        if not self.enabled: return
-        self.enabled = False
+        if self.browser:
+            self.browser.finish_lockdown_unlock()
+
+    # --------------------------------------------------
+    # UI ACTIONS (via Browser)
+    # --------------------------------------------------
+    def _show_threat_report_ui(self):
+
+        if self._lockdown_ui_opened:
+            return
+
+        if not self.browser:
+            return
+
         try:
-            print(self.get_threat_report())
-        except Exception as e:
-            print("[MiniAI] Report failed:", e)
 
+            report_idx = -1
+
+            for i, tab in enumerate(self.browser.tabs):
+                if getattr(tab,"url","") == "darkelf://report":
+                    report_idx = i
+                    break
+
+            if report_idx >= 0:
+
+                tab = self.browser.tabs[report_idx]
+                html = self.browser._build_threat_report_html()
+
+                #tab.view.loadHTMLString_baseURL_(html, None)
+                tab.view.loadHTMLString_baseURL_(html, NSURL.URLWithString_("darkelf://report"))
+                
+                tab.url = "darkelf://report"
+                tab.host = "Darkelf Threat Console"
+                
+                self.browser.active = report_idx
+                self.browser._update_tab_buttons()
+                self.browser._sync_addr()
+
+            else:
+
+                self.browser.openThreatReport_(None)
+
+        except Exception as e:
+            print("[MiniAI] threat report error:", e)
+
+        self._lockdown_ui_opened = True
+
+    # --------------------------------------------------
+    # UI LOCK
+    # --------------------------------------------------
+    def _lock_browser_ui(self):
+
+        if not self.browser:
+            return
+
+        controls = [
+            "btn_back","btn_fwd","btn_reload","btn_home",
+            "btn_new_tab","addr","urlbar",
+            "btn_zoom_out","btn_zoom_in","btn_js","btn_nuke"
+        ]
+
+        for name in controls:
+            try:
+                ctrl = getattr(self.browser,name,None)
+                if ctrl:
+                    ctrl.setEnabled_(False)
+            except Exception:
+                pass
+
+    # --------------------------------------------------
+    # UI UNLOCK
+    # --------------------------------------------------
+    def _unlock_browser_ui(self):
+
+        if not self.browser:
+            return
+
+        controls = [
+            "btn_back","btn_fwd","btn_reload","btn_home",
+            "btn_new_tab","addr","urlbar",
+            "btn_zoom_out","btn_zoom_in","btn_js","btn_nuke"
+        ]
+
+        for name in controls:
+            try:
+                ctrl = getattr(self.browser,name,None)
+                if ctrl:
+                    ctrl.setEnabled_(True)
+            except Exception:
+                pass
+                
 HOME_URL = "darkelf://home"
         
 class ContentRuleManager:
@@ -1198,10 +1485,20 @@ class _UIDelegate(NSObject):
     # Forward the methods you currently implemented on Browser:
 
     def webView_createWebViewWithConfiguration_forNavigationAction_windowFeatures_(
-        self, webView, configuration, navigationAction, windowFeatures
-    ):
-        # block popups
-        print("[UIDelegate] Popup request blocked")
+            self, webView, configuration, navigationAction, windowFeatures):
+
+        try:
+            req = navigationAction.request()
+
+            if req:
+                print("[UIDelegate] Popup redirected to same tab")
+
+                # Load popup URL in current tab
+                webView.loadRequest_(req)
+
+        except Exception as e:
+            print("[UIDelegate] Popup handling error:", e)
+
         return None
 
     def webView_runJavaScriptAlertPanelWithMessage_initiatedByFrame_completionHandler_(
@@ -1263,9 +1560,9 @@ class _NavDelegate(NSObject):
             return None
 
         self.owner = owner
+        self.download_dir = _safe_download_dir()   # ✅ ADD THIS
+
         return self
-
-
     # -------------------------------------------------
     # Navigation Finished
     # -------------------------------------------------
@@ -1375,95 +1672,203 @@ class _NavDelegate(NSObject):
 
         except Exception as e:
             print("[NavDelegate ScriptMessage] Error:", e)
+            
+    # ===============================
+    # DOWNLOAD HANDLING
+    # ===============================
 
+    def webView_decidePolicyForNavigationResponse_decisionHandler_(self, webView, response, decisionHandler):
+
+        try:
+            ns_response = response.response()
+
+            if not ns_response:
+                decisionHandler(WKNavigationResponsePolicyAllow)
+                return
+
+            mime = ns_response.MIMEType() or ""
+            headers = ns_response.allHeaderFields() or {}
+
+            # Normalize headers (case-insensitive)
+            headers_lower = {str(k).lower(): str(v) for k, v in headers.items()}
+
+            # 🔽 ADD THIS BLOCK HERE
+            if mime == "application/octet-stream":
+                print("[Darkelf] Binary download detected")
+                decisionHandler(WKNavigationResponsePolicyDownload)
+                return
+
+            # Force download if server explicitly says so
+            if "content-disposition" in headers_lower and "attachment" in headers_lower["content-disposition"]:
+                print("[Darkelf] Content-Disposition download detected")
+                decisionHandler(WKNavigationResponsePolicyDownload)
+                return
+
+            # If WebKit cannot render this MIME type → download
+            if not response.canShowMIMEType():
+                print("[Darkelf] MIME not displayable → download:", mime)
+                decisionHandler(WKNavigationResponsePolicyDownload)
+                return
+
+            # Otherwise allow normal navigation
+            decisionHandler(WKNavigationResponsePolicyAllow)
+
+        except Exception as e:
+            print("[Darkelf] Download decision error:", e)
+            decisionHandler(WKNavigationResponsePolicyAllow)
+            
+    def webView_navigationResponse_didBecomeDownload_(self, webView, response, download):
+
+        try:
+            download.setDelegate_(self)
+            print("[Darkelf] Download started")
+
+        except Exception as e:
+            print("Download delegate error:", e)
+
+
+    def download_decideDestinationUsingResponse_suggestedFilename_completionHandler_(
+            self, download, response, filename, completionHandler):
+
+        try:
+
+            # Ensure download directory exists
+            os.makedirs(self.download_dir, exist_ok=True)
+    
+            randomized = _randomized_filename(filename)
+
+            path = os.path.join(self.download_dir, randomized)
+
+            print("[Darkelf] Download →", path)
+
+            completionHandler(NSURL.fileURLWithPath_(path))
+
+        except Exception as e:
+            print("Download error:", e)
+            completionHandler(None)
+
+    def download_didFinish_(self, download, finished):
+        try:
+            print("[Darkelf] Download finished")
+        except Exception:
+            pass
+
+    def download_didFailWithError_resumeData_(self, download, error, resumeData):
+        try:
+            print("[Darkelf] Download failed:", error)
+        except Exception:
+            pass
+
+    # ===============================
+    # WIPE DOWNLOAD TRACES
+    # ===============================
+
+    def wipe_download_traces(self):
+
+        try:
+
+            if getattr(self, "download_dir", None) and os.path.isdir(self.download_dir):
+
+                shutil.rmtree(self.download_dir, ignore_errors=True)
+
+                print("[Darkelf] Temp downloads wiped")
+
+        except Exception as e:
+            print("Download wipe error:", e)
+            
     # -------------------------------------------------
     # Navigation Policy
     # -------------------------------------------------
     def webView_decidePolicyForNavigationAction_decisionHandler_(
-        self, webView, navAction, decisionHandler
-    ):
+            self, webView, navAction, decisionHandler):
     
-        if not navAction or not navAction.request():
-            decisionHandler(WKNavigationActionPolicyAllow)
-            return
-            
-        handled = False
-
         try:
 
-            owner = getattr(self, "owner", None)
+            if not navAction or not navAction.request():
+                decisionHandler(WKNavigationActionPolicyAllow)
+                return
 
             req = navAction.request()
+            
+            # -------------------------
+            # MiniAI native traffic monitor
+            # -------------------------
+            try:
+                owner = getattr(self, "owner", None)
+                if owner and hasattr(owner, "mini_ai"):
+                    url_obj = req.URL()
+                    if url_obj:
+                        owner.mini_ai.monitor_network(str(url_obj.absoluteString()), {})
+            except Exception:
+                pass
+                
             url = req.URL()
 
-            url_str = ""
-            scheme = ""
-            host = ""
+            if not url:
+                decisionHandler(WKNavigationActionPolicyAllow)
+                return
 
-            if url:
-                url_str = str(url.absoluteString() or "").strip()
-                scheme = str(url.scheme() or "").lower()
-                host = str(url.host() or "")
-                
-            # --- MiniAI Network Monitor ---
-            owner = getattr(self, "owner", None)
+            url_str = str(url.absoluteString() or "").strip()
+            scheme = str(url.scheme() or "").lower()
+            host = str(url.host() or "")
 
-            if owner and hasattr(owner, "mini_ai"):
-                try:
-                    owner.mini_ai.monitor_network(url_str, {})
-                except Exception:
-                    pass
-                    
-            # Invalid URL
+            # invalid http/https
             if scheme in ("http", "https") and not host:
-
-                decisionHandler(WKNavigationActionPolicyCancel)
-                handled = True
-
-                webView.loadRequest_(
-                    NSURLRequest.requestWithURL_(
-                        NSURL.URLWithString_(HOME_URL)
-                    )
-                )
+                decisionHandler(WKNavigationActionPolicyAllow)
                 return
 
-            # Dangerous schemes
-            if scheme in ("data", "blob", "file", "ftp"):
-
-                decisionHandler(WKNavigationActionPolicyCancel)
-                handled = True
+            # allow blob
+            if scheme == "blob":
+                decisionHandler(WKNavigationActionPolicyAllow)
                 return
-
-            # HTTP → HTTPS upgrade
-            if scheme == "http" and not url_str.startswith("https://"):
-
-                https_url = url_str.replace("http://", "https://", 1)
                 
-                                # --- MiniAI HTTP block detection ---
+            nav_type = navAction.navigationType()
+
+            # Reload of internal report page
+            if nav_type == WKNavigationTypeReload and url_str == "darkelf://report":
+
                 owner = getattr(self, "owner", None)
 
                 if owner and hasattr(owner, "mini_ai"):
-                    try:
-                        owner.mini_ai.on_http_blocked(url_str)
-                    except Exception:
-                        pass
-                        
+                    html = owner._build_threat_report_html()
+
+                    webView.loadHTMLString_baseURL_(
+                        html,
+                        NSURL.URLWithString_("darkelf://report")
+                    )
+
                 decisionHandler(WKNavigationActionPolicyCancel)
-                handled = True
+                return
+                
+            # allow internal darkelf pages
+            if scheme == "darkelf":
+                decisionHandler(WKNavigationActionPolicyAllow)
+                return
+                
+            # block dangerous
+            if scheme in ("ftp"):
+                decisionHandler(WKNavigationActionPolicyCancel)
+                return
+
+            # http -> https
+            if scheme == "http":
+                https_url = url_str.replace("http://", "https://", 1)
 
                 webView.loadRequest_(
                     NSURLRequest.requestWithURL_(
                         NSURL.URLWithString_(https_url)
                     )
                 )
+
+                decisionHandler(WKNavigationActionPolicyAllow)
                 return
-                
+
+            decisionHandler(WKNavigationActionPolicyAllow)
+
         except Exception as e:
             print("[NavDelegate] Policy decision error:", e)
-
-        finally:
-            if not handled:
-                decisionHandler(WKNavigationActionPolicyAllow)
+            decisionHandler(WKNavigationActionPolicyAllow)
+            
     # -------------------------------------------------
     # TLS Certificate Inspection
     # -------------------------------------------------
@@ -1515,9 +1920,6 @@ class _NavDelegate(NSObject):
             NSURLSessionAuthChallengePerformDefaultHandling,
             None
         )
-        
-        
-
 
     # -------------------------------------------------
     # Load Failure
@@ -1536,6 +1938,7 @@ class _NavDelegate(NSObject):
                 )
         except Exception as e:
             print("[WebKit] Recovery failed:", e)
+            
             
 IS_MAC = sys.platform == "darwin"
 if not IS_MAC:
@@ -1877,50 +2280,144 @@ CORE_JS = r'''
     // ==========================================
     const sendToMiniAI = function(url) {
         try {
+
+            if (!url) return;
+
+            url = String(url);
+
+            if (!url.startsWith("http") && !url.startsWith("blob") && !url.startsWith("data"))
+                return;
+
             if (window.webkit &&
                 window.webkit.messageHandlers &&
                 window.webkit.messageHandlers.netlog) {
 
                 window.webkit.messageHandlers.netlog.postMessage({
-                    url: String(url)
+                    url: url
                 });
             }
+
         } catch(e){}
     };
 
-    // fetch interceptor
+
+    // ==========================================
+    // 2️⃣ fetch interceptor
+    // ==========================================
     if (window.fetch) {
+
         const origFetch = window.fetch;
+
         window.fetch = function(...args) {
+
             try { sendToMiniAI(args[0]); } catch(e){}
+
             return origFetch.apply(this, args);
         };
     }
 
-    // XHR interceptor
+
+    // ==========================================
+    // 3️⃣ XHR interceptor
+    // ==========================================
     if (window.XMLHttpRequest) {
+
         const origOpen = XMLHttpRequest.prototype.open;
+
         XMLHttpRequest.prototype.open = function(method, url) {
+
             try { sendToMiniAI(url); } catch(e){}
+
             return origOpen.apply(this, arguments);
         };
     }
 
-    // ==========================================
-    // 2️⃣ Controlled window.open Block
-    // ==========================================
-    try {
-        const origOpen = window.open;
-        window.open = function() {
-            console.warn("[Darkelf] window.open blocked");
-            return null;
-        };
-    } catch(e){}
 
     // ==========================================
-    // 3️⃣ OffscreenCanvas Guard (minimal)
+    // 4️⃣ DOM Resource Watcher
+    // Captures <script src>, <img>, <iframe>, etc.
     // ==========================================
     try {
+
+        const attrs = ["src","href","data","action"];
+
+        const scanNode = function(node) {
+
+            try {
+
+                if (!node || !node.getAttribute) return;
+
+                attrs.forEach(function(attr){
+
+                    if (node.hasAttribute(attr)) {
+
+                        const val = node.getAttribute(attr);
+
+                        if (val && val.startsWith("http")) {
+                            sendToMiniAI(val);
+                        }
+                    }
+
+                });
+
+            } catch(e){}
+        };
+
+        const observer = new MutationObserver(function(mutations){
+
+            mutations.forEach(function(m){
+
+                if (m.addedNodes) {
+
+                    m.addedNodes.forEach(function(node){
+
+                        scanNode(node);
+
+                        if (node.querySelectorAll) {
+
+                            node.querySelectorAll("[src],[href],[data],[action]").forEach(scanNode);
+
+                        }
+
+                    });
+
+                }
+
+            });
+
+        });
+
+        observer.observe(document.documentElement,{
+            childList:true,
+            subtree:true
+        });
+
+    } catch(e){}
+
+
+    // ==========================================
+    // 5️⃣ window.open restriction
+    // ==========================================
+    try {
+
+        const origOpen = window.open;
+
+        window.open = function() {
+
+            console.warn("[Darkelf] window.open blocked");
+
+            return null;
+
+        };
+
+    } catch(e){}
+
+
+    // ==========================================
+    // 6️⃣ OffscreenCanvas Guard
+    // ==========================================
+    try {
+
         if (window.OffscreenCanvas &&
             OffscreenCanvas.prototype &&
             OffscreenCanvas.prototype.convertToBlob) {
@@ -1928,25 +2425,36 @@ CORE_JS = r'''
             const origConvert = OffscreenCanvas.prototype.convertToBlob;
 
             OffscreenCanvas.prototype.convertToBlob = function() {
+
                 return origConvert.apply(this, arguments);
+
             };
+
         }
+
     } catch(e){}
 
+
     // ==========================================
-    // 4️⃣ Optional WebSocket Restriction
+    // 7️⃣ WebSocket Monitor (log instead of break)
     // ==========================================
     try {
+
         if (window.WebSocket) {
+
             const RealWebSocket = window.WebSocket;
 
             window.WebSocket = function(url, protocols) {
-                console.warn("[Darkelf] WebSocket blocked:", url);
-                throw new Error("WebSocket disabled by Darkelf");
+
+                try { sendToMiniAI(url); } catch(e){}
+
+                return new RealWebSocket(url, protocols);
             };
 
             window.WebSocket.prototype = RealWebSocket.prototype;
+
         }
+
     } catch(e){}
 
 })();
@@ -2152,7 +2660,6 @@ class Browser(NSObject):
         ContentRuleManager.load_rules()
         
         self.mini_ai = DarkelfMiniAISentinel()
-        self.mini_ai.browser_bridge = self
         self.mini_ai.browser = self
         
         # ---- 4. Toolbar, Tabbar, UI wiring ----
@@ -2165,7 +2672,8 @@ class Browser(NSObject):
 
         self.window.makeKeyAndOrderFront_(None)
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
-                
+        
+        self.download_dir = _safe_download_dir()
         # ---- 7. Keyboard monitor ----
         self._install_key_monitor()
 
@@ -2181,15 +2689,29 @@ class Browser(NSObject):
             pass
 
         return self
-        
+                    
     @objc.IBAction
     def refreshMiniAI_(self, timer):
-        # Always trigger a refresh to auto-release lockdown
-        self.mini_ai.monitor_network("")
-        # If threat report tab is active, do nothing else
-        if self.tabs and self.tabs[self.active].url == "darkelf://report":
+
+        if not hasattr(self, "mini_ai"):
             return
-        self.updateMiniAIIndicator()
+
+        import time
+        now = time.time()
+
+        try:
+            # Only check unlock timer
+            self.mini_ai._maybe_auto_unlock(now)
+        except Exception as e:
+            print("[MiniAI Timer Error]", e)
+
+        # Update indicator only if not on report tab
+        try:
+            if self.tabs and self.active >= 0:
+                if getattr(self.tabs[self.active], "url", "") != "darkelf://report":
+                    self.updateMiniAIIndicator()
+        except Exception:
+            pass
         
     def openThreatReport_(self, sender):
 
@@ -2229,216 +2751,487 @@ class Browser(NSObject):
         
     def _build_threat_report_html(self):
 
-        stats = self.mini_ai.get_statistics()
-        
-        # Optional: show recent HTTP upgrades
-        recent_upgrades = [
-            e for e in self.mini_ai.events
-            if "HTTP_AUTO_UPGRADE" in e.get("threats", [])
-        ][-5:]
+        stats = self.mini_ai.get_statistics() if getattr(self, "mini_ai", None) else {}
 
-        return f"""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-    <meta charset="UTF-8"/>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <meta http-equiv="Content-Security-Policy"
-    content="
-    default-src 'none';
-    style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
-    font-src https://cdn.jsdelivr.net;
-    img-src 'self' data:;
-    connect-src 'none';
-    script-src 'none';
-    object-src 'none';
-    frame-ancestors 'none';
-    base-uri 'none';
-    form-action 'none';
-    ">
-    <title>Darkelf Threat Console</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
-    <style>
-    :root {{
-        --bg:#05060a;
-        --accent:#36ff9a;
-        --accent2:#00eaff;
-        --accent3:#b400ff;
-        --danger:#ff3b30;
-        --warn:#ffd36b;
-        --muted:#9db0be;
-        --card:rgba(255,255,255,.05);
+        lockdown = stats.get("lockdown", {}) or {}
+        lockdown_active = bool(lockdown.get("active", False))
+        lockdown_triggered_at = float(lockdown.get("triggered_at") or 0)
+
+        now = time.time()
+
+        LOCKDOWN_DURATION = getattr(self.mini_ai, "LOCKDOWN_DURATION_SECONDS", 0) or 0
+        elapsed = now - (lockdown_triggered_at or now)
+        remaining = int(max(0, LOCKDOWN_DURATION - elapsed)) if lockdown_active else 0
+
+        try:
+            seed_stats_json = json.dumps(stats)
+        except Exception:
+            seed_stats_json = "{}"
+
+        # Precompute badge color
+        badge_bg = "#ff3b30" if lockdown_active else "#36ff9a"
+        badge_text = "LOCKDOWN ACTIVE" if lockdown_active else "SYSTEM MONITORING"
+
+        # Timer block shows only when active
+        timer_block = ""
+        if lockdown_active:
+            timer_block = f"""
+            <div class="countdown-timer">
+                Lockdown ends in <span id="lockdown_timer">{remaining}</span>s
+            </div>
+            """
+
+        return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Darkelf Threat Console</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+
+  <style>
+    :root{{
+      --bg:#05060a;
+      --accent:#36ff9a;
+      --accent2:#00eaff;
+      --accent3:#b400ff;
+      --card:rgba(255,255,255,.05);
+      --muted:#9db0be;
+      --danger:#ff3b30;
+      --ok:#36ff9a;
+      --border:rgba(255,255,255,.08);
     }}
-    *{{box-sizing:border-box}}
-    html,body{{margin:0;height:100%;font-family:ui-sans-serif,system-ui,-apple-system;}}
+
+    *{{ box-sizing:border-box; }}
+
     body{{
-        background:
-            radial-gradient(1200px 800px at 15% -10%, rgba(0,234,255,.35), transparent 70%),
-            radial-gradient(900px 600px at 110% 0%, rgba(54,255,154,.35), transparent 70%),
-            radial-gradient(1200px 700px at 50% 120%, rgba(180,0,255,.35), transparent 70%),
-            var(--bg);
-        color:#eef2f6;
+      margin:0;
+      font-family:system-ui,-apple-system;
+      background:
+        radial-gradient(1200px 800px at 15% -10%, rgba(0,234,255,.35), transparent 70%),
+        radial-gradient(900px 600px at 110% 0%, rgba(54,255,154,.35), transparent 70%),
+        radial-gradient(1200px 700px at 50% 120%, rgba(180,0,255,.35), transparent 70%),
+        var(--bg);
+      color:#eef2f6;
     }}
-    body::before {{
-        content:"";
-        position:fixed;
-        inset:0;
-        background:
-            linear-gradient(rgba(0,255,180,.05) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(0,255,180,.05) 1px, transparent 1px);
-        background-size:40px 40px;
-        pointer-events:none;
-        opacity:.3;
+
+    .container{{
+      max-width:1300px;
+      margin:auto;
+      padding:70px 24px;
     }}
-    .scanline {{
-        position:fixed;
-        top:0;
-        left:0;
-        width:100%;
-        height:2px;
-        background:linear-gradient(90deg,transparent,var(--accent2),transparent);
-        animation:scan 5s linear infinite;
-        opacity:.5;
+
+    .title{{
+      font-size:1.8rem;
+      font-weight:900;
+      letter-spacing:.15em;
+      background:linear-gradient(90deg,var(--accent),var(--accent2),var(--accent3));
+      -webkit-background-clip:text;
+      -webkit-text-fill-color:transparent;
     }}
-    @keyframes scan {{
-        0%{{transform:translateY(-20px)}}
-        100%{{transform:translateY(100vh)}}
+
+    .badge{{
+      display:inline-flex;
+      margin-top:14px;
+      padding:8px 16px;
+      border-radius:999px;
+      font-size:.7rem;
+      font-weight:800;
+      letter-spacing:.15em;
+      background:{badge_bg};
+      color:#000;
     }}
-    .container {{
-        max-width:1100px;
-        margin:auto;
-        padding:90px 24px;
+
+    .countdown-timer{{
+      margin-top:14px;
+      font-size:1.2rem;
+      color:var(--danger);
+      font-weight:700;
     }}
-    .title {{
-        font-size:1.8rem;
-        font-weight:900;
-        letter-spacing:.15em;
-        background:linear-gradient(90deg,var(--accent),var(--accent2),var(--accent3));
-        -webkit-background-clip:text;
-        -webkit-text-fill-color:transparent;
+
+    .cards{{
+     margin-top:60px;
+     display:grid;
+     grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
+     gap:36px;
     }}
-    .status-lights {{
-        margin-top:18px;
-        display:flex;
-        gap:10px;
+
+    @media (max-width: 1100px) {{
+      .cards{{ grid-template-columns:repeat(2, minmax(0, 1fr)); }}
     }}
-    .light {{
-        width:10px;
-        height:10px;
-        border-radius:50%;
+
+    @media (max-width: 720px) {{
+      .cards{{ grid-template-columns:1fr; }}
+      .container{{ padding:34px 16px; }}
     }}
-    .green {{background:#36ff9a;box-shadow:0 0 10px #36ff9a}}
-    .cyan {{background:#00eaff;box-shadow:0 0 10px #00eaff}}
-    .purple {{background:#b400ff;box-shadow:0 0 10px #b400ff}}
-    .badge {{
-        display:inline-flex;
-        align-items:center;
-        gap:10px;
-        margin-top:20px;
-        padding:8px 16px;
-        border-radius:999px;
-        font-size:.7rem;
-        font-weight:800;
-        letter-spacing:.15em;
-        background:{"#ff3b30" if stats['lockdown']['active'] else "#36ff9a"};
-        color:#000;
+
+    .card{{
+      background:var(--card);
+      backdrop-filter:blur(20px);
+      padding:30px;
+      border-radius:18px;
+      border:1px solid var(--border);
+      box-shadow:
+        0 30px 60px rgba(0,0,0,.6),
+        0 0 40px rgba(0,234,255,.15);
+      min-height: 220px;
     }}
-    .badge::before {{
-        content:"";
-        width:8px;
-        height:8px;
-        border-radius:50%;
-        background:#fff;
-        animation:pulse 1.5s infinite;
+
+    .section-title{{
+      font-size:.75rem;
+      letter-spacing:.25em;
+      text-transform:uppercase;
+      color:var(--muted);
+      margin-bottom:20px;
     }}
-    @keyframes pulse {{
-        0%{{transform:scale(.7);opacity:.6}}
-        50%{{transform:scale(1.4);opacity:1}}
-        100%{{transform:scale(.7);opacity:.6}}
+
+    .line{{
+      display:grid;
+      grid-template-columns:28px auto max-content;
+      column-gap:14px;
+      align-items:center;
+      margin:12px 0;
     }}
-    .cards {{
-        margin-top:60px;
-        display:grid;
-        grid-template-columns:1fr 1fr;
-        gap:50px;
+
+    .icon{{ color:var(--accent2); }}
+
+    .stat-value{{ font-weight:900; }}
+
+    .dummy-card{{
+      opacity:.5;
+      border-style:dashed;
     }}
-    .card {{
-        background:var(--card);
-        backdrop-filter:blur(20px);
-        padding:40px;
-        border-radius:18px;
-        border:1px solid rgba(255,255,255,.08);
-        box-shadow:0 30px 60px rgba(0,0,0,.6),0 0 40px rgba(0,234,255,.15);
+
+    .log{{
+      margin-top:60px;
+      background:rgba(0,0,0,.45);
+      padding:30px;
+      border-radius:14px;
+      font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size:.85rem;
+      max-height:260px;
+      overflow:auto;
+      border:1px solid rgba(255,255,255,.06);
     }}
-    .section-title {{
-        font-size:.75rem;
-        letter-spacing:.25em;
-        text-transform:uppercase;
-        color:var(--muted);
-        margin-bottom:24px;
+
+    .log-entry{{
+      margin:8px 0;
+      color:#ff9a9a;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
     }}
-    .line {{
-        display:grid;
-        grid-template-columns:28px auto max-content;
-        align-items:center;
-        column-gap:14px;
-        margin:16px 0;
+
+    .footer{{
+      margin-top:60px;
+      text-align:center;
+      font-size:.8rem;
+      color:var(--muted);
     }}
-    .icon {{
-        font-size:1.2rem;
-        color:var(--accent2);
+
+    .top-row{{
+      display:flex;
+      justify-content:space-between;
+      gap:16px;
+      align-items:flex-end;
+      flex-wrap:wrap;
     }}
-    .stat-label {{color:#c3d2dd}}
-    .stat-value {{
-        font-weight:900;
-        font-size:1.15rem;
+
+    .subtle{{
+      color: var(--muted);
+      font-size: .9rem;
+      margin-top: 8px;
     }}
-    .footer {{
-        margin-top:80px;
-        text-align:center;
-        font-size:.8rem;
-        color:var(--muted);
-        opacity:.7;
+
+    .pill{{
+      display:inline-flex;
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.1);
+      background:rgba(255,255,255,.03);
+      font-size:.75rem;
+      color: var(--muted);
     }}
-    </style>
-    </head>
-    <body>
-    <div class="scanline"></div>
-    <div class="container">
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="top-row">
+      <div>
         <div class="title">Darkelf MiniAI Threat Console</div>
-        <div class="status-lights">
-            <div class="light green"></div>
-            <div class="light cyan"></div>
-            <div class="light purple"></div>
+        <div class="badge" id="status_badge">{badge_text}</div>
+        {timer_block}
+        <div class="subtle">
+          Live view (updates every <span class="pill">2s</span>). No full page reload.
         </div>
-        <div class="badge">
-            {"LOCKDOWN ACTIVE" if stats['lockdown']['active'] else "SYSTEM MONITORING"}
-        </div>
-        <div class="cards">
-            <div class="card">
-                <div class="section-title">Session Metrics</div>
-                <div class="line"><i class="bi bi-clock-history icon"></i><span class="stat-label">Session Uptime</span><span class="stat-value">{stats['uptime_seconds']:.1f}s</span></div>
-                <div class="line"><i class="bi bi-activity icon"></i><span class="stat-label">Total Events</span><span class="stat-value">{stats['total_events']}</span></div>
-                <div class="line"><i class="bi bi-globe2 icon"></i><span class="stat-label">Unique Domains</span><span class="stat-value">{stats['unique_domains']}</span></div>
-                <div class="line"><i class="bi bi-shield-exclamation icon"></i><span class="stat-label">Threat Score</span><span class="stat-value">{stats.get('threat_score', 0)}</span></div>
-            </div>
-            <div class="card">
-                <div class="section-title">Threat Analysis</div>
-                <div class="line"><i class="bi bi-crosshair icon"></i><span class="stat-label">Trackers</span><span class="stat-value">{stats['threats']['trackers']}</span></div>
-                <div class="line"><i class="bi bi-bullseye icon"></i><span class="stat-label">Intrusions</span><span class="stat-value">{stats['threats']['intrusions']}</span></div>
-                <div class="line"><i class="bi bi-bug-fill icon"></i><span class="stat-label">Malware</span><span class="stat-value">{stats['threats']['malware']}</span></div>
-                <div class="line"><i class="bi bi-lightning-charge-fill icon"></i><span class="stat-label">Exploits</span><span class="stat-value">{stats['threats']['exploits']}</span></div>
-                <div class="line"><i class="bi bi-fingerprint icon"></i><span class="stat-label">Fingerprinting</span><span class="stat-value">{stats['threats']['fingerprinting']}</span></div>
-                <div class="line"><i class="bi bi-arrow-left-right icon"></i><span class="stat-label">HTTP Blocks</span><span class="stat-value">{stats['threats']['http_blocks']}</span></div>
-            </div>
-        </div>
-        <div class="footer">
-            Darkelf Browser • MiniAI Sentinel • Hardened Runtime
-        </div>
+      </div>
+
+      <div class="pill" id="last_updated">Last updated: --</div>
     </div>
-    </body>
-    </html>
-    """
+
+    <div class="cards">
+
+      <!-- Session Metrics -->
+      <div class="card">
+        <div class="section-title">Session Metrics</div>
+
+        <div class="line">
+          <i class="bi bi-clock-history icon"></i>
+          <span>Session Uptime</span>
+          <span class="stat-value" id="uptime_seconds">0.0s</span>
+        </div>
+
+        <div class="line">
+          <i class="bi bi-activity icon"></i>
+          <span>Total Events</span>
+          <span class="stat-value" id="total_events">0</span>
+        </div>
+
+        <div class="line">
+          <i class="bi bi-globe icon"></i>
+          <span>Unique Domains</span>
+          <span class="stat-value" id="unique_domains">0</span>
+        </div>
+
+        <div class="line">
+          <i class="bi bi-shield-exclamation icon"></i>
+          <span>Threat Score</span>
+          <span class="stat-value" id="threat_score">0</span>
+        </div>
+      </div>
+
+      <!-- Threat Analysis -->
+      <div class="card">
+        <div class="section-title">Threat Analysis</div>
+
+        <div class="line">
+          <i class="bi bi-crosshair icon"></i>
+          <span>Trackers</span>
+          <span class="stat-value" id="th_trackers">0</span>
+        </div>
+
+        <div class="line">
+          <i class="bi bi-bullseye icon"></i>
+          <span>Intrusions</span>
+          <span class="stat-value" id="th_intrusions">0</span>
+        </div>
+
+        <div class="line">
+          <i class="bi bi-bug icon"></i>
+          <span>Malware</span>
+          <span class="stat-value" id="th_malware">0</span>
+        </div>
+
+        <div class="line">
+          <i class="bi bi-lightning icon"></i>
+          <span>Exploits</span>
+          <span class="stat-value" id="th_exploits">0</span>
+        </div>
+
+        <div class="line">
+          <i class="bi bi-fingerprint icon"></i>
+          <span>Fingerprinting</span>
+          <span class="stat-value" id="th_fingerprinting">0</span>
+        </div>
+      </div>
+
+      <!-- IDS Engine -->
+      <div class="card">
+        <div class="section-title">MiniAI IDS Engine</div>
+
+        <div class="line">
+          <i class="bi bi-robot icon"></i>
+          <span>Scraping Bots</span>
+          <span class="stat-value" id="ids_scrapers">0</span>
+        </div>
+
+        <div class="line">
+          <i class="bi bi-key icon"></i>
+          <span>Credential Stuffing</span>
+          <span class="stat-value" id="ids_credential_stuffing">0</span>
+        </div>
+
+        <div class="line">
+          <i class="bi bi-search icon"></i>
+          <span>Vulnerability Scanners</span>
+          <span class="stat-value" id="ids_vulnerability_scanners">0</span>
+        </div>
+
+        <div class="line">
+          <i class="bi bi-shield-lock icon"></i>
+          <span>Bruteforce Logins</span>
+          <span class="stat-value" id="ids_bruteforce_logins">0</span>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="log">
+      <b>Recent Threats</b>
+      <div id="recent_threats"></div>
+    </div>
+
+    <div class="footer">
+      Darkelf Browser • MiniAI Sentinel • Hardened Runtime
+    </div>
+  </div>
+
+  <script>
+    // ---------- seed ----------
+    const SEED_STATS = {seed_stats_json};
+
+    // ---------- helpers ----------
+    function el(id) {{ return document.getElementById(id); }}
+    function setText(id, v) {{
+      const n = el(id);
+      if (!n) return;
+      n.textContent = (v === undefined || v === null) ? "" : String(v);
+    }}
+
+    function formatUptimeSeconds(x) {{
+      const n = Number(x || 0);
+      return n.toFixed(1) + "s";
+    }}
+
+    // Safer rendering (no innerHTML from untrusted data)
+    function renderRecentThreats(items) {{
+      const container = el("recent_threats");
+      if (!container) return;
+      container.innerHTML = "";
+      (items || []).slice(0, 50).forEach(e => {{
+        const div = document.createElement("div");
+        div.className = "log-entry";
+        const dt = (e && e.datetime) ? e.datetime : "";
+        const url = (e && e.url) ? e.url : "";
+        div.textContent = dt + " — " + url;
+        container.appendChild(div);
+      }});
+    }}
+
+    // ---------- countdown ----------
+    // Keep a local countdown that will be corrected on each poll.
+    let lockdownRemaining = null;
+    function tickCountdown() {{
+      const t = el("lockdown_timer");
+      if (!t) return;
+
+      if (lockdownRemaining === null) return;
+      if (lockdownRemaining > 0) {{
+        lockdownRemaining -= 1;
+        t.textContent = String(lockdownRemaining);
+      }}
+    }}
+    setInterval(tickCountdown, 1000);
+
+    // ---------- apply stats ----------
+    function applyStats(stats) {{
+      stats = stats || {{}};
+
+      // Basic metrics
+      setText("uptime_seconds", formatUptimeSeconds(stats.uptime_seconds));
+      setText("total_events", stats.total_events || 0);
+      setText("unique_domains", stats.unique_domains || 0);
+      setText("threat_score", stats.threat_score || 0);
+
+      // Threats
+      const th = stats.threats || {{}};
+      setText("th_trackers", th.trackers || 0);
+      setText("th_intrusions", th.intrusions || 0);
+      setText("th_malware", th.malware || 0);
+      setText("th_exploits", th.exploits || 0);
+      setText("th_fingerprinting", th.fingerprinting || 0);
+
+      // IDS
+      const ids = stats.ids || {{}};
+      setText("ids_scrapers", ids.scrapers || 0);
+      setText("ids_credential_stuffing", ids.credential_stuffing || 0);
+      setText("ids_vulnerability_scanners", ids.vulnerability_scanners || 0);
+      setText("ids_bruteforce_logins", ids.bruteforce_logins || 0);
+
+      // Recent threats
+      renderRecentThreats(stats.recent_threats || []);
+
+      // Lockdown status + badge
+      const lockdown = stats.lockdown || {{}};
+      const active = !!lockdown.active;
+
+      const badge = el("status_badge");
+      if (badge) {{
+        badge.textContent = active ? "LOCKDOWN ACTIVE" : "SYSTEM MONITORING";
+        badge.style.background = active ? "{'#ff3b30'}" : "{'#36ff9a'}";
+        badge.style.color = "#000";
+      }}
+
+      // Countdown node handling:
+      // If lockdown becomes active, ensure timer exists; if becomes inactive, remove it.
+      const existingTimer = el("lockdown_timer");
+      if (active) {{
+        // compute remaining based on server-ish timestamps
+        const triggeredAt = Number(lockdown.triggered_at || 0);
+        const duration = Number(lockdown.duration_seconds || {LOCKDOWN_DURATION} || 0);
+
+        // We'll accept either:
+        // - backend provides duration_seconds
+        // - fallback to embedded LOCKDOWN_DURATION
+        const nowSec = Date.now() / 1000;
+        let rem = Math.max(0, Math.floor(duration - (nowSec - triggeredAt)));
+        lockdownRemaining = rem;
+
+        if (!existingTimer) {{
+          // create timer block
+          const container = badge ? badge.parentElement : document.body;
+          const div = document.createElement("div");
+          div.className = "countdown-timer";
+          div.innerHTML = 'Lockdown ends in <span id="lockdown_timer"></span>s';
+          container.appendChild(div);
+        }}
+        setText("lockdown_timer", lockdownRemaining);
+      }} else {{
+        lockdownRemaining = null;
+        // remove timer block if present
+        if (existingTimer) {{
+          const parent = existingTimer.closest(".countdown-timer");
+          if (parent) parent.remove();
+        }}
+      }}
+
+      // Last updated
+      const lu = el("last_updated");
+      if (lu) {{
+        const d = new Date();
+        lu.textContent = "Last updated: " + d.toLocaleTimeString();
+      }}
+    }}
+
+    // First paint
+    applyStats(SEED_STATS);
+
+    // ---------- live polling ----------
+    // IMPORTANT: implement in your _NavDelegate:
+    // If URL is darkelf://report?json=1, return JSON string of self.mini_ai.get_statistics()
+    async function poll() {{
+      try {{
+        const res = await fetch("darkelf://report?json=1", {{
+          cache: "no-store",
+          credentials: "omit"
+        }});
+        const txt = await res.text();
+        const data = JSON.parse(txt);
+        applyStats(data);
+      }} catch (e) {{
+        // If fetch is blocked by your scheme handler, you can replace this with:
+        // - message handler bridge, or
+        // - WKURLSchemeHandler, or
+        // - injected script via evaluateJavaScript_ from native side.
+      }}
+    }}
+
+    setInterval(poll, 2000);
+  </script>
+</body>
+</html>
+"""
 
     def update_security_indicator(self, trusted):
         try:
@@ -2461,16 +3254,86 @@ class Browser(NSObject):
 
         except Exception as e:
             print("Security indicator error:", e)
-            
-    @objc.IBAction
-    def refreshMiniAI_(self, timer):
+                    
+    def start_lockdown_timer(self):
 
-        # If threat report tab is active, do nothing
-        if self.tabs and self.tabs[self.active].url == "darkelf://report":
+        self.stop_lockdown_timer()
+
+        self._lockdown_timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+            1.0,
+            self,
+            "refreshMiniAI:",
+            None,
+            True
+        )
+ 
+    def stop_lockdown_timer(self):
+
+        if hasattr(self, "_lockdown_timer") and self._lockdown_timer:
+            self._lockdown_timer.invalidate()
+            self._lockdown_timer = None
+            
+    def finish_lockdown_unlock(self):
+
+        print("[Browser] Lockdown finished")
+
+        self.stop_lockdown_timer()
+
+        try:
+            self.mini_ai._unlock_browser_ui()
+        except Exception:
+            pass
+
+        try:
+            self.close_threat_report_tab()
+        except Exception as e:
+            print("[Browser] Close report error:", e)
+            
+    def close_threat_report_tab(self):
+
+        idx = -1
+
+        for i, tab in enumerate(self.tabs):
+            if getattr(tab, "url", None) == "darkelf://report":
+                idx = i
+                break
+
+        if idx < 0:
             return
 
-        self.updateMiniAIIndicator()
+        try:
+            report_view = self.tabs[idx].view
 
+            if report_view and report_view.superview():
+                report_view.removeFromSuperview()
+
+        except Exception:
+            pass
+
+        del self.tabs[idx]
+
+        if not self.tabs:
+            self._add_tab(home=True)
+            return
+
+        if self.active >= len(self.tabs):
+            self.active = len(self.tabs) - 1
+
+        wk = self.tabs[self.active].view
+
+        try:
+            if wk.superview():
+                wk.removeFromSuperview()
+
+            self._mount_webview(wk)
+
+        except Exception as e:
+            print("[Browser] restore webview error:", e)
+
+        self._bring_tabbar_to_front()
+        self._update_tab_buttons()
+        self._sync_addr()
+            
     def _is_tab_webview(self, webview):
         for tab in self.tabs:
             if tab.view is webview:
@@ -2498,9 +3361,6 @@ class Browser(NSObject):
             rect, style, 2, False
         )
         win.setTitle_(APP_NAME)
-
-        # ✅ IMPORTANT: do NOT call win.setDelegate_(...) here.
-        # The delegate is a weak ref and should be set after Browser.init is stable.
 
         try:
             win.setTitleVisibility_(1)
@@ -3293,7 +4153,8 @@ class Browser(NSObject):
             _add(BATTERY_DEFENSE_JS)
             _add(PERFORMANCE_DEFENSE_JS)
             _add(CORE_JS)
-            _add(STORAGE_DEFENSE_JS)
+            #_add(INDEXEDDB_DEFENSE_JS)
+            #_add(STORAGE_DEFENSE_JS)
             
             if ENABLE_LOCAL_HSTS:
                 self._install_local_hsts(ucc)
@@ -3403,11 +4264,21 @@ class Browser(NSObject):
 
         if ContentRuleManager._rule_list:
             ucc.addContentRuleList_(ContentRuleManager._rule_list)
+            
+        config = WKWebViewConfiguration.alloc().init()
 
         # ---- delegates must already exist & be strongly held ----
         # nav delegate (already created in init, appended to _strong_refs)
         ucc.addScriptMessageHandler_name_(self._nav_delegate, "netlog")
-
+        
+        # inject JS
+        script = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
+            CORE_JS,
+            WKUserScriptInjectionTimeAtDocumentEnd,
+            False
+        )
+        
+        ucc.addUserScript_(script)
         # search handler (created ONCE in init; always present!)
         # REMOVE any conditional/creation logic here---just use what's in self._search_handler!
         ucc.addScriptMessageHandler_name_(self._search_handler, "search")
