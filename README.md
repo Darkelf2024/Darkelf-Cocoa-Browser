@@ -56,7 +56,7 @@ Designed for privacy-conscious daily browsing without Tor complexity.
 -   DarkelfMiniAI Monitoring/IDS
 -   Native macOS AppKit interface
 -   Keyboard hotkeys
--   Secure Download Mode
+-   Secure Download Mode - Darkelf Temp Folder/Randomized File Name
 -   Lockdown Mode
 -   Wipe Nuke on Exit
 -   Per Tab Isolation
