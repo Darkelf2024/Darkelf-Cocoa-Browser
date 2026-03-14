@@ -43,7 +43,7 @@ Two editions are available:
 
 # 🟢 Darkelf Cocoa -- General Edition v4.0 Latest
 
-📄 `Darkelf_Cocoa_Browser_4.0.py`
+📄 `Darkelf_Cocoa_Browser_4.0.5.py`
 
 Designed for privacy-conscious daily browsing without Tor complexity.
 
@@ -53,9 +53,11 @@ Designed for privacy-conscious daily browsing without Tor complexity.
 -   Safari-style declarative content blocking
 -   Non-persistent WKWebView data store
 -   JavaScript toggle button
--   MiniAI passive monitoring
+-   DarkelfMiniAI Monitoring/IDS
 -   Native macOS AppKit interface
 -   Keyboard hotkeys
+-   Secure Download Mode
+-   Lockdown Mode
 -   Wipe Nuke on Exit
 -   Per Tab Isolation
 -   Canvas Signatures change on Boot-up and Per-Tab! Not on Reload.
