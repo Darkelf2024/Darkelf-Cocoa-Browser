@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.0.5 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.0.6 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -86,7 +86,7 @@ from Cocoa import (
     NSWindowStyleMaskResizable, NSWindowStyleMaskMiniaturizable, NSWindowCollectionBehaviorFullScreenPrimary,
     NSObject, NSButton, NSImage, NSBox, NSColor, NSView,
     NSTrackingArea, NSTrackingMouseEnteredAndExited, NSTrackingActiveAlways,
-    NSEvent, NSMakeRect, NSSearchField, NSTextField,
+    NSEvent, NSMakeRect, NSSearchField, NSProgressIndicator, NSTextField,
     NSToolbarFlexibleSpaceItemIdentifier, NSApplicationActivationPolicyRegular, NSOperationQueue
 )
 from WebKit import (
@@ -1548,7 +1548,24 @@ class _UIDelegate(NSObject):
             decisionHandler(0)
         except Exception:
             pass
-                
+            
+    def webView_enterFullScreenForFrame_completionHandler_(self, webView, frame, completionHandler):
+
+        try:
+            print("[UIDelegate] WebKit video fullscreen")
+
+            webView.setFrame_(webView.window().contentView().bounds())
+            webView.setAutoresizingMask_(18)  # width + height
+
+        except Exception as e:
+            print("[UIDelegate] fullscreen error:", e)
+
+        completionHandler(True)
+
+    def webView_exitFullScreenForFrame_completionHandler_(self, webView, frame, completionHandler):
+        print("[UIDelegate] exit video fullscreen")
+        completionHandler(True)
+        
 class _NavDelegate(NSObject):
 
     # -------------------------------------------------
@@ -1636,16 +1653,9 @@ class _NavDelegate(NSObject):
             # FULLSCREEN BRIDGE
             # -------------------------
             if message.name() == "fullscreen":
-                try:
-                    win = message.webView().window()
-                    if win:
-                        print("[Fullscreen bridge triggered]")
-                        win.toggleFullScreen_(None)
-                except Exception as e:
-                    print("[Fullscreen error]", e)
+                print("[Fullscreen message ignored]")
                 return
-
-
+            
             # -------------------------
             # NETLOG HANDLER
             # -------------------------
@@ -1673,6 +1683,37 @@ class _NavDelegate(NSObject):
         except Exception as e:
             print("[NavDelegate ScriptMessage] Error:", e)
             
+            # -------------------------
+            # BLOB DOWNLOAD HANDLER
+            # -------------------------
+            if message.name() == "blobdownload":
+
+                body = message.body()
+
+                filename = body.get("filename", "download")
+                data = body.get("data")
+
+                if not data:
+                    return
+
+                import base64
+
+                base64_data = data.split(",")[1]
+
+                randomized = _randomized_filename(filename)
+
+                path = os.path.join(self.download_dir, randomized)
+
+                with open(path, "wb") as f:
+                    f.write(base64.b64decode(base64_data))
+
+                print("[Darkelf] Blob downloaded →", path)
+
+                return
+
+        except Exception as e:
+            print("[NavDelegate ScriptMessage] Error:", e)
+        
     # ===============================
     # DOWNLOAD HANDLING
     # ===============================
@@ -2274,6 +2315,14 @@ if ("getBattery" in navigator) {
 
 CORE_JS = r'''
 (function() {
+
+    try {
+
+        Object.defineProperty(document, "fullscreenEnabled", {
+            get: () => true,
+        configurable: true
+        });
+    } catch(e){}
 
     // ==========================================
     // 1️⃣ Network Monitoring (MiniAI)
@@ -4240,102 +4289,58 @@ class Browser(NSObject):
             print(f"[Inject] Core script injection failed: {e}")
             
     def _new_wk(self):
+
         is_home = bool(getattr(self, "loading_home", False))
 
-        # ---- config first ----
+        # ---- configuration ----
         cfg = WKWebViewConfiguration.alloc().init()
-                
+
         tab_store = WKWebsiteDataStore.nonPersistentDataStore()
         cfg.setWebsiteDataStore_(tab_store)
-        
+
         cfg.setMediaTypesRequiringUserActionForPlayback_(0)
-        
+
         if tab_store.isPersistent():
             raise RuntimeError("Darkelf security failure: persistent data store detected")
 
         js_enabled = True if is_home else bool(getattr(self, "js_enabled", True))
 
+        # ---- preferences ----
         prefs = WKPreferences.alloc().init()
         prefs.setJavaScriptEnabled_(js_enabled)
         prefs.setJavaScriptCanOpenWindowsAutomatically_(True)
+
+        # ✅ enable HTML5 fullscreen
+        prefs.setValue_forKey_(True, "fullScreenEnabled")
+
         cfg.setPreferences_(prefs)
 
+        # ---- user content controller ----
         ucc = WKUserContentController.alloc().init()
 
         if ContentRuleManager._rule_list:
             ucc.addContentRuleList_(ContentRuleManager._rule_list)
-            
-        config = WKWebViewConfiguration.alloc().init()
 
-        # ---- delegates must already exist & be strongly held ----
-        # nav delegate (already created in init, appended to _strong_refs)
+        # ---- message handlers ----
         ucc.addScriptMessageHandler_name_(self._nav_delegate, "netlog")
-        
-        # inject JS
+        ucc.addScriptMessageHandler_name_(self._nav_delegate, "blobdownload")
+        ucc.addScriptMessageHandler_name_(self._search_handler, "search")
+
+        # ---- inject core JS ----
         script = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
             CORE_JS,
             WKUserScriptInjectionTimeAtDocumentEnd,
             False
         )
-        
         ucc.addUserScript_(script)
-        # search handler (created ONCE in init; always present!)
-        # REMOVE any conditional/creation logic here---just use what's in self._search_handler!
-        ucc.addScriptMessageHandler_name_(self._search_handler, "search")
-        
-        ucc.addScriptMessageHandler_name_(self._nav_delegate, "fullscreen")
-        
-        # Inject scripts
-        if is_home or js_enabled:
-            self._inject_core_scripts(ucc)
 
         cfg.setUserContentController_(ucc)
 
-        # ---- create webview LAST ----
-        frame = self.window.contentView().bounds()
-        web = WKWebView.alloc().initWithFrame_configuration_(frame, cfg)
+        web = WKWebView.alloc().initWithFrame_configuration_(NSMakeRect(0,0,800,600), cfg)
 
-        # UI delegate: use the one from init()
         web.setNavigationDelegate_(self._nav_delegate)
         web.setUIDelegate_(self._ui_delegate)
-        
-        print("UIDelegate:", web.UIDelegate())
-        
-        fullscreen_bridge = """
-        (function(){
 
-        function send(type){
-            if(window.webkit &&
-                window.webkit.messageHandlers &&
-                window.webkit.messageHandlers.fullscreen){
-                 window.webkit.messageHandlers.fullscreen.postMessage(type);
-            }
-        }
-
-        document.addEventListener("fullscreenchange", function(){
-            if(!document.fullscreenElement){
-                send("exit");
-            }
-        });
-
-        const orig = Element.prototype.requestFullscreen;
-
-        Element.prototype.requestFullscreen = function(){
-            send("enter");
-            if(orig) orig.call(this);
-        };
-
-        })();
-        """
-
-        script = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
-            fullscreen_bridge,
-            WKUserScriptInjectionTimeAtDocumentEnd,
-            True
-        )
-
-        ucc.addUserScript_(script)
-        
         return web, tab_store
         
     def webView_runJavaScriptAlertPanelWithMessage_initiatedByFrame_completionHandler_(
@@ -4400,7 +4405,7 @@ class Browser(NSObject):
         # ====== Ensure Navigation and UI Delegates are set ======
         if getattr(self, "_nav_delegate", None):
             wk.setNavigationDelegate_(self._nav_delegate)
-        if getattr(self, "ui_delegate", None):
+        if getattr(self, "_ui_delegate", None):
             wk.setUIDelegate_(self._ui_delegate)
 
         # Compute frame: subtract both toolbar and tabbar height!
@@ -4500,7 +4505,9 @@ class Browser(NSObject):
 
             # --- Build a fresh WebView configuration (App-Bound OFF) ---
             config = WKWebViewConfiguration.alloc().init()
-
+            
+            config.preferences().setValue_forKey_(True, "fullScreenEnabled")
+            
             # Security
             prefs = config.preferences()
             prefs.setValue_forKey_(False, "javaScriptCanOpenWindowsAutomatically")
@@ -4513,15 +4520,23 @@ class Browser(NSObject):
                 config.setLimitsNavigationsToAppBoundDomains_(False)
             except Exception:
                 pass
+                
+            wk = WKWebView.alloc().initWithFrame_configuration_(old.frame(), config)
 
+            if getattr(self, "_ui_delegate", None) is not None:
+                wk.setUIDelegate_(self._ui_delegate)
+
+            if getattr(self, "_nav_delegate", None) is not None:
+                wk.setNavigationDelegate_(self._nav_delegate)
+                
             # THEN create webview
-            self.webView = WKWebView.alloc().initWithFrame_configuration_(
-                self.bounds(), config
-            )
+            #self.webView = WKWebView.alloc().initWithFrame_configuration_(
+                #self.bounds(), config
+            #)
 
             # attach delegates
-            webview.setUIDelegate_(self.ui_delegate)
-            webview.setNavigationDelegate_(self)
+            #webview.setUIDelegate_(self.ui_delegate)
+            #webview.setNavigationDelegate_(self)
 
             # --- Set JS enabled or disabled ---
             prefs = WKPreferences.alloc().init()
@@ -4637,8 +4652,6 @@ class Browser(NSObject):
                 wk.loadRequest_(req)
             except Exception:
                 pass
-                
-    
                 
     def _add_tab(self, url: str = "", home: bool = False):
         self.loading_home = bool(home)
