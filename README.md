@@ -1,4 +1,4 @@
-# 🕶️ Darkelf Cocoa Browser v4.0.5
+# 🕶️ Darkelf Cocoa Browser v4.0.6
 
 ![License](https://img.shields.io/badge/license-LGPL--3.0-green)
 ![Python](https://img.shields.io/badge/python-3.11+-blue)
@@ -61,6 +61,7 @@ Designed for privacy-conscious daily browsing without Tor complexity.
 -   Wipe Nuke on Exit
 -   Per Tab Isolation
 -   Canvas Signatures change on Boot-up and Per-Tab! Not on Reload.
+-   Youtube FullScreen Is Fixed
 
 ------------------------------------------------------------------------
 
