@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.0.6 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.0.7 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -94,7 +94,7 @@ from WebKit import (
     WKPreferences, WKContentRuleListStore, WKWebsiteDataStore,
     WKNavigationActionPolicyAllow, WKNavigationActionPolicyCancel,
     WKNavigationResponsePolicyAllow, WKNavigationResponsePolicyDownload,
-    WKNavigationTypeReload, WKNavigationType,
+    WKNavigationTypeReload, WKNavigationType, WKUserScriptInjectionTimeAtDocumentStart,
     WKUserScriptInjectionTimeAtDocumentEnd
 )
 from Foundation import NSURL, NSURLRequest, NSMakeRect, NSNotificationCenter, NSDate, NSTimer, NSUserDefaults, NSRegistrationDomain,NSURLAuthenticationMethodServerTrust, NSURLSessionAuthChallengeUseCredential, NSURLCredential, NSURLSessionAuthChallengePerformDefaultHandling
@@ -4201,7 +4201,7 @@ class Browser(NSObject):
             _add(AUDIO_DEFENSE_JS)
             _add(BATTERY_DEFENSE_JS)
             _add(PERFORMANCE_DEFENSE_JS)
-            _add(CORE_JS)
+            #_add(CORE_JS)
             #_add(INDEXEDDB_DEFENSE_JS)
             #_add(STORAGE_DEFENSE_JS)
             
@@ -4326,13 +4326,7 @@ class Browser(NSObject):
         ucc.addScriptMessageHandler_name_(self._nav_delegate, "blobdownload")
         ucc.addScriptMessageHandler_name_(self._search_handler, "search")
 
-        # ---- inject core JS ----
-        script = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
-            CORE_JS,
-            WKUserScriptInjectionTimeAtDocumentEnd,
-            False
-        )
-        ucc.addUserScript_(script)
+        self._inject_core_scripts(ucc)
 
         cfg.setUserContentController_(ucc)
 
