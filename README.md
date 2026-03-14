@@ -41,7 +41,7 @@ Two editions are available:
 | MiniAI Monitoring | ✅ Enabled | ✅ Enabled |
 | Intended Audience | Everyday Users | Researchers / High-Risk |
 
-# 🟢 Darkelf Cocoa -- General Edition v4.0 Latest
+# 🟢 Darkelf Cocoa -- General Edition v4.0.5 Latest
 
 📄 `Darkelf_Cocoa_Browser_4.0.5.py`
 
