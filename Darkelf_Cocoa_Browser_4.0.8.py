@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.0.7 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.0.8 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -77,7 +77,8 @@ from typing import Dict, List, Set, Optional
 from urllib.parse import urlparse, unquote, quote_plus
 from objc import ObjCPointerWarning
 import shutil
-from Foundation import NSRunLoop, NSDate,  NSOperationQueue
+import tldextract
+from Foundation import NSRunLoop, NSDate,  NSOperationQueue, NSURLCache
 
 warnings.filterwarnings("ignore", category=ObjCPointerWarning)
 
@@ -90,7 +91,7 @@ from Cocoa import (
     NSToolbarFlexibleSpaceItemIdentifier, NSApplicationActivationPolicyRegular, NSOperationQueue
 )
 from WebKit import (
-    WKWebView, WKWebViewConfiguration, WKUserContentController, WKUserScript,
+    WKWebView, WKWebViewConfiguration, WKProcessPool, WKUserContentController, WKUserScript,
     WKPreferences, WKContentRuleListStore, WKWebsiteDataStore,
     WKNavigationActionPolicyAllow, WKNavigationActionPolicyCancel,
     WKNavigationResponsePolicyAllow, WKNavigationResponsePolicyDownload,
@@ -108,6 +109,100 @@ import time
 from Security import SecTrustEvaluateWithError, SecTrustGetCertificateAtIndex, SecCertificateCopySubjectSummary
 import tempfile
 
+# ============================================================
+# Darkelf First Party Isolation (FPI)
+# Memory-only domain + optional tab isolation
+# ============================================================
+
+class FirstPartyIsolation:
+
+    # domains allowed to share storage for login flows
+    AUTH_WHITELIST = {
+        "accounts.google.com",
+        "login.microsoftonline.com",
+        "appleid.apple.com",
+        "github.com"
+    }
+
+    def __init__(self, tab_isolation=False):
+        """
+        tab_isolation:
+            False -> domain-only isolation
+            True  -> domain + tab isolation
+        """
+        self.tab_isolation = tab_isolation
+        self._stores = {}
+
+    # --------------------------------------------------------
+    # Extract first-party domain (eTLD+1 approximation)
+    # --------------------------------------------------------
+
+    def _domain_key(self, url):
+
+        try:
+            host = urlparse(url).hostname or ""
+        except Exception:
+            host = ""
+            
+        host = host.lower()
+        host = host.split(":")[0]
+        
+        if not host:
+            return "unknown"
+
+        if host in self.AUTH_WHITELIST:
+            return host
+
+        try:
+            ext = tldextract.extract(host)
+
+            if ext.domain and ext.suffix:
+                return f"{ext.domain}.{ext.suffix}"
+
+        except Exception:
+            pass
+
+        return host
+
+    # --------------------------------------------------------
+    # Build isolation key
+    # --------------------------------------------------------
+
+    def _key(self, url, tab_uid=None, nonce=None):
+
+        domain = self._domain_key(url)
+
+        if self.tab_isolation and tab_uid is not None:
+            return f"{domain}@tab{tab_uid}-{nonce}"
+
+        return domain
+
+    # --------------------------------------------------------
+    # Get storage container
+    # --------------------------------------------------------
+
+    def store_for(self, url, tab_uid=None):
+
+        key = self._key(url, tab_uid)
+        
+        print("[FPI] Using store:", key)
+        
+        if key not in self._stores:
+
+            # IMPORTANT: non-persistent memory store
+            store = WKWebsiteDataStore.nonPersistentDataStore()
+
+            self._stores[key] = store
+
+        return self._stores[key]
+
+    # --------------------------------------------------------
+    # Clear all stores (browser shutdown)
+    # --------------------------------------------------------
+
+    def clear(self):
+
+        self._stores.clear()
 def _safe_download_dir():
     desktop = os.path.join(os.path.expanduser("~"), "Desktop")
     folder = os.path.join(desktop, "Darkelf Temp Folder")
@@ -2320,9 +2415,65 @@ CORE_JS = r'''
 
         Object.defineProperty(document, "fullscreenEnabled", {
             get: () => true,
-        configurable: true
+            configurable: true
         });
+
     } catch(e){}
+
+    // ==========================================
+    // 0️⃣ Browser Identity Hardening
+    // ==========================================
+    try {
+
+        // Hide webdriver
+        Object.defineProperty(navigator, "webdriver", {
+            get: () => undefined,
+            configurable: true
+        });
+
+        // Normalize vendor (Safari/WebKit style)
+        Object.defineProperty(navigator, "vendor", {
+            get: () => "Apple Computer, Inc.",
+            configurable: true
+        });
+
+        // Hide standalone property (WKWebView detection vector)
+        try {
+            delete navigator.standalone;
+        } catch(e) {}
+
+        // Normalize plugins list
+        if (navigator.plugins && navigator.plugins.length === 0) {
+
+            const fakePlugin = {
+                name: "WebKit built-in PDF",
+                filename: "internal-pdf-viewer",
+                description: "Portable Document Format"
+            };
+
+            Object.defineProperty(navigator, "plugins", {
+                get: () => [fakePlugin],
+                configurable: true
+            });
+        }
+
+        // Normalize mimeTypes
+        if (navigator.mimeTypes && navigator.mimeTypes.length === 0) {
+
+            const fakeMime = {
+                type: "application/pdf",
+                suffixes: "pdf",
+                description: "Portable Document Format"
+            };
+
+            Object.defineProperty(navigator, "mimeTypes", {
+                get: () => [fakeMime],
+                configurable: true
+            });
+        }
+
+    } catch(e){}
+
 
     // ==========================================
     // 1️⃣ Network Monitoring (MiniAI)
@@ -2384,7 +2535,6 @@ CORE_JS = r'''
 
     // ==========================================
     // 4️⃣ DOM Resource Watcher
-    // Captures <script src>, <img>, <iframe>, etc.
     // ==========================================
     try {
 
@@ -2485,7 +2635,7 @@ CORE_JS = r'''
 
 
     // ==========================================
-    // 7️⃣ WebSocket Monitor (log instead of break)
+    // 7️⃣ WebSocket Monitor
     // ==========================================
     try {
 
@@ -2576,6 +2726,8 @@ class HoverButton(NSButton):
 class Tab:
     view: WKWebView
     data_store: WKWebsiteDataStore
+    tab_uid: int = None
+    container_nonce: str = None
     url: str = ""
     host: str = "new"
     canvas_seed: int = None
@@ -2674,7 +2826,9 @@ class Browser(NSObject):
         self = objc.super(Browser, self).init()
         if self is None:
             return None
-
+            
+        self.fpi = FirstPartyIsolation(tab_isolation=True)
+        
         # ---- Usual field setup ----
         self.cookies_enabled = False
         self.js_enabled = True
@@ -2683,7 +2837,10 @@ class Browser(NSObject):
         self.tab_close_btns = []
         self.active = -1
         self._window = []
-
+        
+        self._containers = {}
+        
+        self._tab_uid_counter = 0
         # ---- 1. Create window ----
         self.window = self._make_window()
         
@@ -2696,7 +2853,7 @@ class Browser(NSObject):
         self._nav_delegate    = _NavDelegate.alloc().initWithOwner_(self)
         self._ui_delegate     = _UIDelegate.alloc().initWithOwner_(self)
         self._search_handler  = SearchHandler.alloc().initWithOwner_(self)
-
+                
         self._strong_refs.extend([
             self._window_delegate,
             self._nav_delegate,
@@ -2738,7 +2895,29 @@ class Browser(NSObject):
             pass
 
         return self
-                    
+        
+    def _cleanup_unused_containers(self):
+
+        try:
+
+            active_keys = set()
+
+            for i, tab in enumerate(self.tabs):
+
+                try:
+                    key = self.fpi._key(tab.url or HOME_URL, tab_uid=i)
+                    active_keys.add(key)
+                except Exception:
+                    pass
+
+            for key in list(self._containers.keys()):
+
+                if key not in active_keys:
+                    del self._containers[key]
+
+        except Exception:
+            pass
+            
     @objc.IBAction
     def refreshMiniAI_(self, timer):
 
@@ -2770,7 +2949,7 @@ class Browser(NSObject):
 
             report_html = self._build_threat_report_html()
 
-            wk, store = self._new_wk()
+            wk, store = self._new_wk(container_nonce=secrets.token_hex(4))
 
             wk.setNavigationDelegate_(self._nav_delegate)
             
@@ -3543,7 +3722,8 @@ class Browser(NSObject):
             self.active = -1
 
         self._update_tab_buttons()
-
+        self._cleanup_unused_containers()
+        
     def _layout_topbars(self):
         bounds = self.window.contentView().bounds()
         w = bounds.size.width
@@ -4201,7 +4381,7 @@ class Browser(NSObject):
             _add(AUDIO_DEFENSE_JS)
             _add(BATTERY_DEFENSE_JS)
             _add(PERFORMANCE_DEFENSE_JS)
-            #_add(CORE_JS)
+            _add(CORE_JS)
             #_add(INDEXEDDB_DEFENSE_JS)
             #_add(STORAGE_DEFENSE_JS)
             
@@ -4288,19 +4468,53 @@ class Browser(NSObject):
         except Exception as e:
             print(f"[Inject] Core script injection failed: {e}")
             
-    def _new_wk(self):
+    def _new_wk(self, container_nonce):
 
         is_home = bool(getattr(self, "loading_home", False))
 
-        # ---- configuration ----
         cfg = WKWebViewConfiguration.alloc().init()
 
-        tab_store = WKWebsiteDataStore.nonPersistentDataStore()
-        cfg.setWebsiteDataStore_(tab_store)
+        # ---------------------------
+        # First-Party Isolation
+        # ---------------------------
+        url = getattr(self, "current_url_for_fpi", HOME_URL)
 
+        tab_uid = secrets.token_hex(4)
+
+        key = self.fpi._key(url, tab_uid=tab_uid, nonce=container_nonce)
+
+        if key not in self._containers:
+
+            # storage container (cookies, indexedDB, etc)
+            store = self.fpi.store_for(url, tab_uid=len(self.tabs))
+
+            # isolated WebKit network process
+            pool = WKProcessPool.alloc().init()
+
+            # memory-only HTTP cache
+            cache = NSURLCache.alloc().initWithMemoryCapacity_diskCapacity_directoryURL_(
+                16 * 1024 * 1024,   # 16MB memory cache
+                0,                  # disk cache disabled
+                None
+            )
+
+            if cache.diskCapacity() != 0:
+                raise RuntimeError("Darkelf security failure: disk cache detected")
+
+            # apply cache to container
+            NSURLCache.setSharedURLCache_(cache)
+
+            self._containers[key] = (store, pool)
+
+        store, pool = self._containers[key]
+
+        # apply container isolation
+        cfg.setWebsiteDataStore_(store)
+        cfg.setProcessPool_(pool)
+        
         cfg.setMediaTypesRequiringUserActionForPlayback_(0)
 
-        if tab_store.isPersistent():
+        if store.isPersistent():
             raise RuntimeError("Darkelf security failure: persistent data store detected")
 
         js_enabled = True if is_home else bool(getattr(self, "js_enabled", True))
@@ -4335,7 +4549,7 @@ class Browser(NSObject):
         web.setNavigationDelegate_(self._nav_delegate)
         web.setUIDelegate_(self._ui_delegate)
 
-        return web, tab_store
+        return web, store
         
     def webView_runJavaScriptAlertPanelWithMessage_initiatedByFrame_completionHandler_(
         self, webView, message, frame, completionHandler
@@ -4515,6 +4729,16 @@ class Browser(NSObject):
             except Exception:
                 pass
                 
+            config = WKWebViewConfiguration.alloc().init()
+
+            store = self.fpi.store_for(url, tab_uid=tab_index)
+
+            config.setWebsiteDataStore_(store)
+
+            webview = WKWebView.alloc().initWithFrame_configuration_(
+                frame,
+                config
+            )
             wk = WKWebView.alloc().initWithFrame_configuration_(old.frame(), config)
 
             if getattr(self, "_ui_delegate", None) is not None:
@@ -4653,10 +4877,17 @@ class Browser(NSObject):
         # 🔥 Generate seed FIRST
         seed = secrets.randbits(32) & 0xFFFFFFFF
         self._current_canvas_seed = seed   # temporary storage
-
+        
+        container_nonce = secrets.token_hex(4)
+        
+        self._tab_uid_counter += 1
+        tab_uid = self._tab_uid_counter
+        
         print(f"[AddTab] Seed = {seed}")
+        
+        self.current_url_for_fpi = url if url else HOME_URL
 
-        wk, store = self._new_wk()
+        wk, store = self._new_wk(container_nonce)
 
         wk.setNavigationDelegate_(self._nav_delegate)
         
@@ -4681,7 +4912,9 @@ class Browser(NSObject):
             data_store=store,
             url="",
             host="new",
-            canvas_seed=seed
+            canvas_seed=seed,
+            container_nonce=container_nonce,
+            tab_uid=tab_uid
         )
 
         self.tabs.append(tab)
@@ -4839,37 +5072,49 @@ class Browser(NSObject):
         self._sync_addr()
                 
     def actCloseTabIndex_(self, sender):
+
         try:
             idx = int(sender.tag())
         except Exception:
             return
 
-        print("Close tab index:", idx)  # Debug
+        print("Close tab index:", idx)
 
         if not (0 <= idx < len(self.tabs)):
             return
 
         try:
             view = self.tabs[idx].view
-            if view and view.superview():
-                view.removeFromSuperview()
-        except Exception:
-            pass
 
+            if view:
+                # 🔥 FULL teardown (kills YouTube / media pipelines)
+                self._teardown_webview(view)
+
+        except Exception as e:
+            print("[CloseTab] teardown error:", e)
+
+        # remove tab
         del self.tabs[idx]
 
-        # If no tabs left, create homepage
+        # if no tabs left create homepage
         if not self.tabs:
             self._add_tab(home=True)
             return
 
+        # adjust active index
         if idx == self.active:
             self.active = min(idx, len(self.tabs) - 1)
         elif idx < self.active:
             self.active -= 1
 
+        # mount next tab
         wk = self.tabs[self.active].view
-        self._mount_webview(wk)
+
+        try:
+            self._mount_webview(wk)
+        except Exception as e:
+            print("[CloseTab] mount error:", e)
+
         self._update_tab_buttons()
         self._sync_addr()
 
@@ -5288,7 +5533,8 @@ def main():
         print("[Startup] ✅ Rules ready - initializing browser")
     
     app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
-
+    
+    NSURLCache.setSharedURLCache_(None)
     delegate = AppDelegate.alloc().init()
     app.setDelegate_(delegate)
 
