@@ -1,4 +1,4 @@
-# 🕶️ Darkelf Cocoa Browser v4.0.8
+# 🕶️ Darkelf Cocoa Browser v4.0.9
 
 ![License](https://img.shields.io/badge/license-LGPL--3.0-green)
 ![Python](https://img.shields.io/badge/python-3.11+-blue)
@@ -41,9 +41,9 @@ Two editions are available:
 | MiniAI Monitoring | ✅ Enabled | ✅ Enabled |
 | Intended Audience | Everyday Users | Researchers / High-Risk |
 
-# 🟢 Darkelf Cocoa -- General Edition v4.0.8 Latest
+# 🟢 Darkelf Cocoa -- General Edition v4.0.9 Latest
 
-📄 `Darkelf_Cocoa_Browser_4.0.8.py`
+📄 `Darkelf_Cocoa_Browser_4.0.9.py`
 
 Designed for privacy-conscious daily browsing without Tor complexity.
 
