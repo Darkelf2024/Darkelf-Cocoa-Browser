@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.0.9 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.0.10 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -6142,6 +6142,17 @@ class Browser(NSObject):
         except Exception:
             pass
             
+    def wipe_webkit_memory():
+        store = WKWebsiteDataStore.nonPersistentDataStore()
+
+        types = WKWebsiteDataStore.allWebsiteDataTypes()
+
+        store.removeDataOfTypes_modifiedSince_completionHandler_(
+            types,
+            0,
+            lambda: None
+        )
+        
     def actSnapshot_(self, sender):
         try:
             wk = self.tabs[self.active].view
@@ -6230,6 +6241,9 @@ def main():
 
     app.run()
 
+    wipe_webkit_memory()
 
+    nav_delegate.wipe_download_traces()
+    
 if __name__ == "__main__":
     main()
