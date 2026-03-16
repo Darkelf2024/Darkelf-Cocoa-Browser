@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.0.8 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.0.9 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -109,6 +109,175 @@ import time
 from Security import SecTrustEvaluateWithError, SecTrustGetCertificateAtIndex, SecCertificateCopySubjectSummary
 import tempfile
 
+# ---- Darkelf logging control ----
+
+LOG_LEVEL = 1
+# 0 = silent
+# 1 = important only
+# 2 = verbose debug
+
+def log(level, *msg):
+    if level <= LOG_LEVEL:
+        print(*msg)
+        
+class DarkelfNetworkPolicy:
+
+    def __init__(self, browser):
+        self.browser = browser
+
+    def inspect(self, url, nav_type):
+
+        url = str(url)
+
+        # MiniAI inspection
+        if hasattr(self.browser, "mini_ai"):
+            try:
+                self.browser.mini_ai.monitor_network(url)
+            except Exception:
+                pass
+
+        # tracker blocking
+        blocked = [
+            "doubleclick.net",
+            "google-analytics.com",
+            "facebook.net",
+            "facebook.com/tr",
+            "googletagmanager.com"
+        ]
+
+        for domain in blocked:
+            if domain in url:
+                return "block"
+
+        # enforce HTTPS
+        if url.startswith("http://"):
+            return ("redirect", url.replace("http://", "https://", 1))
+
+        return "allow"
+        
+class DownloadProgressView(NSView):
+
+    def initWithFrame_(self, frame):
+        self = objc.super(DownloadProgressView, self).initWithFrame_(frame)
+        if self is None:
+            return None
+
+        self.setWantsLayer_(True)
+        self.layer().setCornerRadius_(12)
+        self.layer().setBackgroundColor_(
+            NSColor.colorWithCalibratedRed_green_blue_alpha_(0.04,0.05,0.07,1).CGColor()
+        )
+
+        # filename
+        self.label = NSTextField.alloc().initWithFrame_(NSMakeRect(15, 40, 400, 20))
+        self.label.setBezeled_(False)
+        self.label.setEditable_(False)
+        self.label.setDrawsBackground_(False)
+        self.label.setTextColor_(NSColor.whiteColor())
+        self.label.setFont_(NSFont.systemFontOfSize_(13))
+        self.addSubview_(self.label)
+
+        # progress track
+        self.progressTrack = NSView.alloc().initWithFrame_(NSMakeRect(15, 22, 400, 6))
+        self.progressTrack.setWantsLayer_(True)
+
+        self.progressTrack.layer().setCornerRadius_(3)
+        self.progressTrack.layer().setBackgroundColor_(
+            NSColor.colorWithCalibratedRed_green_blue_alpha_(0.08,0.09,0.12,1).CGColor()
+        )
+
+        self.addSubview_(self.progressTrack)
+
+        # progress fill
+        self.progressFill = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 0, 6))
+        self.progressFill.setWantsLayer_(True)
+
+        green = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.20,0.78,0.35,1)
+
+        self.progressFill.layer().setCornerRadius_(3)
+        self.progressFill.layer().setBackgroundColor_(green.CGColor())
+
+        # glow
+        self.progressFill.layer().setShadowColor_(green.CGColor())
+        self.progressFill.layer().setShadowOpacity_(0.7)
+        self.progressFill.layer().setShadowRadius_(6)
+        self.progressFill.layer().setShadowOffset_((0,0))
+
+        self.progressTrack.addSubview_(self.progressFill)
+
+        # speed label
+        self.speed = NSTextField.alloc().initWithFrame_(NSMakeRect(15, 2, 200, 15))
+        self.speed.setBezeled_(False)
+        self.speed.setEditable_(False)
+        self.speed.setDrawsBackground_(False)
+        self.speed.setTextColor_(NSColor.systemGrayColor())
+        self.speed.setFont_(NSFont.systemFontOfSize_(11))
+        self.addSubview_(self.speed)
+
+        # cancel button
+        self.cancel = NSButton.alloc().initWithFrame_(NSMakeRect(420, 18, 70, 22))
+        self.cancel.setTitle_("Cancel")
+        self.cancel.setBezelStyle_(1)
+        self.addSubview_(self.cancel)
+        self.cancel.setTarget_(self)
+        self.cancel.setAction_("cancelDownload:")
+
+        return self
+
+
+    def updateProgress_(self, percent):
+
+        try:
+            percent = max(0.0, min(100.0, float(percent)))
+
+            trackWidth = self.progressTrack.bounds().size.width
+            newWidth = trackWidth * (percent / 100.0)
+
+            frame = self.progressFill.frame()
+            frame.size.width = newWidth
+
+            def animate(ctx):
+                ctx.setDuration_(0.12)
+                self.progressFill.animator().setFrame_(frame)
+
+            NSAnimationContext.runAnimationGroup_completionHandler_(
+                animate,
+                None
+            )
+
+        except Exception as e:
+            print("[DownloadUI progress error]", e)
+
+    def setFilename_(self, name):
+        self.label.setStringValue_(name)
+
+
+    def setSpeed_(self, speed):
+        self.speed.setStringValue_(speed)
+
+
+    def cancelDownload_(self, sender):
+
+        try:
+            if hasattr(self, "download") and self.download:
+
+                if hasattr(self.download, "cancel"):
+                    self.download.cancel()
+                elif hasattr(self.download, "cancel_"):
+                    self.download.cancel_(None)
+
+                try:
+                    self.download.setDelegate_(None)
+                except:
+                    pass
+
+                print("[Darkelf] Download cancelled")
+
+        except Exception as e:
+            print("Cancel error:", e)
+
+        self.setHidden_(True)
+        
 # ============================================================
 # Darkelf First Party Isolation (FPI)
 # Memory-only domain + optional tab isolation
@@ -249,7 +418,11 @@ class DarkelfMiniAISentinel:
         self.vuln_scanner_attempts = 0
         self.bruteforce_attempts = 0
         self.automation_attempts = 0
-
+        self.total_requests = 0
+        self.static_requests = 0
+        self.dynamic_requests = 0
+        self.blocked_requests = 0
+        
         self.login_attempt_tracker = {}
         self.scraper_tracker = {}
 
@@ -316,9 +489,10 @@ class DarkelfMiniAISentinel:
 
         now = time.time()
 
-        # 🔧 throttle heavy request bursts (GitHub / SPA pages)
+        # throttle heavy bursts (SPA pages)
         if now - self._last_scan_time < 0.005:
             return
+
         self._last_scan_time = now
 
         normalized = self._normalize_url(url)
@@ -326,16 +500,19 @@ class DarkelfMiniAISentinel:
         if not normalized:
             return
 
+        # ---- stats ----
+        self.total_requests += 1
+
         headers = headers or {}
 
         try:
             host = urlparse(normalized).hostname or ""
-            # determine first-party domain
-            if not self.first_party_domain and host:
-                self.first_party_domain = host
-            
         except Exception:
             host = ""
+    
+        # determine first-party domain
+        if not self.first_party_domain and host:
+            self.first_party_domain = host
 
         # safe hosts
         SAFE_HOSTS = (
@@ -349,8 +526,12 @@ class DarkelfMiniAISentinel:
             if host.endswith(safe):
                 return
 
+        # track domain early
+        if host:
+            self.unique_domains.add(host)
+
         # --------------------------------------------------
-        # Skip static assets
+        # static asset detection
         # --------------------------------------------------
 
         STATIC_EXT = (
@@ -359,23 +540,49 @@ class DarkelfMiniAISentinel:
             ".map",".mp4",".webm",".mp3",".ogg"
         )
 
-        if normalized.split("?")[0].endswith(STATIC_EXT):
+        is_static = normalized.split("?")[0].endswith(STATIC_EXT)
 
-            try:
-                host = urlparse(normalized).hostname or ""
-                for domain in self.high_risk_domains:
-                    if host == domain or host.endswith("." + domain):
-                        break
-                else:
-                    return
-            except Exception:
-                return
-                
-        # track domain
-        if host:
-            self.unique_domains.add(host)
+        # ---- stats ----
+        if is_static:
+            self.static_requests += 1
+        else:
+            self.dynamic_requests += 1
 
+        # --------------------------------------------------
+        # build event object
+        # --------------------------------------------------
+
+        event = {
+            "url": normalized,
+            "timestamp": now,
+            "datetime": datetime.now().isoformat(),
+            "threats": [],
+            "risk_level": "low",
+            "static": is_static
+        }
+
+        # --------------------------------------------------
+        # lightweight static analysis
+        # --------------------------------------------------
+
+        if is_static:
+
+            for domain in self.high_risk_domains:
+
+                if host == domain or host.endswith("." + domain):
+
+                    event["threats"].append("tracker")
+                    event["risk_level"] = "medium"
+                    self.tracker_hits += 1
+                    break
+
+            self.events.append(event)
+            return
+
+        # --------------------------------------------------
         # lockdown logic
+        # --------------------------------------------------
+
         if self.lockdown_active:
 
             self._maybe_auto_unlock(now)
@@ -391,15 +598,10 @@ class DarkelfMiniAISentinel:
 
                 return
 
-        event = {
-            "url": normalized,
-            "timestamp": now,
-            "datetime": datetime.now().isoformat(),
-            "threats": [],
-            "risk_level": "low"
-        }
-
+        # --------------------------------------------------
         # detection engines
+        # --------------------------------------------------
+
         self._detect_intrusion(normalized, event)
         self._detect_fingerprinting(normalized, headers, event)
         self._check_domain_reputation(normalized, event)
@@ -411,13 +613,16 @@ class DarkelfMiniAISentinel:
         if event["risk_level"] in ("high","critical"):
             self._log_threat(event)
 
-        # 🔧 throttle UI lockdown checks
+        # --------------------------------------------------
+        # UI lockdown checks
+        # --------------------------------------------------
+
         if now - self._last_lockdown_eval > 1.0:
             self._last_lockdown_eval = now
+
             NSOperationQueue.mainQueue().addOperationWithBlock_(
                 self._evaluate_lockdown
             )
-
 
     # --------------------------------------------------
     # DETECT INTRUSION
@@ -710,10 +915,10 @@ class DarkelfMiniAISentinel:
         threat_score = (
             self.tracker_hits +
             self.suspicious_hits +
-            self.fingerprint_attempts*2 +
-            self.intrusion_attempts*4 +
-            self.malware_hits*6 +
-            self.exploit_attempts*6 +
+            self.fingerprint_attempts * 2 +
+            self.intrusion_attempts * 4 +
+            self.malware_hits * 6 +
+            self.exploit_attempts * 6 +
             self.http_blocks_attempts
         )
 
@@ -721,9 +926,18 @@ class DarkelfMiniAISentinel:
 
             "uptime_seconds": uptime,
 
-            "total_events": len(self.events),
+            # -----------------------------
+            # Network Activity (NEW)
+            # -----------------------------
+            "network": {
+                "total_requests": getattr(self, "total_requests", 0),
+                "dynamic_requests": getattr(self, "dynamic_requests", 0),
+                "static_requests": getattr(self, "static_requests", 0),
+                "unique_domains": len(self.unique_domains)
+            },
 
-            "unique_domains": len(self.unique_domains),
+            # existing event counter
+            "total_events": len(self.events),
 
             "threat_score": threat_score,
 
@@ -733,6 +947,9 @@ class DarkelfMiniAISentinel:
                 "triggered_at": self.lockdown_triggered_at,
             },
 
+            # -----------------------------
+            # Threat Counters
+            # -----------------------------
             "threats": {
                 "trackers": self.tracker_hits,
                 "suspicious": self.suspicious_hits,
@@ -742,7 +959,10 @@ class DarkelfMiniAISentinel:
                 "fingerprinting": self.fingerprint_attempts,
                 "http_blocks": self.http_blocks_attempts,
             },
-            
+
+            # -----------------------------
+            # IDS Detection
+            # -----------------------------
             "ids": {
                 "scrapers": self.scraper_attempts,
                 "credential_stuffing": self.credential_stuffing_attempts,
@@ -1720,7 +1940,17 @@ class _NavDelegate(NSObject):
 
             browser._update_tab_buttons()
             browser._sync_addr()
+            
+            # --- WebKit process recycling trigger ---
+            try:
+                if hasattr(browser, "page_load_count"):
+                    browser.page_load_count += 1
 
+                    if browser.page_load_count >= 100:
+                        browser.recycle_web_process()
+            except Exception as e:
+                print("[Darkelf] recycle trigger error:", e)
+                
             color = NSColor.whiteColor()
 
             if url:
@@ -1756,27 +1986,39 @@ class _NavDelegate(NSObject):
             # -------------------------
             if message.name() == "netlog":
 
-                body = message.body()
+                try:
+    
+                    body = message.body()
 
-                if not isinstance(body, dict):
-                    return
+                    if not isinstance(body, dict):
+                        return
 
-                owner = getattr(self, "owner", None)
-                if not owner:
-                    return
+                    owner = getattr(self, "owner", None)
+                    if not owner:
+                        return
 
-                url = str(body.get("url", ""))
-                headers = body.get("headers", {}) or {}
+                    url = str(body.get("url", "")).strip()
 
-                # your MiniAI monitor can run here
-                if hasattr(owner, "mini_ai"):
-                    owner.mini_ai.monitor_network(url, headers)
+                    if not url:
+                        return
+
+                    req_type = str(body.get("type", "unknown"))
+                    headers = body.get("headers", {}) or {}
+
+                    # structured metadata for MiniAI
+                    meta = {
+                        "type": req_type,
+                        "source": "js",
+                        "headers": headers
+                    }
+
+                    if hasattr(owner, "mini_ai"):
+                        owner.mini_ai.monitor_network(url, meta)
+
+                except Exception as e:
+                    print("[Darkelf netlog error]", e)
 
                 return
-
-
-        except Exception as e:
-            print("[NavDelegate ScriptMessage] Error:", e)
             
             # -------------------------
             # BLOB DOWNLOAD HANDLER
@@ -1842,7 +2084,7 @@ class _NavDelegate(NSObject):
 
             # If WebKit cannot render this MIME type → download
             if not response.canShowMIMEType():
-                print("[Darkelf] MIME not displayable → download:", mime)
+                log(2, "[Download] MIME:", mime)
                 decisionHandler(WKNavigationResponsePolicyDownload)
                 return
 
@@ -1854,15 +2096,70 @@ class _NavDelegate(NSObject):
             decisionHandler(WKNavigationResponsePolicyAllow)
             
     def webView_navigationResponse_didBecomeDownload_(self, webView, response, download):
-
         try:
             download.setDelegate_(self)
             print("[Darkelf] Download started")
 
+            # --- get filename safely ---
+            filename = "download"
+            try:
+                url = response.response().URL()
+                if url:
+                    filename = url.lastPathComponent() or "download"
+            except Exception:
+                pass
+
+            # --- init tracking (do this before UI updates) ---
+            self.start_time = time.time()
+            self.bytes_received = 0
+            self.expected = 0
+            self._download_path = None
+            self._download_last_size = 0
+
+            # --- show progress UI (MAIN THREAD) ---
+            def _ui():
+                try:
+                    ui = getattr(self.owner, "download_ui", None)
+                    if not ui:
+                        return
+
+                    ui.download = download
+                    ui.nav_delegate = self  # so Cancel can stop polling etc.
+
+                    parent = ui.superview()
+                    if parent:
+                        try:
+                            ui.removeFromSuperview()
+                        except Exception:
+                            pass
+                        parent.addSubview_(ui)
+
+                    ui.setHidden_(False)
+                    ui.setFilename_(filename)
+
+                    # start with indeterminate until we learn expected size
+                    try:
+                        if hasattr(ui, "setIndeterminate_"):
+                            ui.setIndeterminate_(True)
+                    except Exception:
+                        pass
+
+                    ui.updateProgress_(0)
+                except Exception as e:
+                    print("[DownloadUI] error:", e)
+
+            NSOperationQueue.mainQueue().addOperationWithBlock_(_ui)
+
+            # start file-size polling fallback (works even if WebKit progress callbacks never fire)
+            try:
+                if hasattr(self, "_start_download_poll_timer"):
+                    self._start_download_poll_timer()
+            except Exception as e:
+                print("[Download poll start] error:", e)
+
         except Exception as e:
             print("Download delegate error:", e)
-
-
+            
     def download_decideDestinationUsingResponse_suggestedFilename_completionHandler_(
             self, download, response, filename, completionHandler):
 
@@ -1882,13 +2179,106 @@ class _NavDelegate(NSObject):
         except Exception as e:
             print("Download error:", e)
             completionHandler(None)
+            
+    def download_didReceiveData_(self, download, length):
+        try:
+            self.bytes_received += length
 
-    def download_didFinish_(self, download, finished):
+            elapsed = max(time.time() - getattr(self, "start_time", time.time()), 0.1)
+            speed = self.bytes_received / elapsed
+            mb = speed / 1024 / 1024
+
+            expected = getattr(self, "expected", 0) or 0
+            if expected > 0:
+                percent = min(100.0, (self.bytes_received / expected) * 100.0)
+            else:
+                # fallback "spinner-like" progress if unknown size
+                mb_downloaded = self.bytes_received / 1024 / 1024
+                percent = (mb_downloaded % 100)
+
+            def _ui():
+                try:
+                    ui = getattr(self.owner, "download_ui", None)
+                    if not ui:
+                        return
+                    ui.setSpeed_(f"{mb:.2f} MB/s")
+                    ui.updateProgress_(percent)
+                except Exception:
+                    pass
+
+            NSOperationQueue.mainQueue().addOperationWithBlock_(_ui)
+
+        except Exception as e:
+            print("[Download progress error]", e)
+            
+    def download_didReceiveResponse_(self, download, response):
+
+        try:
+            self.expected = response.expectedContentLength()
+        except:
+            self.expected = 0
+        
+    def downloadDidFinish_(self, download):
+
         try:
             print("[Darkelf] Download finished")
-        except Exception:
-            pass
 
+            ui = getattr(self.owner, "download_ui", None)
+            if not ui:
+                return
+
+            # show full progress
+            try:
+                ui.updateProgress_(100)
+            except Exception:
+                pass
+
+            # auto hide after delay (main thread)
+            def hide():
+                try:
+                    ui.setHidden_(True)
+                except Exception:
+                    pass
+
+            NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+                1.5,          # delay before hiding
+                ui,
+                "setHidden:",
+                True,
+                False
+            )
+
+        except Exception as e:
+            print("[Download finish error]", e)
+            
+    def download_didWriteData_totalBytesWritten_totalBytesExpectedToWrite_(
+        self, download, bytesWritten, totalBytesWritten, totalBytesExpectedToWrite
+    ):
+        try:
+            self.bytes_received = int(totalBytesWritten or 0)
+            self.expected = int(totalBytesExpectedToWrite or 0)
+
+            elapsed = max(time.time() - getattr(self, "start_time", time.time()), 0.1)
+            speed = (bytesWritten or 0) / max(0.1, 0.25)  # short-window speed estimate (optional)
+            mb = speed / 1024 / 1024
+
+            if self.expected > 0:
+                percent = min(100.0, (self.bytes_received / self.expected) * 100.0)
+            else:
+                percent = (self.bytes_received / 1024 / 1024) % 100
+
+            def _ui():
+                ui = getattr(self.owner, "download_ui", None)
+                if not ui:
+                    return
+                ui.setSpeed_(f"{mb:.2f} MB/s")
+                ui.updateProgress_(percent)
+
+            NSOperationQueue.mainQueue().addOperationWithBlock_(_ui)
+
+        except Exception as e:
+            print("[Download didWriteData error]", e)
+            
     def download_didFailWithError_resumeData_(self, download, error, resumeData):
         try:
             print("[Darkelf] Download failed:", error)
@@ -1913,11 +2303,11 @@ class _NavDelegate(NSObject):
             print("Download wipe error:", e)
             
     # -------------------------------------------------
-    # Navigation Policy
+    # Navigation Policy (Darkelf Network Interception)
     # -------------------------------------------------
     def webView_decidePolicyForNavigationAction_decisionHandler_(
             self, webView, navAction, decisionHandler):
-    
+
         try:
 
             if not navAction or not navAction.request():
@@ -1925,80 +2315,116 @@ class _NavDelegate(NSObject):
                 return
 
             req = navAction.request()
-            
-            # -------------------------
-            # MiniAI native traffic monitor
-            # -------------------------
+            url_obj = req.URL()
+
+            if not url_obj:
+                decisionHandler(WKNavigationActionPolicyAllow)
+                return
+
+            url_str = str(url_obj.absoluteString() or "").strip()
+            scheme = str(url_obj.scheme() or "").lower()
+            host = str(url_obj.host() or "")
+
+            nav_type = navAction.navigationType()
+
+            owner = getattr(self, "owner", None)
+
+            # -------------------------------------------------
+            # MiniAI traffic monitoring
+            # -------------------------------------------------
             try:
-                owner = getattr(self, "owner", None)
                 if owner and hasattr(owner, "mini_ai"):
-                    url_obj = req.URL()
-                    if url_obj:
-                        owner.mini_ai.monitor_network(str(url_obj.absoluteString()), {})
+                    owner.mini_ai.monitor_network(url_str, {
+                        "type": nav_type,
+                        "host": host,
+                        "scheme": scheme
+                    })
             except Exception:
                 pass
-                
-            url = req.URL()
 
-            if not url:
-                decisionHandler(WKNavigationActionPolicyAllow)
-                return
-
-            url_str = str(url.absoluteString() or "").strip()
-            scheme = str(url.scheme() or "").lower()
-            host = str(url.host() or "")
-
-            # invalid http/https
+            # -------------------------------------------------
+            # Invalid URLs
+            # -------------------------------------------------
             if scheme in ("http", "https") and not host:
-                decisionHandler(WKNavigationActionPolicyAllow)
+                decisionHandler(WKNavigationActionPolicyCancel)
                 return
 
-            # allow blob
+            # -------------------------------------------------
+            # Allow blob URLs (downloads, media, etc)
+            # -------------------------------------------------
             if scheme == "blob":
                 decisionHandler(WKNavigationActionPolicyAllow)
                 return
-                
-            nav_type = navAction.navigationType()
 
-            # Reload of internal report page
-            if nav_type == WKNavigationTypeReload and url_str == "darkelf://report":
-
-                owner = getattr(self, "owner", None)
-
-                if owner and hasattr(owner, "mini_ai"):
-                    html = owner._build_threat_report_html()
-
-                    webView.loadHTMLString_baseURL_(
-                        html,
-                        NSURL.URLWithString_("darkelf://report")
-                    )
-
-                decisionHandler(WKNavigationActionPolicyCancel)
-                return
-                
-            # allow internal darkelf pages
+            # -------------------------------------------------
+            # Internal Darkelf pages
+            # -------------------------------------------------
             if scheme == "darkelf":
+    
+                # reload threat report
+                if nav_type == WKNavigationTypeReload and url_str == "darkelf://report":
+
+                    if owner and hasattr(owner, "mini_ai"):
+
+                        html = owner._build_threat_report_html()
+
+                        webView.loadHTMLString_baseURL_(
+                            html,
+                            NSURL.URLWithString_("darkelf://report")
+                        )
+
+                    decisionHandler(WKNavigationActionPolicyCancel)
+                    return
+
                 decisionHandler(WKNavigationActionPolicyAllow)
                 return
-                
-            # block dangerous
-            if scheme in ("ftp"):
+
+            # -------------------------------------------------
+            # Block dangerous protocols
+            # -------------------------------------------------
+            if scheme in ("ftp", "file", "javascript"):
+                print("[Darkelf] Blocked scheme:", scheme)
                 decisionHandler(WKNavigationActionPolicyCancel)
                 return
 
-            # http -> https
+            # -------------------------------------------------
+            # Force HTTPS upgrade
+            # -------------------------------------------------
             if scheme == "http":
+
                 https_url = url_str.replace("http://", "https://", 1)
 
-                webView.loadRequest_(
-                    NSURLRequest.requestWithURL_(
-                        NSURL.URLWithString_(https_url)
+                try:
+                    webView.loadRequest_(
+                        NSURLRequest.requestWithURL_(
+                            NSURL.URLWithString_(https_url)
+                        )
                     )
-                )
+                except Exception:
+                    pass
 
-                decisionHandler(WKNavigationActionPolicyAllow)
+                decisionHandler(WKNavigationActionPolicyCancel)
                 return
 
+            # -------------------------------------------------
+            # Optional tracker blocking (domain level)
+            # -------------------------------------------------
+            blocked_domains = (
+                "doubleclick.net",
+                "google-analytics.com",
+                "facebook.net",
+                "googletagmanager.com",
+            )
+
+            for domain in blocked_domains:
+                if domain in host:
+                    print("[Darkelf] Tracker blocked:", host)
+                    decisionHandler(WKNavigationActionPolicyCancel)
+                    return
+
+            # -------------------------------------------------
+            # Allow navigation
+            # -------------------------------------------------
             decisionHandler(WKNavigationActionPolicyAllow)
 
         except Exception as e:
@@ -2035,7 +2461,7 @@ class _NavDelegate(NSObject):
 
                     if cert:
                         summary = SecCertificateCopySubjectSummary(cert)
-                        print("🔎 Certificate Subject:", summary)
+                        log(2, "🔎 Certificate Subject:", summary)
 
                     if owner and hasattr(owner, "update_security_indicator"):
 
@@ -2659,6 +3085,51 @@ CORE_JS = r'''
 })();
 '''
 
+NETWORK_MONITOR_JS = r"""
+(function() {
+
+function send(url, type) {
+    try {
+        window.webkit.messageHandlers.netlog.postMessage({
+            url: url,
+            type: type
+        });
+    } catch(e) {}
+}
+
+/* fetch() */
+const origFetch = window.fetch;
+window.fetch = function() {
+    try { send(arguments[0], "fetch"); } catch(e){}
+    return origFetch.apply(this, arguments);
+};
+
+/* XMLHttpRequest */
+const origOpen = XMLHttpRequest.prototype.open;
+XMLHttpRequest.prototype.open = function(method, url) {
+    try { send(url, "xhr"); } catch(e){}
+    return origOpen.apply(this, arguments);
+};
+
+/* WebSocket */
+const OrigWS = window.WebSocket;
+window.WebSocket = function(url, proto) {
+    try { send(url, "websocket"); } catch(e){}
+    return new OrigWS(url, proto);
+};
+
+/* navigator.sendBeacon */
+if (navigator.sendBeacon) {
+    const origBeacon = navigator.sendBeacon;
+    navigator.sendBeacon = function(url,data) {
+        try { send(url, "beacon"); } catch(e){}
+        return origBeacon.apply(this, arguments);
+    };
+}
+
+})();
+"""
+
 INDEXEDDB_DEFENSE_JS = r'''
 try{
 Object.defineProperty(window,"indexedDB",{get:()=>undefined});
@@ -2833,6 +3304,12 @@ class Browser(NSObject):
         self.cookies_enabled = False
         self.js_enabled = True
         self.tabs = []
+        self.active = 0
+
+        # WebKit memory protection
+        self.page_load_count = 0
+        self.process_pool = WKProcessPool.alloc().init()
+        
         self.tab_btns = []
         self.tab_close_btns = []
         self.active = -1
@@ -2867,6 +3344,21 @@ class Browser(NSObject):
         
         self.mini_ai = DarkelfMiniAISentinel()
         self.mini_ai.browser = self
+        
+        self.download_ui = DownloadProgressView.alloc().initWithFrame_(NSMakeRect(20, 60, 520, 70))
+        self.download_ui.setHidden_(True)
+        self.net_policy = DarkelfNetworkPolicy(self)
+        
+        content = self.window.contentView()
+
+        content.addSubview_positioned_relativeTo_(
+            self.download_ui,
+            1,   # NSWindowAbove
+            None
+        )
+
+        # ensure it resizes with the window
+        self.download_ui.setAutoresizingMask_(NSViewWidthSizable | NSViewMinYMargin)
         
         # ---- 4. Toolbar, Tabbar, UI wiring ----
         self.toolbar = self._make_toolbar()
@@ -2917,6 +3409,58 @@ class Browser(NSObject):
 
         except Exception:
             pass
+            
+    def recycle_web_process(self):
+
+        print("[Darkelf] Recycling WebKit process pool")
+
+        try:
+
+            # create a fresh WebKit process pool
+            self.process_pool = WKProcessPool.alloc().init()
+
+            for tab in self.tabs:
+
+                try:
+
+                    old_view = tab.view
+                    url = None
+
+                    if old_view and old_view.URL():
+                        url = old_view.URL().absoluteString()
+
+                    # rebuild configuration
+                    config = WKWebViewConfiguration.alloc().init()
+                    config.setProcessPool_(self.process_pool)
+
+                    # preserve memory-only storage
+                    config.setWebsiteDataStore_(
+                        WKWebsiteDataStore.nonPersistentDataStore()
+                    )
+
+                    new_view = WKWebView.alloc().initWithFrame_configuration_(
+                        old_view.frame(), config
+                    )
+
+                    new_view.setNavigationDelegate_(self.nav_delegate)
+                    new_view.setUIDelegate_(self.ui_delegate)
+
+                    # replace view
+                    old_view.removeFromSuperview()
+                    tab.view = new_view
+
+                    if url:
+                        new_view.loadRequest_(
+                        NSURLRequest.requestWithURL_(NSURL.URLWithString_(url))
+                        )
+
+                except Exception as e:
+                    print("[Darkelf] Tab recycle error:", e)
+
+            self.page_load_count = 0
+
+        except Exception as e:
+            print("[Darkelf] Process recycle failed:", e)
             
     @objc.IBAction
     def refreshMiniAI_(self, timer):
@@ -3228,7 +3772,95 @@ class Browser(NSObject):
           <span class="stat-value" id="threat_score">0</span>
         </div>
       </div>
+      
+      <!-- Network Activity -->
+      <div class="card">
+        <div class="section-title">Network Activity</div>
 
+        <div class="line">
+          <i class="bi bi-diagram-3 icon"></i>
+          <span>Total Requests</span>
+          <span class="stat-value" id="net_total">0</span>
+        </div>
+
+        <div class="line">
+          <i class="bi bi-lightning-charge icon"></i>
+          <span>Dynamic Requests</span>
+          <span class="stat-value" id="net_dynamic">0</span>
+        </div>
+
+        <div class="line">
+          <i class="bi bi-image icon"></i>
+          <span>Static Assets</span>
+          <span class="stat-value" id="net_static">0</span>
+        </div>
+
+        <div class="line">
+          <i class="bi bi-globe2 icon"></i>
+          <span>Domains Contacted</span>
+          <span class="stat-value" id="net_domains">0</span>
+        </div>
+
+       </div>
+       
+       <!-- Traffic Breakdown -->
+       <div class="card">
+         <div class="section-title">Traffic Breakdown</div>
+
+         <div class="line">
+           <i class="bi bi-bar-chart-line icon"></i>
+           <span>Dynamic / Static Ratio</span>
+           <span class="stat-value" id="tb_ratio">0 : 0</span>
+         </div>
+
+         <div class="line">
+           <i class="bi bi-diagram-3 icon"></i>
+           <span>Requests / Domain</span>
+           <span class="stat-value" id="tb_req_domain">0</span>
+         </div>
+
+         <div class="line">
+           <i class="bi bi-speedometer2 icon"></i>
+           <span>Requests / Second</span>
+           <span class="stat-value" id="tb_rps">0</span>
+         </div>
+
+         <div class="line">
+           <i class="bi bi-activity icon"></i>
+           <span>Recent Events</span>
+           <span class="stat-value" id="tb_recent">0</span>
+         </div>
+       </div>
+
+        <!-- System Status -->
+        <div class="card">
+          <div class="section-title">System Status</div>
+
+          <div class="line">
+            <i class="bi bi-cpu icon"></i>
+            <span>MiniAI Engine</span>
+            <span class="stat-value" id="sys_ai">ACTIVE</span>
+          </div>
+
+        <div class="line">
+          <i class="bi bi-shield-check icon"></i>
+          <span>Tracker Filters</span>
+          <span class="stat-value" id="sys_filters">LOADED</span>
+        </div>
+
+        <div class="line">
+          <i class="bi bi-lock icon"></i>
+          <span>Isolation Mode</span>
+          <span class="stat-value" id="sys_isolation">ENABLED</span>
+        </div>
+
+        <div class="line">
+          <i class="bi bi-hdd-network icon"></i>
+          <span>Ephemeral Storage</span>
+          <span class="stat-value" id="sys_storage">MEMORY</span>
+        </div>
+      </div>
+       
       <!-- Threat Analysis -->
       <div class="card">
         <div class="section-title">Threat Analysis</div>
@@ -3362,6 +3994,14 @@ class Browser(NSObject):
       setText("unique_domains", stats.unique_domains || 0);
       setText("threat_score", stats.threat_score || 0);
 
+      // Network stats
+      const net = stats.network || {{}};
+      setText("unique_domains", net.unique_domains || 0);
+      setText("net_total", net.total_requests || 0);
+      setText("net_dynamic", net.dynamic_requests || 0);
+      setText("net_static", net.static_requests || 0);
+      setText("net_domains", net.unique_domains || 0);
+
       // Threats
       const th = stats.threats || {{}};
       setText("th_trackers", th.trackers || 0);
@@ -3376,6 +4016,18 @@ class Browser(NSObject):
       setText("ids_credential_stuffing", ids.credential_stuffing || 0);
       setText("ids_vulnerability_scanners", ids.vulnerability_scanners || 0);
       setText("ids_bruteforce_logins", ids.bruteforce_logins || 0);
+      
+      // Traffic Breakdown 
+      const dyn = net.dynamic_requests || 0;
+      const stat = net.static_requests || 0;
+      const domains = net.unique_domains || 1;
+      const total = net.total_requests || 0;
+      const uptime = stats.uptime_seconds || 1;
+
+      setText("tb_ratio", dyn + " : " + stat);
+      setText("tb_req_domain", (total / domains).toFixed(1));
+      setText("tb_rps", (total / uptime).toFixed(2));
+      setText("tb_recent", stats.total_events || 0);
 
       // Recent threats
       renderRecentThreats(stats.recent_threats || []);
@@ -4382,6 +5034,7 @@ class Browser(NSObject):
             _add(BATTERY_DEFENSE_JS)
             _add(PERFORMANCE_DEFENSE_JS)
             _add(CORE_JS)
+            _add(NETWORK_MONITOR_JS)
             #_add(INDEXEDDB_DEFENSE_JS)
             #_add(STORAGE_DEFENSE_JS)
             
@@ -4501,9 +5154,10 @@ class Browser(NSObject):
             if cache.diskCapacity() != 0:
                 raise RuntimeError("Darkelf security failure: disk cache detected")
 
-            # apply cache to container
-            NSURLCache.setSharedURLCache_(cache)
-
+            # apply cache to container - (None)/Cache) options
+            #NSURLCache.setSharedURLCache_()
+            NSURLCache.setSharedURLCache_(NSURLCache.alloc().init())
+            
             self._containers[key] = (store, pool)
 
         store, pool = self._containers[key]
@@ -4627,10 +5281,10 @@ class Browser(NSObject):
             if h < min_height:
                 f = cv.frame()
                 h = max(min_height, f.size.height - total_ui_height)
-                print("[WKWebView] Fallback to cv.frame(), height =", h)
+                log(2, "[WKWebView] Fallback to cv.frame(), height =", h)
 
             web_rect = NSMakeRect(0, 0, w, h)
-            print(f"[WKWebView] Set frame: width={w}, height={h}")
+            log(2, f"[WKWebView] Set frame: width={w}, height={h}")
 
         except Exception as e:
             f = cv.frame()
@@ -4638,7 +5292,7 @@ class Browser(NSObject):
             h = max(min_height, f.size.height - (self.TOOLBAR_HEIGHT + self.TABBAR_HEIGHT))
             w = f.size.width
             web_rect = NSMakeRect(0, 0, w, h)
-            print(f"[WKWebView] Exception fallback. Set frame: width={w}, height={h}. Error: {e}")
+            log(2, f"[WKWebView] Exception fallback. Set frame: width={w}, height={h}. Error: {e}")
 
         cv.addSubview_(wk)
 
@@ -5078,7 +5732,7 @@ class Browser(NSObject):
         except Exception:
             return
 
-        print("Close tab index:", idx)
+        log(2, "Close tab index:", idx)
 
         if not (0 <= idx < len(self.tabs)):
             return
