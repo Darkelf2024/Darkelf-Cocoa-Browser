@@ -176,7 +176,18 @@ class DownloadProgressView(NSView):
         self.label.setTextColor_(NSColor.whiteColor())
         self.label.setFont_(NSFont.systemFontOfSize_(13))
         self.addSubview_(self.label)
-
+        
+        # percentage label
+        self.percent = NSTextField.alloc().initWithFrame_(NSMakeRect(360, 40, 60, 20))
+        self.percent.setBezeled_(False)
+        self.percent.setEditable_(False)
+        self.percent.setDrawsBackground_(False)
+        self.percent.setTextColor_(NSColor.systemGrayColor())
+        self.percent.setFont_(NSFont.systemFontOfSize_(12))
+        self.percent.setAlignment_(2)  # right align
+        self.percent.setStringValue_("0%")
+        self.addSubview_(self.percent)
+        
         # progress track
         self.progressTrack = NSView.alloc().initWithFrame_(NSMakeRect(15, 22, 400, 6))
         self.progressTrack.setWantsLayer_(True)
@@ -214,13 +225,13 @@ class DownloadProgressView(NSView):
         self.speed.setFont_(NSFont.systemFontOfSize_(11))
         self.addSubview_(self.speed)
 
-        # cancel button
-        self.cancel = NSButton.alloc().initWithFrame_(NSMakeRect(420, 18, 70, 22))
-        self.cancel.setTitle_("Cancel")
-        self.cancel.setBezelStyle_(1)
-        self.addSubview_(self.cancel)
-        self.cancel.setTarget_(self)
-        self.cancel.setAction_("cancelDownload:")
+        # Done button
+        self.done = NSButton.alloc().initWithFrame_(NSMakeRect(420, 18, 70, 22))
+        self.done.setTitle_("Done")
+        self.done.setBezelStyle_(1)
+        self.addSubview_(self.done)
+        self.done.setTarget_(self)
+        self.done.setAction_("closeDownload:")
 
         return self
 
@@ -229,6 +240,13 @@ class DownloadProgressView(NSView):
 
         try:
             percent = max(0.0, min(100.0, float(percent)))
+
+            # update percent label if present
+            try:
+                if hasattr(self, "percent"):
+                    self.percent.setStringValue_(f"{int(percent)}%")
+            except Exception:
+                pass
 
             trackWidth = self.progressTrack.bounds().size.width
             newWidth = trackWidth * (percent / 100.0)
@@ -256,27 +274,11 @@ class DownloadProgressView(NSView):
         self.speed.setStringValue_(speed)
 
 
-    def cancelDownload_(self, sender):
-
+    def closeDownload_(self, sender):
         try:
-            if hasattr(self, "download") and self.download:
-
-                if hasattr(self.download, "cancel"):
-                    self.download.cancel()
-                elif hasattr(self.download, "cancel_"):
-                    self.download.cancel_(None)
-
-                try:
-                    self.download.setDelegate_(None)
-                except:
-                    pass
-
-                print("[Darkelf] Download cancelled")
-
+            self.setHidden_(True)
         except Exception as e:
-            print("Cancel error:", e)
-
-        self.setHidden_(True)
+            print("[DownloadUI] close error:", e)
         
 # ============================================================
 # Darkelf First Party Isolation (FPI)
@@ -372,11 +374,30 @@ class FirstPartyIsolation:
     def clear(self):
 
         self._stores.clear()
-def _safe_download_dir():
+        
+def _darkelf_library():
+
     desktop = os.path.join(os.path.expanduser("~"), "Desktop")
-    folder = os.path.join(desktop, "Darkelf Temp Folder")
-    os.makedirs(folder, exist_ok=True)
-    return folder
+
+    library = os.path.join(desktop, "Darkelf Library")
+    snaps   = os.path.join(library, "Darkelf Snap")
+    temp    = os.path.join(library, "Darkelf Temp")
+
+    os.makedirs(snaps, exist_ok=True)
+    os.makedirs(temp, exist_ok=True)
+
+    return library, snaps, temp
+
+
+def _safe_download_dir():
+
+    _, _, temp = _darkelf_library()
+    return temp
+    
+def _snapshot_dir():
+
+    _, snaps, _ = _darkelf_library()
+    return snaps
     
 def _randomized_filename(name):
     name = (name or "download").strip()
@@ -2259,7 +2280,8 @@ class _NavDelegate(NSObject):
             self.expected = int(totalBytesExpectedToWrite or 0)
 
             elapsed = max(time.time() - getattr(self, "start_time", time.time()), 0.1)
-            speed = (bytesWritten or 0) / max(0.1, 0.25)  # short-window speed estimate (optional)
+
+            speed = self.bytes_received / elapsed
             mb = speed / 1024 / 1024
 
             if self.expected > 0:
@@ -6126,15 +6148,27 @@ class Browser(NSObject):
 
             def handler(image, error):
                 if image and not error:
-                    panel = NSSavePanel.savePanel()
-                    panel.setNameFieldStringValue_("darkelf_snapshot.png")
 
-                    if panel.runModal() == 1:
-                        url = panel.URL()
-                        tiff = image.TIFFRepresentation()
-                        rep = NSBitmapImageRep.imageRepWithData_(tiff)
-                        png = rep.representationUsingType_properties_(4, None)  # PNG
-                        png.writeToURL_atomically_(url, True)
+                    # --- Darkelf snapshot folder ---
+                    desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+                    library = os.path.join(desktop, "Darkelf Library")
+                    snapdir = os.path.join(library, "Darkelf Snap")
+
+                    os.makedirs(snapdir, exist_ok=True)
+
+                    # timestamp filename
+                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f"darkelf_snapshot_{ts}.png"
+                    path = os.path.join(snapdir, filename)
+
+                    url = NSURL.fileURLWithPath_(path)
+
+                    tiff = image.TIFFRepresentation()
+                    rep = NSBitmapImageRep.imageRepWithData_(tiff)
+                    png = rep.representationUsingType_properties_(4, None)  # PNG
+                    png.writeToURL_atomically_(url, True)
+
+                    print("[Darkelf] Snapshot saved →", path)
 
             wk.takeSnapshotWithConfiguration_completionHandler_(None, handler)
 
