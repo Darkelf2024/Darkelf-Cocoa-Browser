@@ -1,4 +1,4 @@
-# 🧿 Darkelf Cocoa Browser 4.0.10
+# 🧿 Darkelf Cocoa Browser 4.0.13
 ### Ephemeral, Privacy-First macOS Browser (PyObjC + WebKit)
 
 > A hardened, memory-only browser designed for **zero persistence**, **tracker resistance**, and **real-time threat detection** — installable via `pip`, launching a full native GUI.
