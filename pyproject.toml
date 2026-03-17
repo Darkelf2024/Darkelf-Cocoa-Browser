@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "darkelf-cocoa"
+version = "4.0.10"
+description = "Darkelf Cocoa privacy browser for macOS"
+readme = "README.md"
+requires-python = ">=3.11"
+
+authors = [
+  { name="Dr. Kevin Moore" }
+]
+
+license = { text = "LGPL-3.0-or-later" }
+
+dependencies = [
+  "pyobjc",
+  "tldextract"
+]
+
+[project.scripts]
+darkelf = "darkelf_cocoa.main:run"
