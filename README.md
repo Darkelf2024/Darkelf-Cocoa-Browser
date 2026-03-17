@@ -1,4 +1,4 @@
-# 🕶️ Darkelf Cocoa Browser v4.0.9
+# 🕶️ Darkelf Cocoa Browser v4.0.10
 
 ![License](https://img.shields.io/badge/license-LGPL--3.0-green)
 ![Python](https://img.shields.io/badge/python-3.11+-blue)
@@ -41,9 +41,9 @@ Two editions are available:
 | MiniAI Monitoring | ✅ Enabled | ✅ Enabled |
 | Intended Audience | Everyday Users | Researchers / High-Risk |
 
-# 🟢 Darkelf Cocoa -- General Edition v4.0.9 Latest
+# 🟢 Darkelf Cocoa -- General Edition v4.0.10 Latest
 
-📄 `Darkelf_Cocoa_Browser_4.0.9.py`
+📄 `Darkelf_Cocoa_Browser_4.0.10.py`
 
 Designed for privacy-conscious daily browsing without Tor complexity.
 
@@ -62,6 +62,9 @@ Designed for privacy-conscious daily browsing without Tor complexity.
 -   Per Tab Isolation
 -   Canvas Signatures change on Boot-up and Per-Tab! Not on Reload.
 -   First Party Isolation
+-   WebProcess Pool Isolation 
+-   Pip Install darkelf-cocoa/Bash darkelf 
+-   Mac Only
 
 ------------------------------------------------------------------------
 
