@@ -10,7 +10,7 @@
 Darkelf Cocoa Browser is a macOS-native browser built using **PyObjC + WebKit**, focused on:
 
 - 🔒 Ephemeral browsing (RAM-only)
-- 🧠 On-device AI threat detection (MiniAI Sentinel)
+- 🧠 On-device AI threat detection (Darkelf MiniAI Sentinel)
 - 🚫 Aggressive tracker & telemetry blocking
 - 🧬 First-party + tab isolation
 - 🧯 Automatic threat lockdown system
