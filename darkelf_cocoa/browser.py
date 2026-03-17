@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.0.9 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.0.13 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -3389,7 +3389,9 @@ class Browser(NSObject):
         self._build_tabbar()
         self._add_tab(home=True)
         self._bring_tabbar_to_front()
-
+        
+        self.window.setDelegate_(self)
+        
         self.window.makeKeyAndOrderFront_(None)
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
         
@@ -4360,34 +4362,37 @@ class Browser(NSObject):
         h = bounds.size.height
         top_y = h - self.TOOLBAR_HEIGHT - self.TABBAR_HEIGHT
 
+        # CREATE TABBAR ONCE
         self.tabbar = NSView.alloc().initWithFrame_(
             NSMakeRect(0, top_y, w, self.TABBAR_HEIGHT)
         )
+
         self.tabbar.setAutoresizingMask_(NSViewWidthSizable | NSViewMinYMargin)
         self.tabbar.setWantsLayer_(True)
         self.tabbar.layer().setBackgroundColor_(
             self._nscolor_hex("#0a0d12", 1.0).CGColor()
         )
 
-        # container for tab buttons
-        self.tab_buttons_container = NSView.alloc().initWithFrame_(
-            NSMakeRect(0, 0, w, self.TABBAR_HEIGHT)
+        # ADD BUTTON (after tabbar exists)
+        self.btn_new_tab = HoverButton.alloc().initWithFrame_(
+            NSMakeRect(w - 44, 6, 34, 26)
         )
-        self.tab_buttons_container.setAutoresizingMask_(NSViewWidthSizable)
+        
+        self.btn_new_tab.setTitle_("+")
+        self.btn_new_tab.setBordered_(False)
+        self.btn_new_tab.setBezelStyle_(0)
+        self.btn_new_tab.setTarget_(self)
+        self.btn_new_tab.setAction_("actNewTab:")
+                
+        self.tabbar.addSubview_(self.btn_new_tab)
+
+        # container
+        self.tab_buttons_container = NSView.alloc().initWithFrame_(
+            NSMakeRect(0, 0, w - 50, self.TABBAR_HEIGHT)
+        )
         self.tabbar.addSubview_(self.tab_buttons_container)
 
         self.window.contentView().addSubview_(self.tabbar)
-
-        # webview container
-        content_h = h - self.TOOLBAR_HEIGHT - self.TABBAR_HEIGHT
-        self.content_container = NSView.alloc().initWithFrame_(
-            NSMakeRect(0, 0, w, content_h)
-        )
-        self.content_container.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
-        self.content_container.setWantsLayer_(True)
-        self.content_container.layer().setBackgroundColor_(NSColor.blackColor().CGColor())
-
-        self.window.contentView().addSubview_(self.content_container)
 
         if not hasattr(self, "tabs"):
             self.tabs = []
@@ -4437,12 +4442,14 @@ class Browser(NSObject):
         num_tabs = len(self.tabs)
         if num_tabs <= 0:
             return
+            
+        plus_reserved = 44  # space for + button
 
         available_w = max(
             200,
-            w - (gap * max(0, num_tabs - 1)) - self.PADDING * 2
+            w - plus_reserved - (gap * max(0, num_tabs - 1)) - self.PADDING * 2
         )
-
+        
         tab_w = max(min_tab_w, min(available_w // num_tabs, max_tab_w))
 
         x = self.PADDING
@@ -4514,10 +4521,16 @@ class Browser(NSObject):
 
     @objc.IBAction
     def actNewTab_(self, sender):
-        try:
-            self._add_tab(home=True)
-        except Exception as e:
-            print("[Tabs] actNewTab_ error:", e)
+        print("CLICKED + BUTTON")
+
+        idx = self._add_tab(home=True)
+
+        print("TAB RESULT:", idx)
+        print("TOTAL TABS:", len(self.tabs))
+
+        self.active = len(self.tabs) - 1
+        self._update_tab_buttons()
+        self._sync_addr()
 
     @objc.IBAction
     def actBack_(self, sender):
@@ -6003,7 +6016,7 @@ class Browser(NSObject):
 
         except Exception:
             pass
-
+                        
     def _install_key_monitor(self):
 
         def handler(evt):
@@ -6019,8 +6032,32 @@ class Browser(NSObject):
                     return evt
 
                 ch = evt.charactersIgnoringModifiers()
+                key = evt.keyCode()
 
+                # ----------------------------------
+                # ⌘ + ← / →  (Back / Forward)
+                # ----------------------------------
+                if key == 123:  # left arrow
+                    self.actBack_(None)
+                    return None
+
+                if key == 124:  # right arrow
+                    self.actFwd_(None)
+                    return None
+
+                # ----------------------------------
+                # ⌘ + Shift + L  (Threat Console)
+                # ----------------------------------
+                if ch and ch.lower() == "l" and shift:
+                    try:
+                        self.openThreatReport_(None)
+                    except Exception:
+                        print("[Shortcut] Threat console not hooked")
+                    return None
+
+                # ----------------------------------
                 # ⌘ + T
+                # ----------------------------------
                 if ch == "t":
                     self.actNewTab_(None)
                     return None
@@ -6036,26 +6073,26 @@ class Browser(NSObject):
                     return None
 
                 # ⌘ + L
-                if ch == "l":
+                if ch and ch.lower() == "l" and not shift:
                     self.window.makeFirstResponder_(self.urlbar)
                     return None
 
-                # 🔥 ⌘ + S  → Snapshot
+                # ⌘ + S → Snapshot
                 if ch == "s":
                     self.actSnapshot_(None)
                     return None
 
-                # 🔥 ⌘ + Shift + X  → Instant Exit (FIXED)
+                # ⌘ + Shift + X → Exit
                 if ch.lower() == "x" and shift:
                     NSApp().terminate_(None)
                     return None
 
-                # ➖ ⌘ + - → Zoom Out
+                # ⌘ + - → Zoom Out
                 if ch == "-":
                     self.actZoomOut_(None)
                     return None
 
-                # ➕ ⌘ + = (Shift gives +) → Zoom In
+                # ⌘ + = → Zoom In
                 if ch == "=":
                     self.actZoomIn_(None)
                     return None
