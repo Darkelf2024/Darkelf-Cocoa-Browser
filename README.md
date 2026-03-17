@@ -39,13 +39,13 @@ darkelf
 
 ### 🧬 First-Party & Tab Isolation
 - Domain-level isolation (default)
-- Tab-level isolation (supported)
+- Tab isolation (implemented)
 - No shared global storage
 - Prevents cross-site tracking & session leakage
 
 ---
 
-### 🧠 MiniAI Sentinel (On-Device IDS)
+### 🧠 Darkelf MiniAI Sentinel (On-Device IDS)
 Detects:
 - Trackers & fingerprinting  
 - Vulnerability scanners  
@@ -103,6 +103,7 @@ Runs locally (no telemetry)
 | Cmd + T | New tab |
 | Cmd + W | Close tab |
 | Cmd + R | Reload |
+| Cmd + S | Snapshot |
 | Cmd + L | Focus address bar |
 | Cmd + ← / → | Back / Forward |
 | Cmd + Shift + L | Threat Console |
