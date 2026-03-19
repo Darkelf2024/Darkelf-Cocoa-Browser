@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "darkelf-cocoa"
-version = "v4.0.15"
+version = "4.1.0"
 description = "Darkelf Cocoa privacy browser for macOS"
 readme = "README.md"
 requires-python = ">=3.11"
