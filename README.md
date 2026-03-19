@@ -1,4 +1,4 @@
-# 🧿 Darkelf Cocoa Browser 4.0.15
+# 🧿 Darkelf Cocoa Browser 4.1.0
 ### Ephemeral, Privacy-First macOS Browser (PyObjC + WebKit)
 
 > A hardened, memory-only browser designed for **zero persistence**, **tracker resistance**, **real-time threat detection**, and **post-quantum integrity awareness** — installable via `pip`, launching a full native GUI.
@@ -58,23 +58,74 @@ Runs locally (no telemetry)
 
 ---
 
-### 🔗 Post-Quantum Integrity Layer (NEW)
+### 🔗 Post-Quantum Integrity Layer (Enhanced)
 
-Darkelf includes a **passive post-quantum integrity system** using **SHA3-512**:
+Darkelf implements a **post-quantum–resilient integrity system** built on **SHA3-512**, designed to provide **tamper-evident session integrity without modifying network traffic**.
 
-- Each request is cryptographically fingerprinted
-- Requests are chained together per session
-- Forms a **tamper-evident browsing history**
-- Resistant to quantum-era attacks (Grover-limited)
+---
 
-#### 🧠 What it does
-- Detects silent manipulation of request flow
-- Prevents undetected replay or injection attempts
-- Adds integrity without modifying traffic
+### 🧬 Core Design
 
-#### 👁️ User Visibility
-- Displays **“PQ” indicator** next to HTTPS lock when active
-- Fully passive — no performance or behavior impact
+- Each navigation request is cryptographically fingerprinted  
+- Requests are chained into a **session-bound integrity chain**  
+- The chain evolves continuously during browsing  
+- Resistant to quantum attacks (Grover-limited security model)
+
+---
+
+### 🛡️ Integrity + Trust Awareness
+
+Darkelf extends beyond request integrity by adding a **real-time trust consistency layer**:
+
+- TLS certificate identity is tracked per domain (TOFU model)  
+- Unexpected certificate changes are detected within the session  
+- Helps identify:
+  - Man-in-the-middle (MITM) attacks  
+  - Certificate swapping  
+  - Suspicious infrastructure changes  
+
+---
+
+### 👁️ User Visibility
+
+PQ state is surfaced directly in the address bar:
+
+- `PQ✓` → Integrity active, trust stable  
+- `PQ⚠` → Trust inconsistency detected  
+
+- Integrated alongside HTTPS indicators  
+- Passive and non-intrusive (no performance impact)
+
+---
+
+### 🧠 What This Provides
+
+- Tamper-evident request flow  
+- Session-level integrity assurance  
+- Detection of silent manipulation or replay patterns  
+- Early warning of trust anomalies  
+
+---
+
+### ⚙️ Design Philosophy
+
+> Darkelf’s PQ layer augments — not replaces — TLS.
+
+- TLS → Secures transport  
+- PQ Layer → Verifies integrity and behavioral consistency  
+
+Together providing:
+
+> **Transport security + post-quantum-aware integrity validation**
+
+---
+
+### 🔬 Implementation Notes
+
+- Uses SHA3-512 (NIST-standardized, quantum-resistant hashing)  
+- Passive design (no protocol changes required)  
+- No telemetry or external dependencies  
+- Fully memory-resident (ephemeral session scope)
 
 ---
 
@@ -212,4 +263,3 @@ Dr. Kevin Moore
 - Built-in IDS
 - Lockdown system
 - Advanced isolation
-- Post-quantum integrity layer
