@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.0.15 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.1.0 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -2014,17 +2014,30 @@ class _NavDelegate(NSObject):
 
                     current = browser.addr.stringValue() or ""
 
-                    if " PQ" not in current:
-                        browser.addr.setStringValue_(current + "  PQ")
+                    # remove old PQ tags (prevents stacking)
+                    for tag in [" PQ", " PQ✓", " PQ⚠"]:
+                        current = current.replace(tag, "")
 
-                    browser.addr.setToolTip_("TLS Secure + PQ Integrity Active")
+                    status = getattr(browser, "_pq_trust_status", "ok")
+
+                    if status == "warn":
+                        tag = "  PQ⚠"
+                        tooltip = "TLS Secure + PQ Active — Trust change detected"
+                        color = NSColor.systemRedColor()
+                    else:
+                        tag = "  PQ✓"
+                        tooltip = "TLS Secure + PQ Integrity Active"
+                        color = NSColor.systemGreenColor()
+
+                    browser.addr.setStringValue_(current + tag)
+                    browser.addr.setToolTip_(tooltip)
+                    browser.addr.setTextColor_(color)
 
             except Exception:
                 pass
-                
+        
         except Exception as e:
             print("[NavDelegate] didFinish error:", e)
-
 
     # -------------------------------------------------
     # JS Bridge
@@ -2538,6 +2551,33 @@ class _NavDelegate(NSObject):
                         summary = SecCertificateCopySubjectSummary(cert)
                         log(2, "🔎 Certificate Subject:", summary)
 
+                        # ✅ --- PQ TRUST CACHE (UI-DRIVEN, NO SPAM) ---
+                        try:
+                            if owner:
+
+                                if not hasattr(owner, "_pq_trust_cache"):
+                                    owner._pq_trust_cache = {}
+
+                                host = protectionSpace.host() or "unknown"
+
+                                fp = hashlib.sha3_512(
+                                    str(summary).encode()
+                                ).hexdigest()
+
+                                if host not in owner._pq_trust_cache:
+                                    owner._pq_trust_cache[host] = fp
+                                    owner._pq_trust_status = "ok"
+                                else:
+                                    if owner._pq_trust_cache[host] != fp:
+                                        owner._pq_trust_status = "warn"
+                                    else:
+                                        owner._pq_trust_status = "ok"
+
+                        except Exception:
+                            # silent fail (no spam)
+                            pass
+                        # ✅ --- END PQ BLOCK ---
+
                     if owner and hasattr(owner, "update_security_indicator"):
 
                         NSOperationQueue.mainQueue().addOperationWithBlock_(
@@ -2552,7 +2592,7 @@ class _NavDelegate(NSObject):
 
         except Exception as e:
             print("[Cert Inspection Error]", e)
-
+    
         completionHandler(
             NSURLSessionAuthChallengePerformDefaultHandling,
             None
@@ -3395,6 +3435,8 @@ class Browser(NSObject):
         self._tab_uid_counter = 0
         # ---- 1. Create window ----
         self.window = self._make_window()
+        
+        self._pq_trust_cache = {}
         
         self.window.setCollectionBehavior_(128)  # NSWindowCollectionBehaviorFullScreenPrimary
         
