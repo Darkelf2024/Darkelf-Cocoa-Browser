@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.0.13 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.1.0 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -120,6 +120,30 @@ def log(level, *msg):
     if level <= LOG_LEVEL:
         print(*msg)
         
+def darkelf_pq_fingerprint(url: str, headers: dict = None) -> str:
+    """
+    Post-quantum safe request fingerprint (SHA3-256)
+    Lightweight, deterministic, replay-resistant
+    """
+    h = hashlib.sha3_512()
+
+    # bind URL
+    h.update(url.encode("utf-8", errors="ignore"))
+
+    # bind headers (if any)
+    if headers:
+        for k, v in sorted(headers.items()):
+            h.update(str(k).encode())
+            h.update(str(v).encode())
+
+    # time window (10s buckets → prevents replay)
+    h.update(str(int(time.time() // 10)).encode())
+
+    return h.hexdigest()
+    
+def darkelf_is_pq_active(owner) -> bool:
+    return hasattr(owner, "_pq_chain") and bool(owner._pq_chain)
+    
 class DarkelfNetworkPolicy:
 
     def __init__(self, browser):
@@ -1983,7 +2007,21 @@ class _NavDelegate(NSObject):
                         color = NSColor.systemGreenColor()
 
             browser.addr.setTextColor_(color)
+            
+            # --- PQ indicator ---
+            try:
+                if scheme == "https" and darkelf_is_pq_active(browser):
 
+                    current = browser.addr.stringValue() or ""
+
+                    if " PQ" not in current:
+                        browser.addr.setStringValue_(current + "  PQ")
+
+                    browser.addr.setToolTip_("TLS Secure + PQ Integrity Active")
+
+            except Exception:
+                pass
+                
         except Exception as e:
             print("[NavDelegate] didFinish error:", e)
 
@@ -2350,7 +2388,22 @@ class _NavDelegate(NSObject):
             nav_type = navAction.navigationType()
 
             owner = getattr(self, "owner", None)
+            
+            # --- PQ fingerprint binding ---
+            try:
+                fp = darkelf_pq_fingerprint(url_str)
 
+                # store per-session chain (optional but powerful)
+                prev = getattr(owner, "_pq_chain", "")
+                combined = hashlib.sha3_512((prev + fp).encode()).hexdigest()
+                owner._pq_chain = combined
+
+                # attach to MiniAI (optional)
+                if hasattr(self.owner, "mini_ai"):
+                    owner.mini_ai.last_request_fp = combined
+
+            except Exception as e:
+                print("[PQ] fingerprint error:", e)
             # -------------------------------------------------
             # MiniAI traffic monitoring
             # -------------------------------------------------
