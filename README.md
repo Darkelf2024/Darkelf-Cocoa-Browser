@@ -1,7 +1,7 @@
-# 🧿 Darkelf Cocoa Browser 4.0.13
+# 🧿 Darkelf Cocoa Browser 4.1.0
 ### Ephemeral, Privacy-First macOS Browser (PyObjC + WebKit)
 
-> A hardened, memory-only browser designed for **zero persistence**, **tracker resistance**, and **real-time threat detection** — installable via `pip`, launching a full native GUI.
+> A hardened, memory-only browser designed for **zero persistence**, **tracker resistance**, **real-time threat detection**, and **post-quantum integrity awareness** — installable via `pip`, launching a full native GUI.
 
 ---
 
@@ -14,6 +14,7 @@ Darkelf Cocoa Browser is a macOS-native browser built using **PyObjC + WebKit**,
 - 🚫 Aggressive tracker & telemetry blocking
 - 🧬 First-party + tab isolation
 - 🧯 Automatic threat lockdown system
+- 🔗 Post-quantum request integrity (SHA3-512 chain)
 
 Unlike traditional browsers, Darkelf **never persists browsing data to disk** and operates with a **defense-in-depth security model**.
 
@@ -57,6 +58,26 @@ Runs locally (no telemetry)
 
 ---
 
+### 🔗 Post-Quantum Integrity Layer (NEW)
+
+Darkelf includes a **passive post-quantum integrity system** using **SHA3-512**:
+
+- Each request is cryptographically fingerprinted
+- Requests are chained together per session
+- Forms a **tamper-evident browsing history**
+- Resistant to quantum-era attacks (Grover-limited)
+
+#### 🧠 What it does
+- Detects silent manipulation of request flow
+- Prevents undetected replay or injection attempts
+- Adds integrity without modifying traffic
+
+#### 👁️ User Visibility
+- Displays **“PQ” indicator** next to HTTPS lock when active
+- Fully passive — no performance or behavior impact
+
+---
+
 ### 🚨 Automatic Lockdown Mode
 - Stops all tabs on threat
 - Locks UI controls
@@ -72,9 +93,11 @@ Runs locally (no telemetry)
 
 ---
 
-### 🔐 TLS Inspection
-- Certificate validation via macOS Security framework
-- Real-time trust indicators
+### 🔐 TLS + Hybrid PQ Transport (macOS)
+
+- Uses macOS WebKit TLS stack
+- Supports **hybrid key exchange (X25519 + ML-KEM768)** when available
+- Combined with Darkelf PQ layer for **transport + integrity coverage**
 
 ---
 
@@ -84,6 +107,7 @@ Runs locally (no telemetry)
 - Ephemeral downloads
 - Anti-fingerprinting detection
 - Third-party tracker detection
+- PQ-safe request integrity (SHA3-512)
 
 ---
 
@@ -93,6 +117,7 @@ Runs locally (no telemetry)
 - Tabbed browsing
 - Download progress UI
 - Built-in threat console (`darkelf://report`)
+- 🔒 HTTPS + **PQ indicator system**
 
 ---
 
@@ -161,6 +186,7 @@ Darkelf uses a dedicated sandboxed directory:
 Darkelf focuses on:
 - Minimizing fingerprint surface
 - Increasing anonymity
+- Adding post-quantum resilience
 - Giving users full control
 
 ---
@@ -186,3 +212,4 @@ Dr. Kevin Moore
 - Built-in IDS
 - Lockdown system
 - Advanced isolation
+- Post-quantum integrity layer
