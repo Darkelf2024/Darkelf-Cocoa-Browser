@@ -1,4 +1,4 @@
-# 🧿 Darkelf Cocoa Browser 4.1.1
+# 🧿 Darkelf Cocoa Browser 4.1.2
 ### Ephemeral, Privacy-First macOS Browser (PyObjC + WebKit)
 
 > A hardened, memory-only browser designed for **zero persistence**, **tracker resistance**, **real-time threat detection**, and **post-quantum integrity awareness** — installable via `pip`, launching a full native GUI.
@@ -60,92 +60,101 @@ Runs locally (no telemetry)
 
 ### 🔗 Post-Quantum Integrity Layer (Enhanced)
 
-Darkelf implements a **post-quantum–aware integrity system** built on **SHA3-512**, providing **tamper-evident browsing, trust monitoring, and file integrity verification** — all without modifying network traffic.
+Darkelf implements a **post-quantum--aware integrity system** built on
+**SHA3-512**, providing **tamper-evident browsing, trust monitoring, and
+file integrity verification** --- all without modifying network traffic.
 
----
+------------------------------------------------------------------------
 
 ### 🧬 Core Design
 
-- Each navigation request is cryptographically fingerprinted (SHA3-512)  
-- Requests are chained into a **session-bound integrity chain**  
-- The chain evolves continuously during browsing  
-- Resistant to quantum attacks (Grover-limited security model)  
+-   Each navigation request is cryptographically fingerprinted
+    (SHA3-512)\
+-   Requests are chained into a **session-bound integrity chain**\
+-   The chain evolves continuously during browsing\
+-   Resistant to quantum attacks (Grover-limited security model)
 
----
+------------------------------------------------------------------------
 
 ### 🛡️ Integrity + Trust Awareness
 
-Darkelf extends beyond request integrity with a **real-time trust consistency layer**:
+Darkelf extends beyond request integrity with a **real-time trust
+consistency layer**:
 
-- TLS certificate identity is tracked per domain (TOFU model)  
-- Certificate fingerprints are monitored during the session  
-- Unexpected changes trigger a **PQ trust warning**  
+-   TLS certificate identity is tracked per domain (TOFU model)\
+-   Certificate fingerprints are monitored during the session\
+-   Unexpected changes trigger a **PQ trust warning**
 
-Helps identify:
-- Man-in-the-middle (MITM) attacks  
-- Certificate swapping  
-- Suspicious infrastructure or routing changes  
+Helps identify: - Man-in-the-middle (MITM) attacks\
+- Certificate swapping\
+- Suspicious infrastructure or routing changes
 
----
+------------------------------------------------------------------------
 
-### 📦 File Integrity Protection (NEW)
+### 📦 File Integrity Protection (Enhanced)
 
-Darkelf now includes **post-quantum file integrity verification**:
+Darkelf includes **post-quantum file integrity verification** with
+**session-bound integrity binding**:
 
-- All downloads are hashed using **SHA3-512**  
-- Hashes are stored **in-memory only (ephemeral)**  
-- Files can be verified for tampering during the session  
+-   All downloads are hashed using **SHA3-512**\
+-   Hashes are bound to the active **session integrity chain**\
+-   Integrity records are stored **in-memory only (ephemeral)**
 
-Capabilities:
-- Detects file modification after download  
-- Ensures integrity of blob and standard downloads  
-- Enables future enforcement (block/delete tampered files)  
+Capabilities: - Detects file modification during the session\
+- **Blob downloads are fully session-bound and verifiable**\
+- Standard downloads follow the same integrity model, with enforcement
+integrated as an incremental hardening path
 
----
+------------------------------------------------------------------------
 
 ### 👁️ User Visibility
 
 PQ state is surfaced directly in the address bar:
 
-- `PQ✓` → Integrity active, trust stable  
-- `PQ⚠` → Trust inconsistency detected  
+-   `PQ✓` → Integrity active, trust stable\
 
-- Integrated alongside HTTPS indicators  
-- Passive and non-intrusive (no performance impact)  
+-   `PQ⚠` → Trust inconsistency detected
 
----
+-   Integrated alongside HTTPS indicators\
+
+-   Passive and non-intrusive (no performance impact)
+
+------------------------------------------------------------------------
 
 ### 🧠 What This Provides
 
-- Tamper-evident request flow  
-- Session-level integrity assurance  
-- Detection of silent manipulation or replay patterns  
-- Early warning of TLS trust anomalies  
-- File integrity validation for downloaded content  
+-   Tamper-evident request flow\
+-   Session-level integrity assurance\
+-   Detection of silent manipulation or replay patterns\
+-   Early warning of TLS trust anomalies\
+-   **Session-bound integrity tracking for downloaded content**
 
----
+------------------------------------------------------------------------
 
 ### ⚙️ Design Philosophy
 
-> Darkelf’s PQ layer augments — not replaces — TLS.
+> Darkelf's PQ layer augments --- not replaces --- TLS.
 
-- TLS → Secures transport  
-- PQ Layer → Verifies integrity, trust consistency, and file integrity  
+-   TLS → Secures transport\
+-   PQ Layer → Verifies integrity, trust consistency, and session
+    binding
 
 Together providing:
 
 > **Transport security + post-quantum-aware integrity validation**
 
----
+------------------------------------------------------------------------
 
 ### 🔬 Implementation Notes
 
-- Uses SHA3-512 (NIST-standardized, quantum-resistant hashing)  
-- Passive design (no protocol or network changes required)  
-- No telemetry or external dependencies  
-- Fully memory-resident (ephemeral session scope)  
-- Designed for incremental hardening (trust, integrity, enforcement layers)
-
+-   Uses SHA3-512 (NIST-standardized, quantum-resistant hashing)\
+-   Session-bound chaining model (request + file integrity linkage)\
+-   Passive design (no protocol or network changes required)\
+-   No telemetry or external dependencies\
+-   Fully memory-resident (ephemeral session scope)\
+-   Designed for incremental hardening (trust, integrity, enforcement
+    layers)
+    
 ---
 
 ### 🚨 Automatic Lockdown Mode
