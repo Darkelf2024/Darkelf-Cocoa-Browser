@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.1.1 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.1.2 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -100,11 +100,12 @@ from WebKit import (
 )
 from Foundation import NSURL, NSURLRequest, NSMakeRect, NSNotificationCenter, NSDate, NSTimer, NSUserDefaults, NSRegistrationDomain,NSURLAuthenticationMethodServerTrust, NSURLSessionAuthChallengeUseCredential, NSURLCredential, NSURLSessionAuthChallengePerformDefaultHandling
 
-from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttributedString, NSAlert, NSAlertStyleCritical, NSColor, NSAppearance, NSAnimationContext, NSViewWidthSizable, NSViewMinYMargin, NSViewMaxXMargin, NSViewHeightSizable, NSAppearance, NSEventModifierFlagCommand, NSEventModifierFlagShift, NSSavePanel, NSBitmapImageRep, NSMutableParagraphStyle, NSFont, NSFocusRingTypeNone, NSAttributedString
+from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttributedString, NSAlert, NSAlertStyleCritical, NSColor, NSAppearance, NSAnimationContext, NSViewWidthSizable, NSViewMinYMargin, NSViewMaxXMargin, NSViewHeightSizable, NSAppearance, NSViewMinXMargin, NSEventModifierFlagCommand, NSEventModifierFlagShift, NSSavePanel, NSBitmapImageRep, NSMutableParagraphStyle, NSFont, NSFocusRingTypeNone, NSAttributedString
 
 from WebKit import WKContentRuleListStore
 import json
 import time
+import base64
 
 from Security import SecTrustEvaluateWithError, SecTrustGetCertificateAtIndex, SecCertificateCopySubjectSummary
 import tempfile
@@ -207,39 +208,55 @@ class DownloadProgressView(NSView):
             NSColor.colorWithCalibratedRed_green_blue_alpha_(0.04,0.05,0.07,1).CGColor()
         )
 
-        # filename
-        self.label = NSTextField.alloc().initWithFrame_(NSMakeRect(15, 40, 400, 20))
+        # ---- filename ----
+        self.label = NSTextField.alloc().initWithFrame_(NSMakeRect(15, 40, 300, 20))
         self.label.setBezeled_(False)
         self.label.setEditable_(False)
         self.label.setDrawsBackground_(False)
         self.label.setTextColor_(NSColor.whiteColor())
         self.label.setFont_(NSFont.systemFontOfSize_(13))
         self.addSubview_(self.label)
-        
-        # percentage label
-        self.percent = NSTextField.alloc().initWithFrame_(NSMakeRect(360, 40, 60, 20))
+
+        # ---- percent (RIGHT ANCHORED) ----
+        self.percent = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(frame.size.width - 90, 40, 60, 20)
+        )
+        self.percent.setAutoresizingMask_(NSViewMinXMargin)
         self.percent.setBezeled_(False)
         self.percent.setEditable_(False)
         self.percent.setDrawsBackground_(False)
         self.percent.setTextColor_(NSColor.systemGrayColor())
         self.percent.setFont_(NSFont.systemFontOfSize_(12))
-        self.percent.setAlignment_(2)  # right align
+        self.percent.setAlignment_(2)
         self.percent.setStringValue_("0%")
         self.addSubview_(self.percent)
-        
-        # progress track
-        self.progressTrack = NSView.alloc().initWithFrame_(NSMakeRect(15, 22, 400, 6))
-        self.progressTrack.setWantsLayer_(True)
 
+        # ---- DONE BUTTON (RIGHT ANCHORED) ----
+        self.done = NSButton.alloc().initWithFrame_(
+            NSMakeRect(frame.size.width - 90, 18, 70, 22)
+        )
+        self.done.setAutoresizingMask_(NSViewMinXMargin)
+        self.done.setTitle_("Done")
+        self.done.setBezelStyle_(1)
+        self.done.setTarget_(self)
+        self.done.setAction_("closeDownload:")
+        self.addSubview_(self.done)
+
+        # ---- PROGRESS TRACK (STOPS BEFORE BUTTON) ----
+        self.progressTrack = NSView.alloc().initWithFrame_(
+            NSMakeRect(15, 22, frame.size.width - 120, 6)
+        )
+        self.progressTrack.setAutoresizingMask_(NSViewWidthSizable)
+        self.progressTrack.setWantsLayer_(True)
         self.progressTrack.layer().setCornerRadius_(3)
         self.progressTrack.layer().setBackgroundColor_(
             NSColor.colorWithCalibratedRed_green_blue_alpha_(0.08,0.09,0.12,1).CGColor()
         )
-
         self.addSubview_(self.progressTrack)
 
-        # progress fill
+        # ---- PROGRESS FILL ----
         self.progressFill = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 0, 6))
+        self.progressFill.setAutoresizingMask_(NSViewWidthSizable)
         self.progressFill.setWantsLayer_(True)
 
         green = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.20,0.78,0.35,1)
@@ -247,7 +264,6 @@ class DownloadProgressView(NSView):
         self.progressFill.layer().setCornerRadius_(3)
         self.progressFill.layer().setBackgroundColor_(green.CGColor())
 
-        # glow
         self.progressFill.layer().setShadowColor_(green.CGColor())
         self.progressFill.layer().setShadowOpacity_(0.7)
         self.progressFill.layer().setShadowRadius_(6)
@@ -255,7 +271,7 @@ class DownloadProgressView(NSView):
 
         self.progressTrack.addSubview_(self.progressFill)
 
-        # speed label
+        # ---- SPEED ----
         self.speed = NSTextField.alloc().initWithFrame_(NSMakeRect(15, 2, 200, 15))
         self.speed.setBezeled_(False)
         self.speed.setEditable_(False)
@@ -264,17 +280,8 @@ class DownloadProgressView(NSView):
         self.speed.setFont_(NSFont.systemFontOfSize_(11))
         self.addSubview_(self.speed)
 
-        # Done button
-        self.done = NSButton.alloc().initWithFrame_(NSMakeRect(420, 18, 70, 22))
-        self.done.setTitle_("Done")
-        self.done.setBezelStyle_(1)
-        self.addSubview_(self.done)
-        self.done.setTarget_(self)
-        self.done.setAction_("closeDownload:")
-
         return self
-
-
+        
     def updateProgress_(self, percent):
 
         try:
@@ -2120,8 +2127,6 @@ class _NavDelegate(NSObject):
                 if not data:
                     return
 
-                import base64
-
                 base64_data = data.split(",")[1]
 
                 randomized = _randomized_filename(filename)
@@ -2132,8 +2137,13 @@ class _NavDelegate(NSObject):
                 
                 raw = base64.b64decode(base64_data)
 
-                hash_val = darkelf_sha3_bytes(raw)
+                base_hash = darkelf_sha3_bytes(raw)
 
+                # bind to PQ session chain
+                chain = getattr(self.owner, "_pq_chain", "")
+
+                hash_val = hashlib.sha3_512((chain + base_hash).encode()).hexdigest()
+                
                 with open(path, "wb") as f:
                     f.write(raw)
 
@@ -2229,7 +2239,18 @@ class _NavDelegate(NSObject):
                             ui.removeFromSuperview()
                         except Exception:
                             pass
+
                         parent.addSubview_(ui)
+
+                        # ✅ FORCE FIXED SIZE + POSITION
+                        parent_width = parent.bounds().size.width
+
+                        ui.setFrame_(NSMakeRect(
+                            20,                  # left margin
+                            parent.bounds().size.height - 100,  # top position
+                            515,                 # FIXED WIDTH (this is the key)
+                            70
+                        ))
 
                     ui.setHidden_(False)
                     ui.setFilename_(filename)
@@ -2316,20 +2337,23 @@ class _NavDelegate(NSObject):
             self.expected = 0
         
     def downloadDidFinish_(self, download):
-            
+
+        # --- 1. Log finish ---
         try:
             print("[Darkelf] Download finished")
         except Exception:
             pass
 
-        # ✅ PQ HASH BLOCK (separate)
+        # --- 2. PQ HASH (SAFE BLOCK) ---
         try:
             if hasattr(self, "_download_path") and self._download_path:
 
                 with open(self._download_path, "rb") as f:
                     data = f.read()
 
-                hash_val = darkelf_sha3_bytes(data)
+                base_hash = darkelf_sha3_bytes(data)
+                chain = getattr(self.owner, "_pq_chain", "")
+                hash_val = hashlib.sha3_512((chain + base_hash).encode()).hexdigest()
 
                 if hasattr(self.owner, "_pq_file_hashes"):
                     self.owner._pq_file_hashes[self._download_path] = hash_val
@@ -2338,18 +2362,17 @@ class _NavDelegate(NSObject):
 
         except Exception as e:
             print("[PQ download hash error]", e)
-                
+
+        # --- 3. UI UPDATE (ALWAYS RUNS) ---
+        try:
             ui = getattr(self.owner, "download_ui", None)
             if not ui:
                 return
 
-            # show full progress
-            try:
-                ui.updateProgress_(100)
-            except Exception:
-                pass
+            # force full progress
+            ui.updateProgress_(100)
 
-            # auto hide after delay (main thread)
+            # auto-hide after delay
             def hide():
                 try:
                     ui.setHidden_(True)
@@ -2357,7 +2380,7 @@ class _NavDelegate(NSObject):
                     pass
 
             NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-                1.5,          # delay before hiding
+                1.5,
                 ui,
                 "setHidden:",
                 True,
@@ -2365,7 +2388,7 @@ class _NavDelegate(NSObject):
             )
 
         except Exception as e:
-            print("[Download finish error]", e)
+            print("[Download finish UI error]", e)
             
     def download_didWriteData_totalBytesWritten_totalBytesExpectedToWrite_(
         self, download, bytesWritten, totalBytesWritten, totalBytesExpectedToWrite
