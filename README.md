@@ -211,6 +211,7 @@ Together providing:
 | Cmd + L | Focus address bar |
 | Cmd + ← / → | Back / Forward |
 | Cmd + Shift + L | Threat Console |
+| Cmd + Shift + X | Wipe / Shutdown |
 | Cmd + + / - | Zoom |
 
 ---
