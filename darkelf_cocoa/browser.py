@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.1.0 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.1.1 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -143,6 +143,21 @@ def darkelf_pq_fingerprint(url: str, headers: dict = None) -> str:
     
 def darkelf_is_pq_active(owner) -> bool:
     return hasattr(owner, "_pq_chain") and bool(owner._pq_chain)
+    
+def darkelf_sha3_bytes(data: bytes) -> str:
+    import hashlib
+    h = hashlib.sha3_512()
+    h.update(data)
+    return h.hexdigest()
+    
+def verify_file(path, owner):
+    if path not in owner._pq_file_hashes:
+        return True
+
+    with open(path, "rb") as f:
+        data = f.read()
+
+    return darkelf_sha3_bytes(data) == owner._pq_file_hashes[path]
     
 class DarkelfNetworkPolicy:
 
@@ -2112,10 +2127,20 @@ class _NavDelegate(NSObject):
                 randomized = _randomized_filename(filename)
 
                 path = os.path.join(self.download_dir, randomized)
+                
+                self._download_path = path
+                
+                raw = base64.b64decode(base64_data)
+
+                hash_val = darkelf_sha3_bytes(raw)
 
                 with open(path, "wb") as f:
-                    f.write(base64.b64decode(base64_data))
+                    f.write(raw)
 
+                if hasattr(self.owner, "_pq_file_hashes"):
+                    self.owner._pq_file_hashes[path] = hash_val
+
+                print("[PQ FILE HASH]", hash_val)
                 print("[Darkelf] Blob downloaded →", path)
 
                 return
@@ -2291,10 +2316,29 @@ class _NavDelegate(NSObject):
             self.expected = 0
         
     def downloadDidFinish_(self, download):
-
+            
         try:
             print("[Darkelf] Download finished")
+        except Exception:
+            pass
 
+        # ✅ PQ HASH BLOCK (separate)
+        try:
+            if hasattr(self, "_download_path") and self._download_path:
+
+                with open(self._download_path, "rb") as f:
+                    data = f.read()
+
+                hash_val = darkelf_sha3_bytes(data)
+
+                if hasattr(self.owner, "_pq_file_hashes"):
+                    self.owner._pq_file_hashes[self._download_path] = hash_val
+
+                print("[PQ FILE HASH]", hash_val)
+
+        except Exception as e:
+            print("[PQ download hash error]", e)
+                
             ui = getattr(self.owner, "download_ui", None)
             if not ui:
                 return
@@ -3491,7 +3535,9 @@ class Browser(NSObject):
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
         
         self.download_dir = _safe_download_dir()
-        # ---- 7. Keyboard monitor ----
+        
+        self._pq_file_hashes = {}
+                # ---- 7. Keyboard monitor ----
         self._install_key_monitor()
 
         try:
