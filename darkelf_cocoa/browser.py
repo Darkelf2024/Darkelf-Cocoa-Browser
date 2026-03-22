@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.1.2 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.1.3 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -78,7 +78,7 @@ from urllib.parse import urlparse, unquote, quote_plus
 from objc import ObjCPointerWarning
 import shutil
 import tldextract
-from Foundation import NSRunLoop, NSDate,  NSOperationQueue, NSURLCache
+from Foundation import NSRunLoop, NSDate,  NSOperationQueue, NSURLCache, NSMutableDictionary
 
 warnings.filterwarnings("ignore", category=ObjCPointerWarning)
 
@@ -100,7 +100,7 @@ from WebKit import (
 )
 from Foundation import NSURL, NSURLRequest, NSMakeRect, NSNotificationCenter, NSDate, NSTimer, NSUserDefaults, NSRegistrationDomain,NSURLAuthenticationMethodServerTrust, NSURLSessionAuthChallengeUseCredential, NSURLCredential, NSURLSessionAuthChallengePerformDefaultHandling
 
-from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttributedString, NSAlert, NSAlertStyleCritical, NSColor, NSAppearance, NSAnimationContext, NSViewWidthSizable, NSViewMinYMargin, NSViewMaxXMargin, NSViewHeightSizable, NSAppearance, NSViewMinXMargin, NSEventModifierFlagCommand, NSEventModifierFlagShift, NSSavePanel, NSBitmapImageRep, NSMutableParagraphStyle, NSFont, NSFocusRingTypeNone, NSAttributedString
+from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttributedString, NSAlert, NSAlertStyleCritical, NSColor, NSAppearance, NSAnimationContext, NSViewWidthSizable, NSTextView, NSViewMinYMargin, NSViewMaxXMargin, NSViewHeightSizable, NSAppearance, NSViewMinXMargin, NSEventModifierFlagCommand, NSEventModifierFlagShift, NSSavePanel,NSBackgroundColorAttributeName, NSForegroundColorAttributeName, NSBitmapImageRep, NSMutableParagraphStyle, NSFont, NSFocusRingTypeNone, NSAttributedString
 
 from WebKit import WKContentRuleListStore
 import json
@@ -160,6 +160,13 @@ def verify_file(path, owner):
 
     return darkelf_sha3_bytes(data) == owner._pq_file_hashes[path]
     
+def apply_darkelf_theme():
+    green = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.20, 0.78, 0.35, 1)
+
+    NSApplication.sharedApplication().setAppearance_(
+        NSAppearance.appearanceNamed_("NSAppearanceNameDarkAqua")
+    )
+    
 class DarkelfNetworkPolicy:
 
     def __init__(self, browser):
@@ -194,7 +201,7 @@ class DarkelfNetworkPolicy:
             return ("redirect", url.replace("http://", "https://", 1))
 
         return "allow"
-        
+            
 class DownloadProgressView(NSView):
 
     def initWithFrame_(self, frame):
@@ -2030,6 +2037,15 @@ class _NavDelegate(NSObject):
 
             browser.addr.setTextColor_(color)
             
+            browser.addr.setFocusRingType_(NSFocusRingTypeNone)
+
+            browser.addr.setWantsLayer_(True)
+            browser.addr.layer().setBorderColor_(
+                NSColor.colorWithCalibratedRed_green_blue_alpha_(0.20, 0.78, 0.35, 1).CGColor()
+            )
+            browser.addr.layer().setBorderWidth_(1.5)
+            browser.addr.layer().setCornerRadius_(6)
+            
             # --- PQ indicator ---
             try:
                 if scheme == "https" and darkelf_is_pq_active(browser):
@@ -2683,6 +2699,18 @@ class _NavDelegate(NSObject):
         except Exception as e:
             print("[WebKit] Recovery failed:", e)
             
+class DarkelfMenuDelegate(NSObject):
+
+    def menu_willOpen_(self, menu, event):
+        for item in menu.itemArray():
+            item.setAttributedTitle_(
+                NSAttributedString.alloc().initWithString_attributes_(
+                    item.title(),
+                    {
+                        "NSForegroundColor": NSColor.whiteColor()
+                    }
+                )
+            )
             
 IS_MAC = sys.platform == "darwin"
 if not IS_MAC:
@@ -3556,6 +3584,8 @@ class Browser(NSObject):
         
         self.window.makeKeyAndOrderFront_(None)
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+
+        apply_darkelf_theme()
         
         self.download_dir = _safe_download_dir()
         
@@ -4401,6 +4431,46 @@ class Browser(NSObject):
         self._bring_tabbar_to_front()
         self._update_tab_buttons()
         self._sync_addr()
+        
+    def controlTextDidBeginEditing_(self, notification):
+        try:
+            field_editor = notification.userInfo().get("NSFieldEditor")
+
+            if field_editor:
+                green = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.20, 0.78, 0.35, 0.6)
+
+                field_editor.setSelectedTextAttributes_({
+                    "NSBackgroundColor": green,
+                    "NSForegroundColor": NSColor.blackColor()
+                })
+
+        except Exception as e:
+            print("[Darkelf] editor styling error:", e)
+            
+    def _show_context_popover(self, view, location):
+        try:
+            pop = NSPopover.alloc().init()
+            pop.setBehavior_(1)  # transient
+
+            vc = NSViewController.alloc().init()
+            content = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 200, 80))
+
+            label = NSTextField.alloc().initWithFrame_(NSMakeRect(20, 30, 160, 20))
+            label.setStringValue_("Context menu (placeholder)")
+            label.setBezeled_(False)
+            label.setEditable_(False)
+            label.setDrawsBackground_(False)
+
+            content.addSubview_(label)
+            vc.setView_(content)
+
+            pop.setContentViewController_(vc)
+
+            rect = NSMakeRect(location.x, location.y, 1, 1)
+            pop.showRelativeToRect_ofView_preferredEdge_(rect, view, 1)
+
+        except Exception as e:
+            print("[Popover error]", e)
             
     def _is_tab_webview(self, webview):
         for tab in self.tabs:
@@ -4429,7 +4499,7 @@ class Browser(NSObject):
             rect, style, 2, False
         )
         win.setTitle_(APP_NAME)
-
+                
         try:
             win.setTitleVisibility_(1)
             win.setToolbarStyle_(1)
@@ -4469,7 +4539,7 @@ class Browser(NSObject):
             print("[Window] ✅ Content view layer-backed")
         except Exception as e:
             print(f"[Window] ❌ Content view layer failed: {e}")
-
+                    
         return win
         
     def windowShouldClose_(self, sender):
@@ -4948,6 +5018,8 @@ class Browser(NSObject):
         self.urlbar = AddressField.alloc().initWithFrame_owner_(NSMakeRect(200, 10, 720, 32), self)
         self.addr = self.urlbar
 
+        self.addr.setFocusRingType_(NSFocusRingTypeNone)
+
         self.urlbar.setBezeled_(True)
 
         self.urlbar.setFocusRingType_(0)
@@ -4959,6 +5031,8 @@ class Browser(NSObject):
         self.urlbar.setDrawsBackground_(False)
 
         self.urlbar.setPlaceholderString_("Search or enter URL")
+
+        # ✅ KEEP THIS (your working enter handler)
         self.urlbar.setTarget_(self)
         self.urlbar.setAction_("addrEntered:")
 
@@ -4966,6 +5040,14 @@ class Browser(NSObject):
         self.urlbar.cell().setSendsSearchStringImmediately_(False)
 
         self.urlbar.setAutoresizingMask_(2)
+
+        # ✅ ADD THIS EXACTLY HERE (RIGHT BEFORE addSubview)
+        NSNotificationCenter.defaultCenter().addObserver_selector_name_object_(
+            self,
+            "controlTextDidBeginEditing:",
+            "NSControlTextDidBeginEditingNotification",
+            self.addr
+        )
 
         self.toolbar_container.addSubview_(self.urlbar)
         
@@ -5589,9 +5671,19 @@ class Browser(NSObject):
             config.setWebsiteDataStore_(store)
 
             webview = WKWebView.alloc().initWithFrame_configuration_(
-                frame,
+                NSMakeRect(0, 0, width, height),
                 config
             )
+
+            # ✅ ATTACH CONTEXT MENU DELEGATE HERE
+            menu = webview.menu()
+            if not menu:
+                menu = NSMenu.alloc().initWithTitle_("Context")
+                webview.setMenu_(menu)
+
+            menu_delegate = DarkelfMenuDelegate.alloc().init()
+            menu.setDelegate_(menu_delegate)
+            
             wk = WKWebView.alloc().initWithFrame_configuration_(old.frame(), config)
 
             if getattr(self, "_ui_delegate", None) is not None:
@@ -6421,6 +6513,15 @@ def main():
 
     app = NSApplication.sharedApplication()
     
+    # ✅ APPLY DARKELF THEME HERE (CORRECT SPOT)
+    apply_darkelf_theme()
+
+    # ✅ FORCE GREEN ACCENT (removes orange system highlight)
+    NSUserDefaults.standardUserDefaults().setInteger_forKey_(
+        3,
+        "AppleAccentColor"
+    )
+
     # ✅ PRE-COMPILE RULES BEFORE BROWSER STARTS
     print("[Startup] Compiling content blocking rules...")
     ContentRuleManager.load_rules()
