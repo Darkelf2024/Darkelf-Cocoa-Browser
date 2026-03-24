@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.1.3 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.1.4 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -100,7 +100,7 @@ from WebKit import (
 )
 from Foundation import NSURL, NSURLRequest, NSMakeRect, NSNotificationCenter, NSDate, NSTimer, NSUserDefaults, NSRegistrationDomain,NSURLAuthenticationMethodServerTrust, NSURLSessionAuthChallengeUseCredential, NSURLCredential, NSURLSessionAuthChallengePerformDefaultHandling
 
-from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttributedString, NSAlert, NSAlertStyleCritical, NSColor, NSAppearance, NSAnimationContext, NSViewWidthSizable, NSTextView, NSViewMinYMargin, NSViewMaxXMargin, NSViewHeightSizable, NSAppearance, NSViewMinXMargin, NSEventModifierFlagCommand, NSEventModifierFlagShift, NSSavePanel,NSBackgroundColorAttributeName, NSForegroundColorAttributeName, NSBitmapImageRep, NSMutableParagraphStyle, NSFont, NSFocusRingTypeNone, NSAttributedString
+from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttributedString, NSAlert, NSAlertStyleCritical, NSColor, NSAppearance, NSAnimationContext, NSViewWidthSizable, NSTextView, NSViewMinYMargin, NSViewMaxXMargin, NSViewHeightSizable, NSAppearance, NSViewMinXMargin, NSEventModifierFlagCommand, NSEventModifierFlagShift, NSPopover, NSSavePanel,NSBackgroundColorAttributeName, NSForegroundColorAttributeName, NSBitmapImageRep, NSMutableParagraphStyle, NSFont, NSFocusRingTypeNone, NSAttributedString
 
 from WebKit import WKContentRuleListStore
 import json
@@ -806,35 +806,82 @@ class DarkelfMiniAISentinel:
 
                 return
 
-
-    # --------------------------------------------------
-    # TRAFFIC ANOMALY
-    # --------------------------------------------------
-
     def _detect_anomalies(self, now, event):
 
         self.request_timestamps.append(now)
 
+        # Sliding window
         window = [
             t for t in self.request_timestamps
             if now - t < self.CRITICAL_WINDOW_SECONDS
         ]
 
-        if len(self.unique_domains) > 120:
+        req_rate = len(window)
+        domain_count = len(self.unique_domains)
+
+        # --------------------------------------------------
+        # 1. LOW-SCALE DISTRIBUTED SCAN (NEW)
+        # --------------------------------------------------
+        if domain_count > 30 and req_rate > 80:
+
+            event["threats"].append("distributed_probe")
+
+            if event["risk_level"] == "low":
+                event["risk_level"] = "medium"
+
+            self.suspicious_hits += 1
+
+        # --------------------------------------------------
+        # 2. MID-SCALE DOMAIN SCANNER (IMPROVED)
+        # --------------------------------------------------
+        if domain_count > 60 and req_rate > 150:
 
             event["threats"].append("domain_scanner")
 
-            if event["risk_level"] == "low":
+            if event["risk_level"] in ("low", "medium"):
                 event["risk_level"] = "high"
 
             self.vuln_scanner_attempts += 1
 
-        if len(window) > self.anomaly_threshold:
+        # --------------------------------------------------
+        # 3. LARGE-SCALE SCANNER (ORIGINAL, KEPT)
+        # --------------------------------------------------
+        if domain_count > 120:
 
-            event["threats"].append("traffic_anomaly")
+            event["threats"].append("mass_domain_scan")
             event["risk_level"] = "high"
 
-            self.suspicious_hits += 1
+            self.vuln_scanner_attempts += 1
+
+        # --------------------------------------------------
+        # 4. TRAFFIC ANOMALY (REFINED)
+        # --------------------------------------------------
+        if req_rate > self.anomaly_threshold:
+
+            # Avoid false positives from static content bursts
+            if getattr(self, "dynamic_requests", 0) > getattr(self, "static_requests", 0):
+
+                event["threats"].append("traffic_anomaly")
+                event["risk_level"] = "high"
+
+                self.suspicious_hits += 1
+
+        # --------------------------------------------------
+        # 5. DOMAIN VELOCITY HEURISTIC (NEW)
+        # --------------------------------------------------
+        if domain_count > 20:
+
+            avg_per_domain = req_rate / max(domain_count, 1)
+
+            # many domains but very few requests each → scanner pattern
+            if avg_per_domain < 2 and req_rate > 50:
+
+                event["threats"].append("wide_scan_pattern")
+
+                if event["risk_level"] == "low":
+                    event["risk_level"] = "medium"
+
+                self.suspicious_hits += 1
 
 
     # --------------------------------------------------
