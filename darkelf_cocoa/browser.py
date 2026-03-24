@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.1.4 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.1.5 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -100,7 +100,7 @@ from WebKit import (
 )
 from Foundation import NSURL, NSURLRequest, NSMakeRect, NSNotificationCenter, NSDate, NSTimer, NSUserDefaults, NSRegistrationDomain,NSURLAuthenticationMethodServerTrust, NSURLSessionAuthChallengeUseCredential, NSURLCredential, NSURLSessionAuthChallengePerformDefaultHandling
 
-from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttributedString, NSAlert, NSAlertStyleCritical, NSColor, NSAppearance, NSAnimationContext, NSViewWidthSizable, NSTextView, NSViewMinYMargin, NSViewMaxXMargin, NSViewHeightSizable, NSAppearance, NSViewMinXMargin, NSEventModifierFlagCommand, NSEventModifierFlagShift, NSPopover, NSSavePanel,NSBackgroundColorAttributeName, NSForegroundColorAttributeName, NSBitmapImageRep, NSMutableParagraphStyle, NSFont, NSFocusRingTypeNone, NSAttributedString
+from AppKit import NSImageSymbolConfiguration, NSBezierPath, NSFont, NSAttributedString, NSAlert, NSAlertStyleCritical, NSColor, NSAppearance, NSAnimationContext, NSViewWidthSizable, NSTextView, NSViewMinYMargin, NSViewMaxXMargin, NSViewHeightSizable, NSAppearance, NSViewMinXMargin, NSEventModifierFlagCommand, NSEventModifierFlagShift, NSPopover, NSViewController, NSSavePanel,NSBackgroundColorAttributeName, NSForegroundColorAttributeName, NSBitmapImageRep, NSMutableParagraphStyle, NSFont, NSFocusRingTypeNone, NSAttributedString
 
 from WebKit import WKContentRuleListStore
 import json
@@ -3823,7 +3823,7 @@ class Browser(NSObject):
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-  <title>Darkelf Threat Console</title>
+  <title>Darkelf MiniAI Activity Console</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
 
   <style>
@@ -3996,7 +3996,7 @@ class Browser(NSObject):
   <div class="container">
     <div class="top-row">
       <div>
-        <div class="title">Darkelf MiniAI Threat Console</div>
+        <div class="title">Darkelf MiniAI Activity Console</div>
         <div class="badge" id="status_badge">{badge_text}</div>
         {timer_block}
         <div class="subtle">
@@ -4126,9 +4126,9 @@ class Browser(NSObject):
         </div>
       </div>
        
-      <!-- Threat Analysis -->
+      <!-- System Analysis -->
       <div class="card">
-        <div class="section-title">Threat Analysis</div>
+        <div class="section-title">System Analysis</div>
 
         <div class="line">
           <i class="bi bi-crosshair icon"></i>
