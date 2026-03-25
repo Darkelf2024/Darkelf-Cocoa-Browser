@@ -335,7 +335,7 @@ class DownloadProgressView(NSView):
         
 # ============================================================
 # Darkelf First Party Isolation (FPI)
-# Memory-only domain + optional tab isolation
+# Memory-only domain + implemented tab isolation
 # ============================================================
 
 class FirstPartyIsolation:
