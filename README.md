@@ -241,6 +241,20 @@ Darkelf uses a dedicated sandboxed directory:
 
 ---
 
+## Test Coverage
+
+Darkelf includes 58 automated tests covering:
+
+- First-party isolation (FPI)
+- Post-quantum fingerprinting system
+- MiniAI intrusion detection
+- Network policy enforcement
+- Adversarial attack simulations
+
+All tests pass:
+
+![test output]([./docs/tests.png](https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/tree/main/Darkelf%20Cocoa%20Test%20Results))
+
 ## 🧭 Upcoming Features
 
 ### 🧅 Tor Integration *(Planned)*
