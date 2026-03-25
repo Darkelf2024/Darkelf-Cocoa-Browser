@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.1.5 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.1.6 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -60,6 +60,7 @@
 # applicable export/usage restrictions.
 #
 # Authored by Dr. Kevin Moore (2025).
+
 import os
 import sys, re, json, subprocess, threading
 from dataclasses import dataclass
@@ -1184,7 +1185,7 @@ class DarkelfMiniAISentinel:
                 tab.view.loadHTMLString_baseURL_(html, NSURL.URLWithString_("darkelf://report"))
                 
                 tab.url = "darkelf://report"
-                tab.host = "Darkelf Threat Console"
+                tab.host = "Darkelf MiniAI Console"
                 
                 self.browser.active = report_idx
                 self.browser._update_tab_buttons()
@@ -3763,12 +3764,14 @@ class Browser(NSObject):
             wk.setNavigationDelegate_(self._nav_delegate)
             
             self._mount_webview(wk)
-
+            
+            print("[AddTab] Internal page detected → seed skipped")
+            
             tab = Tab(
                 view=wk,
                 data_store=store,
                 url="darkelf://report",
-                host="Threat Report",
+                host="MiniAI Report",
                 canvas_seed=None
             )
 
@@ -5109,7 +5112,7 @@ class Browser(NSObject):
                                           tint=NSColor.systemGreenColor() if self.js_enabled else NSColor.systemRedColor())
 
         self.btn_nuke     = make_icon_btn("trash.fill", "Clear All Data", tint=NSColor.systemRedColor())
-        self.btn_mini_ai  = make_icon_btn("shield.fill", "MiniAI Threat Report", tint=NSColor.systemGreenColor())
+        self.btn_mini_ai  = make_icon_btn("shield.fill", "MiniAI System Report", tint=NSColor.systemGreenColor())
 
         for b, sel in [
             (self.btn_zoom_out, "actZoomOut:"),
@@ -5866,16 +5869,23 @@ class Browser(NSObject):
     def _add_tab(self, url: str = "", home: bool = False):
         self.loading_home = bool(home)
 
-        # 🔥 Generate seed FIRST
-        seed = secrets.randbits(32) & 0xFFFFFFFF
+        url_str = str(url or "").lower()
+
+        # 🔒 Internal Darkelf pages → no seed
+        if url_str.startswith("darkelf://") or home:
+            print("[AddTab] Internal page detected → seed skipped")
+            seed = None
+        else:
+            # 🔥 Generate seed FIRST (external pages only)
+            seed = secrets.randbits(32) & 0xFFFFFFFF
+            print(f"[AddTab] Seed = {seed}")
+
         self._current_canvas_seed = seed   # temporary storage
-        
+    
         container_nonce = secrets.token_hex(4)
-        
+    
         self._tab_uid_counter += 1
         tab_uid = self._tab_uid_counter
-        
-        print(f"[AddTab] Seed = {seed}")
         
         self.current_url_for_fpi = url if url else HOME_URL
 
