@@ -253,7 +253,7 @@ Darkelf includes 58 automated tests covering:
 
 All tests pass:
 
-[Test Output](https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/tree/main/Darkelf%20Cocoa%20Test%20Results))
+[Test Output](https://github.com/Darkelf2024/Darkelf-Cocoa-Browser/tree/main/Darkelf%20Cocoa%20Test%20Results)
 
 ## 🧭 Upcoming Features
 
