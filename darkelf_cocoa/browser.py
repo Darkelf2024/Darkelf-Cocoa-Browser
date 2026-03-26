@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.1.6 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.1.7 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -121,24 +121,37 @@ LOG_LEVEL = 1
 def log(level, *msg):
     if level <= LOG_LEVEL:
         print(*msg)
-        
-def darkelf_pq_fingerprint(url: str, headers: dict = None) -> str:
+    
+def darkelf_pq_fingerprint(url: str, headers: dict = None, session_secret: str = "") -> str:
     """
-    Post-quantum safe request fingerprint (SHA3-256)
-    Lightweight, deterministic, replay-resistant
+    Post-quantum safe request fingerprint (SHA3-512)
+    Stable per session + time-bucketed
     """
+
     h = hashlib.sha3_512()
 
-    # bind URL
+    # ----------------------------
+    # Bind URL
+    # ----------------------------
     h.update(url.encode("utf-8", errors="ignore"))
 
-    # bind headers (if any)
+    # ----------------------------
+    # Bind headers (deterministic)
+    # ----------------------------
     if headers:
         for k, v in sorted(headers.items()):
-            h.update(str(k).encode())
-            h.update(str(v).encode())
+            h.update(str(k).encode("utf-8", errors="ignore"))
+            h.update(str(v).encode("utf-8", errors="ignore"))
 
-    # time window (10s buckets → prevents replay)
+    # ----------------------------
+    # 🔥 CRITICAL: Bind session
+    # ----------------------------
+    if session_secret:
+        h.update(session_secret.encode("utf-8"))
+
+    # ----------------------------
+    # Time window (anti-replay)
+    # ----------------------------
     h.update(str(int(time.time() // 10)).encode())
 
     return h.hexdigest()
@@ -180,7 +193,21 @@ class DarkelfNetworkPolicy:
         # MiniAI inspection
         if hasattr(self.browser, "mini_ai"):
             try:
-                self.browser.mini_ai.monitor_network(url)
+                headers = {}  # or real headers if available
+
+                fp = darkelf_pq_fingerprint(
+                    url,
+                    headers,
+                    getattr(self.browser, "_pq_session_secret", "")
+                )
+
+                meta = {
+                    "headers": headers,
+                    "pq_fp": fp
+                }
+
+                self.browser.mini_ai.monitor_network(url, meta)
+
             except Exception:
                 pass
 
@@ -536,7 +563,14 @@ class DarkelfMiniAISentinel:
             "canvas":0,"webgl":0,"audio":0,"font":0,
             "battery":0,"geolocation":0,"media_devices":0,"webrtc":0
         }
-
+        
+        # ----------------------------
+        # PQ tracking (NEW)
+        # ----------------------------
+        self._pq_seen = set()
+        self._pq_window = deque(maxlen=200)   # optional: sliding window
+        self._pq_last_reset = time.time()
+        
         print("[MiniAI] Sentinel initialized")
 
 
@@ -578,13 +612,45 @@ class DarkelfMiniAISentinel:
         # ---- stats ----
         self.total_requests += 1
 
+        # ----------------------------
+        # Headers + PQ extraction
+        # ----------------------------
         headers = headers or {}
 
+        # ✅ PQ now comes from headers
+        pq_fp = headers.get("_pq_fp")
+
+        # ----------------------------
+        # PQ fingerprint behavior analysis
+        # ----------------------------
+        if pq_fp:
+
+            self._pq_window.append(pq_fp)
+
+            if pq_fp not in self._pq_seen:
+                self._pq_seen.add(pq_fp)
+
+                # too many unique fingerprints quickly → anomaly
+                if len(self._pq_seen) > 100:
+                    self.suspicious_hits += 1
+
+            # OPTIONAL: detect high churn (stronger)
+            if len(self._pq_window) >= 50:
+                unique_recent = len(set(self._pq_window))
+
+                if unique_recent > 40:
+                    self.suspicious_hits += 1
+
+        # ---- extract host + path (FIX STARTS HERE) ----
         try:
-            host = urlparse(normalized).hostname or ""
+            parsed = urlparse(normalized)
+            host = parsed.hostname or ""
+            path = unquote(parsed.path).lower()
         except Exception:
             host = ""
-    
+            path = normalized
+        # ---- FIX ENDS HERE ----
+
         # determine first-party domain
         if not self.first_party_domain and host:
             self.first_party_domain = host
@@ -604,6 +670,26 @@ class DarkelfMiniAISentinel:
         # track domain early
         if host:
             self.unique_domains.add(host)
+
+        # ==================================================
+        # 🔥 NEW: PATH OBFUSCATION DETECTION
+        # ==================================================
+
+        # encoded payload indicator
+        if "%" in url:
+            self.suspicious_hits += 1
+
+        # path traversal
+        if any(x in path for x in ["../", "..\\"]):
+            self.suspicious_hits += 1
+
+        # null byte injection
+        if "\x00" in path:
+            self.suspicious_hits += 1
+
+        # sensitive target probing
+        if "admin" in path:
+            self.intrusion_attempts += 1
 
         # --------------------------------------------------
         # static asset detection
@@ -1034,6 +1120,14 @@ class DarkelfMiniAISentinel:
 
         uptime = time.time() - self.session_start
 
+        # ----------------------------
+        # PQ contribution
+        # ----------------------------
+        pq_entropy = len(set(self._pq_window)) if self._pq_window else 0
+
+        # ----------------------------
+        # Threat score (enhanced)
+        # ----------------------------
         threat_score = (
             self.tracker_hits +
             self.suspicious_hits +
@@ -1041,7 +1135,8 @@ class DarkelfMiniAISentinel:
             self.intrusion_attempts * 4 +
             self.malware_hits * 6 +
             self.exploit_attempts * 6 +
-            self.http_blocks_attempts
+            self.http_blocks_attempts +
+            (pq_entropy // 10)   # 🔥 PQ influence
         )
 
         return {
@@ -1049,7 +1144,7 @@ class DarkelfMiniAISentinel:
             "uptime_seconds": uptime,
 
             # -----------------------------
-            # Network Activity (NEW)
+            # Network Activity
             # -----------------------------
             "network": {
                 "total_requests": getattr(self, "total_requests", 0),
@@ -1058,11 +1153,22 @@ class DarkelfMiniAISentinel:
                 "unique_domains": len(self.unique_domains)
             },
 
-            # existing event counter
             "total_events": len(self.events),
 
             "threat_score": threat_score,
 
+            # -----------------------------
+            # 🔥 Overall Risk (NEW)
+            # -----------------------------
+            "overall_risk": (
+                "high" if threat_score > 50 else
+                "medium" if threat_score > 15 else
+                "low"
+            ),
+
+            # -----------------------------
+            # Lockdown State
+            # -----------------------------
             "lockdown": {
                 "active": self.lockdown_active,
                 "threshold": self.lockdown_threshold,
@@ -1091,8 +1197,38 @@ class DarkelfMiniAISentinel:
                 "vulnerability_scanners": self.vuln_scanner_attempts,
                 "bruteforce_logins": self.bruteforce_attempts,
                 "automation_frameworks": self.automation_attempts
-            }
+            },
+
+            # -----------------------------
+            # 🔥 PQ Intelligence (NEW)
+            # -----------------------------
+            "pq": self._pq_stats()
         }
+
+
+    def _pq_stats(self):
+
+        unique = len(self._pq_seen)
+        recent = len(self._pq_window)
+        entropy = len(set(self._pq_window)) if self._pq_window else 0
+
+        # ----------------------------
+        # Risk evaluation
+        # ----------------------------
+        risk = "low"
+
+        if entropy > 40 or unique > 150:
+            risk = "high"
+        elif entropy > 20 or unique > 80:
+            risk = "medium"
+
+        return {
+            "unique_fingerprints": unique,
+            "recent_window": recent,
+            "entropy": entropy,
+            "risk_level": risk
+        }
+        
     # --------------------------------------------------
     # LOCKDOWN TRIGGER
     # --------------------------------------------------
@@ -1259,7 +1395,7 @@ class ContentRuleManager:
 
         cls._loaded = True
         store = WKContentRuleListStore.defaultStore()
-        identifier = "darkelf_builtin_rules_v9_enhanced"
+        identifier = "darkelf_builtin_rules_v10_enhanced"
 
         def _lookup(rule_list, error):
             if rule_list:
@@ -1873,6 +2009,32 @@ class ContentRuleManager:
             },
             "action": { "type": "block" }
         })
+        
+        
+        rules.append({
+            "trigger": {
+                "url-filter": "consentmanager",
+                "resource-type": ["script"]
+            },
+            "action": { "type": "block" }
+        })
+
+        # 🔥 YouTube ad blocking
+        rules.append({
+            "trigger": {
+                "url-filter": "youtubei\\.googleapis\\.com\\/youtubei\\/v1\\/player",
+                "resource-type": ["raw"]
+            },
+            "action": { "type": "block" }
+        })
+
+        rules.append({
+            "trigger": {
+                "url-filter": "youtube\\.com\\/api\\/stats\\/ads",
+                "resource-type": ["xmlhttprequest"]
+            },
+            "action": { "type": "block" }
+        })
 
         rules.append({
             "trigger": {
@@ -2014,14 +2176,21 @@ class _NavDelegate(NSObject):
             return None
 
         self.owner = owner
-        self.download_dir = _safe_download_dir()   # ✅ ADD THIS
-
+        self.download_dir = _safe_download_dir()
+        
+        self._ua_applied_views = set()
+        
         return self
     # -------------------------------------------------
     # Navigation Finished
     # -------------------------------------------------
     def webView_didFinishNavigation_(self, webView, nav):
+        
+        view_id = id(webView)
 
+        if view_id not in self._ua_applied_views:
+            self._ua_applied_views.add(view_id)
+            
         owner = getattr(self, "owner", None)
 
         if not owner:
@@ -2163,15 +2332,21 @@ class _NavDelegate(NSObject):
                     req_type = str(body.get("type", "unknown"))
                     headers = body.get("headers", {}) or {}
 
-                    # structured metadata for MiniAI
-                    meta = {
-                        "type": req_type,
-                        "source": "js",
-                        "headers": headers
-                    }
+                    # -------------------------
+                    # PQ fingerprint (NEW)
+                    # -------------------------
+                    fp = darkelf_pq_fingerprint(
+                        url,
+                        headers,
+                        getattr(owner, "_pq_session_secret", "")
+                    )
+
+                    # attach PQ safely into headers (NOT replace structure)
+                    headers = headers or {}
+                    headers["_pq_fp"] = fp
 
                     if hasattr(owner, "mini_ai"):
-                        owner.mini_ai.monitor_network(url, meta)
+                        owner.mini_ai.monitor_network(url, headers)
 
                 except Exception as e:
                     print("[Darkelf netlog error]", e)
@@ -3557,6 +3732,7 @@ class Browser(NSObject):
             return None
             
         self.fpi = FirstPartyIsolation(tab_isolation=True)
+        self._pq_session_secret = secrets.token_hex(32)
         
         # ---- Usual field setup ----
         self.cookies_enabled = False
@@ -4127,6 +4303,12 @@ class Browser(NSObject):
           <span>Ephemeral Storage</span>
           <span class="stat-value" id="sys_storage">MEMORY</span>
         </div>
+        
+        <div class="line">
+          <i class="bi bi-cpu icon"></i>
+          <span>PQ Risk</span>
+          <span class="stat-value" id="pq-risk">LOW</span>
+        </div>           
       </div>
        
       <!-- System Analysis -->
@@ -4156,7 +4338,7 @@ class Browser(NSObject):
           <span>Exploits</span>
           <span class="stat-value" id="th_exploits">0</span>
         </div>
-
+                
         <div class="line">
           <i class="bi bi-fingerprint icon"></i>
           <span>Fingerprinting</span>
@@ -4277,7 +4459,27 @@ class Browser(NSObject):
       setText("th_malware", th.malware || 0);
       setText("th_exploits", th.exploits || 0);
       setText("th_fingerprinting", th.fingerprinting || 0);
+      
+      // -----------------------------
+      // PQ Risk (NEW)
+      // -----------------------------
+      const pq = stats.pq || {{}};
+      const pqRisk = pq.risk_level || "low";
 
+      const pqEl = document.getElementById("pq-risk");
+
+      if (pqEl) {{
+        pqEl.textContent = pqRisk.toUpperCase();
+
+        if (pqRisk === "high") {{
+          pqEl.style.color = "#ff3b30";
+        }} else if (pqRisk === "medium") {{
+          pqEl.style.color = "#ffcc00";
+        }} else {{
+          pqEl.style.color = "#36ff9a";
+        }}
+      }}
+      
       // IDS
       const ids = stats.ids || {{}};
       setText("ids_scrapers", ids.scrapers || 0);
@@ -5338,7 +5540,7 @@ class Browser(NSObject):
             
     @objc.python_method
     def _inject_core_scripts(self, ucc):
-    
+
         try:
             seed = getattr(self, "_current_canvas_seed", None)
             if seed is None:
@@ -5354,7 +5556,7 @@ class Browser(NSObject):
                     ucc.addUserScript_(skr)
                 except Exception as e:
                     print("[Inject] addUserScript_ failed:", e)
-                            
+
             _add(WEBRTC_DEFENSE_JS)
             _add(WEBGL_DEFENSE_JS)
             _add(canvas_script)
@@ -5366,8 +5568,6 @@ class Browser(NSObject):
             _add(PERFORMANCE_DEFENSE_JS)
             _add(CORE_JS)
             _add(NETWORK_MONITOR_JS)
-            #_add(INDEXEDDB_DEFENSE_JS)
-            #_add(STORAGE_DEFENSE_JS)
             
             if ENABLE_LOCAL_HSTS:
                 self._install_local_hsts(ucc)
@@ -5699,6 +5899,10 @@ class Browser(NSObject):
             # --- Build a fresh WebView configuration (App-Bound OFF) ---
             config = WKWebViewConfiguration.alloc().init()
             
+            config.setApplicationNameForUserAgent_(
+                "Version/17.5 Safari/605.1.15"
+            )
+            
             config.preferences().setValue_forKey_(True, "fullScreenEnabled")
             
             # Security
@@ -5713,44 +5917,21 @@ class Browser(NSObject):
                 config.setLimitsNavigationsToAppBoundDomains_(False)
             except Exception:
                 pass
-                
-            config = WKWebViewConfiguration.alloc().init()
 
             store = self.fpi.store_for(url, tab_uid=tab_index)
 
             config.setWebsiteDataStore_(store)
 
-            webview = WKWebView.alloc().initWithFrame_configuration_(
-                NSMakeRect(0, 0, width, height),
-                config
-            )
+            wk = WKWebView.alloc().initWithFrame_configuration_(frame, config)
 
-            # ✅ ATTACH CONTEXT MENU DELEGATE HERE
-            menu = webview.menu()
+            menu = wk.menu()
             if not menu:
                 menu = NSMenu.alloc().initWithTitle_("Context")
-                webview.setMenu_(menu)
+                wk.setMenu_(menu)
 
             menu_delegate = DarkelfMenuDelegate.alloc().init()
             menu.setDelegate_(menu_delegate)
             
-            wk = WKWebView.alloc().initWithFrame_configuration_(old.frame(), config)
-
-            if getattr(self, "_ui_delegate", None) is not None:
-                wk.setUIDelegate_(self._ui_delegate)
-
-            if getattr(self, "_nav_delegate", None) is not None:
-                wk.setNavigationDelegate_(self._nav_delegate)
-                
-            # THEN create webview
-            #self.webView = WKWebView.alloc().initWithFrame_configuration_(
-                #self.bounds(), config
-            #)
-
-            # attach delegates
-            #webview.setUIDelegate_(self.ui_delegate)
-            #webview.setNavigationDelegate_(self)
-
             # --- Set JS enabled or disabled ---
             prefs = WKPreferences.alloc().init()
             try:
@@ -5802,6 +5983,12 @@ class Browser(NSObject):
                 frame = old.frame() if hasattr(old, "frame") else ((0, 0), (1200, 760))
 
                 wk = WKWebView.alloc().initWithFrame_configuration_(frame, config)
+                
+                # attach rules BEFORE load
+                if ContentRuleManager._rule_list:
+                    wk.configuration().userContentController().addContentRuleList_(
+                        ContentRuleManager._rule_list
+                    )
 
                 wk.setFrame_(NSMakeRect(0, 0, 1200, 760))
                 
@@ -5821,7 +6008,7 @@ class Browser(NSObject):
                 # Mount & swap in
                 self.tabs[self.active].view = wk
                 self._mount_webview(wk)
-
+                
             except Exception as e:
                 print("[WK] creation failed:", e)
                 return
