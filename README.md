@@ -166,40 +166,9 @@ Together providing:
 
 > **Transport security + post-quantum-aware integrity + behavioral validation**
 
----
-
-### 🔬 Implementation Notes
-
-* SHA3-512 (NIST-standardized, quantum-resistant hashing)
-* Deterministic request fingerprinting (URL + headers + session secret)
-* Time-bucketed anti-replay model (~10s rolling window)
-* **Session-based PQ chaining (stable seed + counter evolution)**
-* Sliding window PQ tracking (`_pq_window`, `_pq_seen`) for entropy analysis
-* Adaptive anomaly detection based on fingerprint churn and replay signals
-* PQ signals integrated into internal MiniAI inspection pipeline
-* File integrity bound to session context (download hash linkage)
-* Fully memory-resident (ephemeral session scope, no persistence)
-* Passive design (no protocol or network changes required)
-* No telemetry or external dependencies
-* Designed for incremental hardening (trust, integrity, enforcement layers)
-
-### ⚙️ Design Philosophy
+___
 
 > TLS secures transport — PQ validates behavior.
-
----
-
-### 🔬 Implementation Notes
-
-* SHA3-512 (quantum-resistant hashing)
-* Session-seeded PQ chain (stable + evolving)
-* Rate-limited injection (no entropy spikes)
-* Sliding window analysis (`_pq_window`, `_pq_seen`)
-* Asynchronous execution (off UI thread)
-* No header/network modification
-* Fully in-memory, no telemetry
-
-___
  
 
 ### ⚙️ Design Philosophy
