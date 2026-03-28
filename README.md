@@ -1,4 +1,4 @@
-# 🧿 Darkelf Cocoa Browser 4.1.7
+# 🧿 Darkelf Cocoa Browser 4.1.8
 ### Ephemeral, Privacy-First macOS Browser (PyObjC + WebKit)
 
 > A hardened, memory-only browser designed for **zero persistence**, **tracker resistance**, **real-time threat detection**, and **post-quantum integrity awareness** — installable via `pip`, launching a full native GUI.
@@ -58,96 +58,149 @@ Runs locally (no telemetry)
 
 ---
 
-### 🔗 Post-Quantum Integrity Layer (Enhanced)
+### 🔗 Post-Quantum Integrity Layer
 
-Darkelf implements a **post-quantum–aware integrity and behavioral verification system** built on  
-**SHA3-512**, providing **tamper-evident browsing, trust monitoring, anomaly detection, and file integrity binding** — all without modifying network traffic.
+Darkelf introduces a **post-quantum–aware integrity and behavioral verification system** powered by **SHA3-512**, delivering tamper-evident browsing, anomaly detection, and session-bound trust — without modifying network traffic.
 
 ---
 
 ### 🧬 Core Design
 
-- Each navigation request is cryptographically fingerprinted (SHA3-512)  
-- Fingerprints incorporate URL, headers, session secret, and time bucket  
-- Requests are tracked within a **session-bound integrity model**  
-- Time-bucketed hashing provides **anti-replay protection**  
-- Resistant to quantum attacks (Grover-limited security model)  
+- Every request is cryptographically fingerprinted (SHA3-512)
+- Fingerprints bind:
+  - URL
+  - headers
+  - session secret
+  - time bucket (anti-replay)
+- **Session-bound integrity model** ensures continuity across requests
+- **Time-bucketed hashing** prevents replay attacks
+- Designed for **post-quantum resilience** (Grover-limited model)
+
+**PQ Chaining**
+- Session-seeded chain (`_pq_seed`)
+- Deterministic, counter-based evolution per request
+- No per-request randomness → stable, low-noise tracking
+- Maintains continuity without breaking web compatibility
 
 ---
 
-### 🧠 Behavioral Integrity Layer (New)
+### 🧠 Behavioral Integrity Layer
 
-Darkelf extends beyond static integrity with a **real-time behavioral PQ system**:
+Darkelf extends integrity into **real-time behavioral analysis**:
 
-- Sliding window tracking of recent request fingerprints (`_pq_window`)  
-- Deduplicated fingerprint tracking (`_pq_seen`) for replay detection  
-- Detection of **high-entropy request churn** (automation / injection signals)  
-- Adaptive anomaly scoring based on fingerprint uniqueness and frequency  
-- PQ signals integrated directly into **MiniAI network inspection pipeline**  
+- Sliding window fingerprint tracking (`_pq_window`)
+- Deduplicated fingerprint detection (`_pq_seen`)
+- Entropy-based anomaly detection
+- Adaptive scoring based on request patterns
+- Integrated into the **MiniAI inspection engine**
 
-This enables detection of:
-- Replay attempts  
-- Scripted or automated browsing patterns  
-- Silent request injection or manipulation  
-
----
-
-### 🛡️ Integrity + Trust Awareness
-
-Darkelf includes a **trust consistency layer**:
-
-- TLS certificate identity tracked per domain (TOFU-style model)  
-- Certificate fingerprints monitored during the session  
-- Unexpected changes trigger a **PQ trust warning (`PQ⚠`)**  
-
-Helps identify:
-- Man-in-the-middle (MITM) attacks  
-- Certificate swapping  
-- Suspicious infrastructure or routing changes  
+**Detects:**
+- Replay attempts
+- Automated or scripted browsing
+- Silent request injection or manipulation
 
 ---
 
-### 📦 File Integrity Protection (Enhanced)
+### 🛡️ Trust Awareness
 
-Darkelf provides **post-quantum file integrity verification with session binding**:
+- Tracks TLS certificate identity per domain (TOFU-style)
+- Monitors certificate consistency during sessions
+- Flags anomalies with **PQ⚠ warnings**
 
-- All downloads hashed using **SHA3-512**  
-- File hashes are **linked to the active PQ session context**  
-- Integrity records are stored **in-memory only (ephemeral)**  
+**Detects:**
+- MITM attacks
+- Certificate changes
+- Suspicious infrastructure shifts
 
-Capabilities:
-- Detects file modification during the session  
-- **Blob downloads are fully session-bound and verifiable**  
-- Standard downloads follow the same integrity model  
-- Prevents replay or substitution of downloaded content  
+---
+
+### 📦 File Integrity Protection
+
+- All downloads hashed with **SHA3-512**
+- Bound to active session context
+- Stored in-memory only (no persistence)
+
+**Capabilities:**
+- Detects in-session file tampering
+- Verifies blob and standard downloads
+- Prevents replay or substitution attacks
 
 ---
 
 ### 👁️ User Visibility
 
-PQ state is surfaced directly in the address bar:
+- `PQ✓` → Integrity active, no anomalies  
+- `PQ⚠` → Anomaly or trust issue detected  
 
-- `PQ✓` → Integrity active, trust stable, no anomalies detected  
-- `PQ⚠` → Trust anomaly detected (entropy spike, replay pattern, or trust inconsistency)  
-
-- Integrated alongside HTTPS indicators  
-- Updates dynamically per navigation/session behavior  
-- Passive and non-intrusive (no performance impact)  
+- Integrated with HTTPS indicators  
+- Updates dynamically per session  
+- Zero performance impact  
 
 ---
 
-### 🧠 What This Provides
+### 🚀 What This Provides
 
 - Tamper-evident request fingerprinting  
-- Session-bound integrity assurance  
-- Time-based replay resistance  
-- Behavioral anomaly detection (entropy + fingerprint churn)  
-- Detection of silent manipulation or injected requests  
-- Integration with real-time network inspection (MiniAI)  
-- Early warning of TLS trust anomalies  
-- **Session-bound integrity tracking for downloaded content**  
+- Session-bound integrity guarantees  
+- Replay resistance via time + chaining  
+- Behavioral anomaly detection  
+- Detection of injected or hidden requests  
+- Real-time MiniAI integration  
+- Early warning of trust anomalies  
+- Secure, session-bound download verification  
 
 ---
+
+### ⚙️ Design Philosophy
+
+> Darkelf's PQ layer augments — not replaces — TLS.
+
+* TLS → Secures transport
+* PQ Layer → Verifies:
+
+  * request integrity
+  * session continuity
+  * behavioral consistency
+
+Together providing:
+
+> **Transport security + post-quantum-aware integrity + behavioral validation**
+
+---
+
+### 🔬 Implementation Notes
+
+* SHA3-512 (NIST-standardized, quantum-resistant hashing)
+* Deterministic request fingerprinting (URL + headers + session secret)
+* Time-bucketed anti-replay model (~10s rolling window)
+* **Session-based PQ chaining (stable seed + counter evolution)**
+* Sliding window PQ tracking (`_pq_window`, `_pq_seen`) for entropy analysis
+* Adaptive anomaly detection based on fingerprint churn and replay signals
+* PQ signals integrated into internal MiniAI inspection pipeline
+* File integrity bound to session context (download hash linkage)
+* Fully memory-resident (ephemeral session scope, no persistence)
+* Passive design (no protocol or network changes required)
+* No telemetry or external dependencies
+* Designed for incremental hardening (trust, integrity, enforcement layers)
+
+### ⚙️ Design Philosophy
+
+> TLS secures transport — PQ validates behavior.
+
+---
+
+### 🔬 Implementation Notes
+
+* SHA3-512 (quantum-resistant hashing)
+* Session-seeded PQ chain (stable + evolving)
+* Rate-limited injection (no entropy spikes)
+* Sliding window analysis (`_pq_window`, `_pq_seen`)
+* Asynchronous execution (off UI thread)
+* No header/network modification
+* Fully in-memory, no telemetry
+
+___
+ 
 
 ### ⚙️ Design Philosophy
 
