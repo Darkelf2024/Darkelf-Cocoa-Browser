@@ -1,339 +1,203 @@
-# 🧿 Darkelf Cocoa Browser 4.1.8
-### Ephemeral, Privacy-First macOS Browser (PyObjC + WebKit)
+# 🧿 Darkelf Cocoa Browser 4.1.9
+### Ephemeral, Privacy‑First macOS Browser (PyObjC + WebKit)
 
-> A hardened, memory-only browser designed for **zero persistence**, **tracker resistance**, **real-time threat detection**, and **post-quantum integrity awareness** — installable via `pip`, launching a full native GUI.
+A hardened, **memory‑only** macOS browser designed for **zero persistence**, **tracker resistance**, **real‑time threat detection**, and **post‑quantum integrity awareness** — installable via `pip` with a full native GUI.
 
----
-
-## 🚀 Overview
-
-Darkelf Cocoa Browser is a macOS-native browser built using **PyObjC + WebKit**, focused on:
-
-- 🔒 Ephemeral browsing (RAM-only)
-- 🧠 On-device AI threat detection (Darkelf MiniAI Sentinel)
-- 🚫 Aggressive tracker & telemetry blocking
-- 🧬 First-party + tab isolation
-- 🧯 Automatic threat lockdown system
-- 🔗 Post-quantum request integrity (SHA3-512 chain)
-
-Unlike traditional browsers, Darkelf **never persists browsing data to disk** and operates with a **defense-in-depth security model**.
+> **Core promise:** Darkelf Cocoa aims to keep browsing state **in RAM only** (cookies, cache, history, local storage, IndexedDB, etc.) and discard it when the process exits, while applying defense‑in‑depth protections against tracking and hostile automation.
 
 ---
 
-## ⚡ Installation
+## Table of Contents
+- [Why Darkelf Cocoa](#why-darkelf-cocoa)
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Security Model](#security-model)
+- [Post‑Quantum Integrity Layer (PQ)](#post-quantum-integrity-layer-pq)
+- [MiniAI Sentinel (On‑Device IDS)](#miniai-sentinel-on-device-ids)
+- [First‑Party & Tab Isolation](#first-party--tab-isolation)
+- [Downloads & File Integrity](#downloads--file-integrity)
+- [User Indicators](#user-indicators)
+- [Platform Support](#platform-support)
+- [License](#license)
+- [Author](#author)
+- [Disclaimer](#disclaimer)
+
+---
+
+## Why Darkelf Cocoa
+Darkelf Cocoa Browser is the macOS edition of the Darkelf‑Mini project, implemented with **PyObjC** bindings to Apple’s **Cocoa** + **WebKit** frameworks.
+
+It’s built for users who want:
+- **Ephemeral browsing** (no retained session artifacts)
+- **Aggressive tracking resistance**
+- **Local-only security monitoring** (no telemetry)
+- **Integrity signaling** and session-bound consistency checks
+
+---
+
+## Features
+
+### 🔒 Zero‑Persistence Runtime (RAM‑Only)
+- No disk-backed cookies/cache/history/local storage
+- Uses **non‑persistent WebKit data stores**
+- Designed to discard browsing data automatically when the app exits
+
+### 🚫 Tracker & Telemetry Resistance
+- Built‑in content blocking rules (WebKit Content Rule Lists)
+- Additional DOM/CSS suppression for common banners/ads and nuisance overlays
+- Optional protocol/scheme restrictions (blocks risky schemes like `file:`, `ftp:`, `javascript:`)
+
+### 🧬 Isolation by Design
+- **First‑Party Isolation (FPI)**: compartmentalized storage by site
+- Optional **tab‑level isolation** for stronger separation
+- Reduces cross‑site correlation and session leakage risk
+
+### 🧠 On‑Device Threat Detection (MiniAI Sentinel)
+- Local intrusion/abuse heuristics
+- Tracks suspicious navigation patterns, scanners, credential stuffing behaviors, and fingerprinting indicators
+- Automatic **lockdown mode** when critical threat thresholds are met
+- No external reporting or analytics
+
+### 🔗 Post‑Quantum Integrity Awareness (PQ Layer)
+- Deterministic, session‑bound request integrity signals using **SHA3**
+- Behavioral anomaly checks and entropy scoring
+- Trust-change awareness via TLS certificate tracking (TOFU‑style)
+
+---
+
+## Installation
 
 ```bash
 pip install darkelf-cocoa
+```
+
+> If you are packaging for PyPI, ensure your project metadata clearly indicates **macOS-only**, and include PyObjC/WebKit prerequisites in your docs.
+
+---
+
+## Quick Start
+
+```bash
 darkelf
 ```
 
 ---
 
-## 🛡️ Security Architecture
+## Security Model
 
-### 🔥 Memory-Only Execution
-- No cookies, cache, or history stored
-- Uses non-persistent WebKit storage
-- Data wiped completely on exit
-
----
-
-### 🧬 First-Party & Tab Isolation
-- Domain-level isolation (default)
-- Tab isolation (implemented)
-- No shared global storage
-- Prevents cross-site tracking & session leakage
+Darkelf Cocoa uses a defense‑in‑depth approach:
+1. **Ephemeral storage** (RAM-only browsing state)
+2. **Isolation** (site/tab compartmentalization)
+3. **Content blocking** (known tracker patterns + nuisance suppression)
+4. **On-device monitoring** (MiniAI Sentinel)
+5. **Integrity awareness** (PQ layer + TLS trust consistency)
 
 ---
 
-### 🧠 Darkelf MiniAI Sentinel (On-Device IDS)
-Detects:
-- Trackers & fingerprinting  
-- Vulnerability scanners  
-- Credential stuffing  
-- Automation frameworks  
-- Exploit attempts  
+## Post‑Quantum Integrity Layer (PQ)
 
-Runs locally (no telemetry)
+Darkelf implements a **post‑quantum–aware integrity and behavioral verification system** using **SHA3-512/SHA3-256** primitives.  
+This layer is designed to provide **tamper‑evident, session‑bound consistency signals** *without modifying network traffic*.
 
----
-
-### 🔗 Post-Quantum Integrity Layer
-
-Darkelf introduces a **post-quantum–aware integrity and behavioral verification system** powered by **SHA3-512**, delivering tamper-evident browsing, anomaly detection, and session-bound trust — without modifying network traffic.
-
----
-
-### 🧬 Core Design
-
-- Every request is cryptographically fingerprinted (SHA3-512)
-- Fingerprints bind:
+### ✅ What PQ is (in Darkelf)
+- **Deterministic request fingerprinting** bound to:
   - URL
-  - headers
-  - session secret
-  - time bucket (anti-replay)
-- **Session-bound integrity model** ensures continuity across requests
-- **Time-bucketed hashing** prevents replay attacks
-- Designed for **post-quantum resilience** (Grover-limited model)
+  - normalized metadata (where available)
+  - session seed (hidden)
+  - time bucket (anti‑replay)
+- **Per‑tab chaining**:
+  - per‑tab seed (`_pq_seed`)
+  - monotonic per‑tab counter (`_pq_counter`)
+  - request-bound chain output (`darkelf_pq_chain`)
 
-**PQ Chaining**
-- Session-seeded chain (`_pq_seed`)
-- Deterministic, counter-based evolution per request
-- No per-request randomness → stable, low-noise tracking
-- Maintains continuity without breaking web compatibility
+### 🔁 PQ Chaining
+- Session/Tab seeded chain progression
+- Stable, low‑noise integrity evolution per request
+- Counter-based continuity designed not to disrupt rendering
 
----
+### 🕵️ Minimal Deception Layer (Third‑Party Contexts)
+- Applies only in **third‑party** situations
+- Very low frequency
+- Derived from PQ signals
+- Intended to reduce tracker confidence and correlation quality
 
-### 🧠 Behavioral Integrity Layer
+### 🧠 PQ Behavioral Intelligence
+- Sliding window tracking (`_pq_window`)
+- Unique fingerprint tracking (`_pq_seen`)
+- Entropy-based anomaly scoring for automation/replay-like patterns
+- PQ signals contribute to the overall threat score and “PQ risk” indicator
 
-Darkelf extends integrity into **real-time behavioral analysis**:
-
-- Sliding window fingerprint tracking (`_pq_window`)
-- Deduplicated fingerprint detection (`_pq_seen`)
-- Entropy-based anomaly detection
-- Adaptive scoring based on request patterns
-- Integrated into the **MiniAI inspection engine**
-
-**Detects:**
-- Replay attempts
-- Automated or scripted browsing
-- Silent request injection or manipulation
-
----
-
-### 🛡️ Trust Awareness
-
-- Tracks TLS certificate identity per domain (TOFU-style)
-- Monitors certificate consistency during sessions
-- Flags anomalies with **PQ⚠ warnings**
-
-**Detects:**
-- MITM attacks
-- Certificate changes
-- Suspicious infrastructure shifts
+### 🔐 TLS Trust Awareness (TOFU‑Style)
+- Tracks server certificate subject summaries per host
+- Flags trust changes during a session
+- Integrates with UI trust indicators:
+  - stable trust → normal PQ indicator
+  - changed trust → warning indicator
 
 ---
 
-### 📦 File Integrity Protection
+## MiniAI Sentinel (On‑Device IDS)
 
-- All downloads hashed with **SHA3-512**
-- Bound to active session context
-- Stored in-memory only (no persistence)
+### Detects (heuristic signals)
+- Trackers and third‑party correlation attempts
+- Fingerprinting indicators (canvas/webgl/audio keywords & patterns)
+- Scraping/bot-like navigation patterns
+- Credential stuffing-like bursts against login endpoints
+- Scanner-like domain velocity patterns
+- Suspicious URL encodings / traversal probes
 
-**Capabilities:**
-- Detects in-session file tampering
-- Verifies blob and standard downloads
-- Prevents replay or substitution attacks
+### Automatic Lockdown Mode
+When critical threats exceed threshold:
+- Stops loading across tabs
+- Opens an internal report console (`darkelf://report`)
+- Temporarily disables navigation controls
+- Auto-unlocks after a defined duration (configurable)
 
----
-
-### 👁️ User Visibility
-
-- `PQ✓` → Integrity active, no anomalies  
-- `PQ⚠` → Anomaly or trust issue detected  
-
-- Integrated with HTTPS indicators  
-- Updates dynamically per session  
-- Zero performance impact  
+> MiniAI runs locally. No telemetry, analytics, or network beacons are included.
 
 ---
 
-### 🚀 What This Provides
-
-- Tamper-evident request fingerprinting  
-- Session-bound integrity guarantees  
-- Replay resistance via time + chaining  
-- Behavioral anomaly detection  
-- Detection of injected or hidden requests  
-- Real-time MiniAI integration  
-- Early warning of trust anomalies  
-- Secure, session-bound download verification  
+## First‑Party & Tab Isolation
+- Storage is separated by an eTLD+1 approximation (with an auth whitelist for common login flows)
+- Optional tab-level compartmentalization for stricter isolation
+- Designed to prevent cross-site storage reuse and reduce tracking surface
 
 ---
 
-### ⚙️ Design Philosophy
+## Downloads & File Integrity
 
-> Darkelf's PQ layer augments — not replaces — TLS.
+### Safe-by-default behavior
+- Download routing can be restricted to avoid persistence
+- Temporary download directories can be wiped
 
-* TLS → Secures transport
-* PQ Layer → Verifies:
-
-  * request integrity
-  * session continuity
-  * behavioral consistency
-
-Together providing:
-
-> **Transport security + post-quantum-aware integrity + behavioral validation**
-
-___
-
-> TLS secures transport — PQ validates behavior.
- 
-
-### ⚙️ Design Philosophy
-
-> Darkelf's PQ layer augments — not replaces — TLS.
-
-- TLS → Secures transport  
-- PQ Layer → Verifies:
-  - request integrity  
-  - session continuity  
-  - behavioral consistency  
-
-Together providing:
-
-> **Transport security + post-quantum-aware integrity + behavioral validation**
+### File integrity protection
+- Downloads can be hashed with **SHA3** and bound to the session PQ chain
+- In-memory hash registry enables within-session integrity checks for downloaded artifacts
 
 ---
 
-### 🔬 Implementation Notes
-
-- SHA3-512 (NIST-standardized, quantum-resistant hashing)  
-- Deterministic request fingerprinting (URL + headers + session secret)  
-- Time-bucketed anti-replay model (~10s rolling window)  
-- Sliding window PQ tracking (`_pq_window`, `_pq_seen`) for entropy analysis  
-- Adaptive anomaly detection based on fingerprint churn and replay signals  
-- PQ signals integrated into internal MiniAI inspection pipeline  
-- File integrity bound to session context (download hash linkage)  
-- Fully memory-resident (ephemeral session scope, no persistence)  
-- Passive design (no protocol or network changes required)  
-- No telemetry or external dependencies  
-- Designed for incremental hardening (trust, integrity, enforcement layers)
+## User Indicators
+- `PQ✓` → TLS secure + PQ integrity active (stable)
+- `PQ⚠` → trust anomaly detected (e.g., TLS trust change during session)
 
 ---
 
-### 🚨 Automatic Lockdown Mode
-- Stops all tabs on threat
-- Locks UI controls
-- Displays threat console
-- Auto recovery after cooldown
+## Platform Support
+- **macOS only** (Cocoa + WebKit via PyObjC)
 
 ---
 
-### 🛑 Network Enforcement
-- HTTPS upgrade enforcement
-- Tracker & ad blocking
-- Dangerous protocol blocking
+## License
+**LGPL-3.0-or-later**
 
 ---
 
-### 🔐 TLS + Hybrid PQ Transport (macOS)
-
-- Uses macOS WebKit TLS stack
-- Supports **hybrid key exchange (X25519 + ML-KEM768)** when available
-- Combined with Darkelf PQ layer for **transport + integrity coverage**
+## Author
+Dr. Kevin Moore (2025)
 
 ---
 
-## 🔒 Privacy Features
-
-- Zero telemetry
-- Ephemeral downloads
-- Anti-fingerprinting detection
-- Third-party tracker detection
-- PQ-safe request integrity (SHA3-512)
-
----
-
-## 🖥️ GUI Features
-
-- Native macOS UI
-- Tabbed browsing
-- Download progress UI
-- Built-in threat console (`darkelf://report`)
-- 🔒 HTTPS + **PQ indicator system**
-
----
-
-## ⌨️ Keyboard Shortcuts
-
-| Shortcut | Action |
-|--------|--------|
-| Cmd + T | New tab |
-| Cmd + W | Close tab |
-| Cmd + R | Reload |
-| Cmd + S | Snapshot |
-| Cmd + L | Focus address bar |
-| Cmd + ← / → | Back / Forward |
-| Cmd + Shift + L | Threat Console |
-| Cmd + + / - | Zoom |
-
----
-
-## 🗂️ Isolated Darkelf Library
-
-Darkelf uses a dedicated sandboxed directory:
-
-```
-~/Desktop/Darkelf Library/
-├── Darkelf Snap/
-└── Darkelf Temp/
-```
-
-### 🔒 Security Design
-
-- Separate from system browser storage
-- Randomized filenames for downloads
-- No persistent user profile
-- Fully disposable data structure
-
-### 🧹 Cleanup
-
-- Temporary files easily wiped
-- No long-term artifacts
-- Reduced forensic traceability
-
----
-
-## 🧭 Upcoming Features
-
-### 🧅 Tor Integration *(Planned)*
-- IP anonymization
-- Circuit isolation
-
-### 📐 Letterboxing *(Planned)*
-- Anti-screen fingerprinting
-
-### 🦊 Firefox UA Mode *(Planned)*
-- Reduce fingerprint uniqueness
-
-### 🎛️ Privacy Control Panel *(In Development)*
-- Toggle security modes
-- Manage isolation & anonymity
-
----
-
-## 🔮 Roadmap Philosophy
-
-> Privacy is not static — it adapts to threat models.
-
-Darkelf focuses on:
-- Minimizing fingerprint surface
-- Increasing anonymity
-- Adding post-quantum resilience
-- Giving users full control
-
----
-
-## ⚠️ Platform
-macOS only
-
----
-
-## 📜 License
-LGPL-3.0-or-later
-
----
-
-## 👨‍💻 Author
-Dr. Kevin Moore
-
----
-
-## ⭐ Highlights
-- GUI via pip
-- Memory-only architecture
-- Built-in IDS
-- Lockdown system
-- Advanced isolation
+## Disclaimer
+This project is security-focused software provided **without warranty**.  
+If you distribute binaries or integrate cryptographic components beyond Apple’s platform frameworks, you are responsible for applicable compliance (export controls, local regulations, etc.).
