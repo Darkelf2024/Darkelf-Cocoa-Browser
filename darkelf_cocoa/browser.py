@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.1.8 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.1.9 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -122,29 +122,72 @@ def log(level, *msg):
     if level <= LOG_LEVEL:
         print(*msg)
         
-def darkelf_pq_fingerprint(url: str, headers: dict = None) -> str:
-    """
-    Post-quantum safe request fingerprint (SHA3-256)
-    Lightweight, deterministic, replay-resistant
-    """
+def darkelf_destroy_tab(tab):
+    try:
+        view = getattr(tab, "view", None)
+
+        if not view:
+            return
+
+        # 🔥 STOP FIRST
+        try:
+            view.stopLoading()
+        except:
+            pass
+
+        # 🔥 DETACH DELEGATES
+        try:
+            view.setNavigationDelegate_(None)
+            view.setUIDelegate_(None)
+        except:
+            pass
+
+        # 🔥 LOAD BLANK (VERY IMPORTANT)
+        try:
+            view.loadHTMLString_baseURL_("", None)
+        except:
+            pass
+
+        # 🔥 REMOVE FROM UI
+        try:
+            view.removeFromSuperview()
+        except:
+            pass
+
+        # 🔥 DELAY FINAL RELEASE (prevents async crash)
+        def _release():
+            try:
+                tab.view = None
+            except:
+                pass
+
+        threading.Timer(0.2, _release).start()
+
+    except Exception as e:
+        print("[DestroyTab error]", e)
+        
+def darkelf_pq_fingerprint(url: str, headers: dict = None, owner=None) -> str:
     h = hashlib.sha3_512()
 
     # bind URL
     h.update(url.encode("utf-8", errors="ignore"))
 
-    # bind headers (if any)
+    # bind headers
     if headers:
         for k, v in sorted(headers.items()):
             h.update(str(k).encode())
             h.update(str(v).encode())
 
-    # time window (10s buckets → prevents replay)
+    # time bucket
     h.update(str(int(time.time() // 10)).encode())
+
+    # 🔥 NEW: hidden salt (secrecy)
+    if owner and hasattr(owner, "_pq_salt"):
+        h.update(owner._pq_salt)
 
     return h.hexdigest()
     
 def darkelf_pq_chain(owner, url: str) -> bytes:
-    import hashlib
 
     h = hashlib.sha3_512()
 
@@ -154,7 +197,7 @@ def darkelf_pq_chain(owner, url: str) -> bytes:
     if tab and getattr(tab, "_pq_seed", None):
         h.update(tab._pq_seed)
     else:
-        h.update(owner._pq_seed)
+        return b"\x00" * 32  # 🔥 NO FALLBACK
 
     # bind URL
     h.update(url.encode("utf-8", errors="ignore"))
@@ -173,7 +216,6 @@ def darkelf_is_pq_active(owner) -> bool:
     return hasattr(owner, "_pq_seed") and bool(getattr(owner, "_pq_seed", None))
     
 def darkelf_sha3_bytes(data: bytes) -> str:
-    import hashlib
     h = hashlib.sha3_512()
     h.update(data)
     return h.hexdigest()
@@ -193,7 +235,7 @@ def apply_darkelf_theme():
     NSApplication.sharedApplication().setAppearance_(
         NSAppearance.appearanceNamed_("NSAppearanceNameDarkAqua")
     )
-    
+
 class DarkelfNetworkPolicy:
     def __init__(self, browser):
         self.browser = browser
@@ -201,36 +243,113 @@ class DarkelfNetworkPolicy:
     def inspect(self, url, nav_type):
         url = str(url or "")
 
-        # Default decision
         decision = "allow"
         meta = {"source": "net_policy", "type": str(nav_type)}
 
-        # Skip PQ on sensitive contexts
+        # ----------------------------
+        # HARD SKIP: sensitive contexts
+        # ----------------------------
         if any(x in url for x in ("data:", "blob:", "canvas", "fingerprint")):
             return decision, meta
 
-        tab = getattr(self.browser, "active_tab", None)
-        if tab:
-            if not hasattr(tab, "_pq_counter"):
-                tab._pq_counter = 0
-            tab._pq_counter += 1
-            counter = tab._pq_counter
-        else:
-            counter = 0
+        # ----------------------------
+        # HARD SKIP: fingerprint test sites
+        # ----------------------------
+        if any(x in url for x in ("browserleaks", "amiunique", "coveryourtracks")):
+            return decision, meta
 
-        # Warm-up
+        # ----------------------------
+        # PARSE URL
+        # ----------------------------
+        try:
+            parsed = urlparse(url)
+            host = parsed.hostname or ""
+            path = parsed.path or ""
+        except Exception:
+            return decision, meta
+
+        # ----------------------------
+        # QUIET MODE: static resources
+        # ----------------------------
+        if isinstance(nav_type, str) and nav_type.lower() in ("image", "media", "font"):
+            return decision, meta
+
+        # ----------------------------
+        # SAFE TAB ACCESS
+        # ----------------------------
+        tab = getattr(self.browser, "active_tab", None)
+
+        if not tab or not hasattr(tab, "view") or tab.view is None:
+            return decision, meta
+
+        # 🔥 REQUIRE per-tab seed
+        if not hasattr(tab, "_pq_seed") or not tab._pq_seed:
+            return decision, meta
+
+        # ----------------------------
+        # COUNTER
+        # ----------------------------
+        if not hasattr(tab, "_pq_counter"):
+            tab._pq_counter = 0
+
+        tab._pq_counter = min(tab._pq_counter + 1, 1_000_000)
+        counter = tab._pq_counter
+
+        # ----------------------------
+        # WARM-UP
+        # ----------------------------
         if counter < 40:
             return decision, meta
 
-        # Deterministic sampling
+        # ----------------------------
+        # PQ INJECTION
+        # ----------------------------
         try:
-            inject = False
-            if hasattr(self.browser, "_pq_seed") and self.browser._pq_seed:
-                inject = (int(hashlib.sha3_512(url.encode("utf-8", "ignore")).hexdigest(), 16) % 11 == 0)
+            h = hashlib.sha3_256()
 
-            if inject:
+            if host:
+                h.update(host.encode())
+
+            bucket = path[:32]
+            h.update(bucket.encode())
+
+            h.update(url.encode("utf-8", "ignore"))
+
+            digest = h.digest()
+
+            if digest[0] % 11 == 0:
                 pq_bytes = darkelf_pq_chain(self.browser, url)
                 meta["_pq_fp"] = pq_bytes[:16].hex()
+
+        except Exception:
+            return decision, meta
+
+        # ----------------------------
+        # TRACKER DECEPTION (FIXED INDENT)
+        # ----------------------------
+        try:
+            if "_pq_fp" in meta and host:
+
+                first_party = getattr(self.browser, "current_url_for_fpi", "")
+                is_third_party = False
+
+                if first_party:
+                    fp_host = urlparse(first_party).hostname or ""
+                    if fp_host and not host.endswith(fp_host):
+                        is_third_party = True
+
+                if is_third_party:
+                    d = hashlib.sha3_256((host + url).encode()).digest()
+
+                    if d[0] % 23 == 0:
+                        real_fp = meta["_pq_fp"]
+
+                        decoy = hashlib.sha3_256(
+                            (real_fp + host).encode()
+                        ).digest()
+
+                        meta["_pq_fp_alt"] = decoy[:8].hex()
+
         except Exception:
             pass
 
@@ -439,21 +558,34 @@ class FirstPartyIsolation:
     # Get storage container
     # --------------------------------------------------------
 
-    def store_for(self, url, tab_uid=None):
+    def store_for(self, url, tab_uid=None, nonce=None):
+        key = self._key(url, tab_uid, nonce)
 
-        key = self._key(url, tab_uid)
-        
         print("[FPI] Using store:", key)
-        
-        if key not in self._stores:
 
-            # IMPORTANT: non-persistent memory store
+        # ensure store map exists
+        if not hasattr(self, "_stores"):
+            self._stores = {}
+
+        # create store if missing
+        if key not in self._stores:
             store = WKWebsiteDataStore.nonPersistentDataStore()
 
+            # 🔥 DO NOT PURGE HERE (causes segfault)
             self._stores[key] = store
 
         return self._stores[key]
+        
+    def clear_tab(self, url, tab_uid=None, nonce=None):
+        key = self._key(url, tab_uid, nonce)
 
+        if key in self._stores:
+            try:
+                del self._stores[key]
+                print("[FPI] Cleared store:", key)
+            except Exception as e:
+                print("[FPI] Clear error:", e)
+                
     # --------------------------------------------------------
     # Clear all stores (browser shutdown)
     # --------------------------------------------------------
@@ -461,7 +593,7 @@ class FirstPartyIsolation:
     def clear(self):
 
         self._stores.clear()
-        
+            
 def _darkelf_library():
 
     desktop = os.path.join(os.path.expanduser("~"), "Desktop")
@@ -3760,6 +3892,9 @@ class Browser(NSObject):
         # Strong session seed (required)
         self._pq_seed = secrets.token_bytes(32)
 
+        # 🔥 NEW: hidden session salt (for fingerprint secrecy)
+        self._pq_salt = hashlib.sha3_256(self._pq_seed).digest()[:16]
+
         # ----------------------------
         # PQ SERIALIZATION QUEUE
         # ----------------------------
@@ -3926,7 +4061,7 @@ class Browser(NSObject):
 
                     # rebuild configuration
                     config = WKWebViewConfiguration.alloc().init()
-                    config.setProcessPool_(self.process_pool)
+                    config.setProcessPool_(WKProcessPool.alloc().init())
 
                     # preserve memory-only storage
                     config.setWebsiteDataStore_(
@@ -5725,7 +5860,7 @@ class Browser(NSObject):
         if key not in self._containers:
 
             # storage container (cookies, indexedDB, etc)
-            store = self.fpi.store_for(url, tab_uid=len(self.tabs))
+            store = self.fpi.store_for(url, tab_uid=len(self.tabs), nonce=container_nonce)
 
             # isolated WebKit network process
             pool = WKProcessPool.alloc().init()
@@ -6175,6 +6310,9 @@ class Browser(NSObject):
             tab_uid=tab_uid
         )
 
+        tab._pq_seed = os.urandom(32)
+        tab._pq_counter = 0
+        tab._nonce = secrets.token_hex(8)
         # ----------------------------
         # 🔥 PQ INITIALIZATION (PER TAB)
         # ----------------------------
@@ -6353,31 +6491,36 @@ class Browser(NSObject):
         if not (0 <= idx < len(self.tabs)):
             return
 
-        try:
-            view = self.tabs[idx].view
+        tab = self.tabs[idx]
 
-            if view:
-                # 🔥 FULL teardown (kills YouTube / media pipelines)
-                self._teardown_webview(view)
-
-        except Exception as e:
-            print("[CloseTab] teardown error:", e)
-
-        # remove tab
-        del self.tabs[idx]
-
-        # if no tabs left create homepage
-        if not self.tabs:
-            self._add_tab(home=True)
-            return
-
-        # adjust active index
+        # 🔥 STEP 1 — adjust active index BEFORE deletion
         if idx == self.active:
-            self.active = min(idx, len(self.tabs) - 1)
+            if len(self.tabs) > 1:
+                self.active = min(idx, len(self.tabs) - 2)
+            else:
+                self.active = -1
         elif idx < self.active:
             self.active -= 1
 
-        # mount next tab
+        # 🔥 STEP 2 — destroy ONLY ONCE (CRITICAL)
+        try:
+            darkelf_destroy_tab(tab)
+        except Exception as e:
+            print("[CloseTab] destroy error:", e)
+
+        # 🔥 STEP 3 — remove tab
+        del self.tabs[idx]
+
+        # 🔥 STEP 4 — if no tabs left → create new
+        if not self.tabs:
+            self.active = -1
+            self._add_tab(home=True)
+            return
+
+        # 🔥 STEP 5 — ensure valid index
+        self.active = max(0, min(self.active, len(self.tabs) - 1))
+
+        # 🔥 STEP 6 — mount new active tab
         wk = self.tabs[self.active].view
 
         try:
@@ -6385,6 +6528,7 @@ class Browser(NSObject):
         except Exception as e:
             print("[CloseTab] mount error:", e)
 
+        # 🔥 STEP 7 — UI sync
         self._update_tab_buttons()
         self._sync_addr()
 
