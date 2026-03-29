@@ -160,7 +160,7 @@ When critical threats exceed threshold:
 
 ## First‑Party & Tab Isolation
 - Storage is separated by an eTLD+1 approximation (with an auth whitelist for common login flows)
-- Optional tab-level compartmentalization for stricter isolation
+- Implemented tab-level compartmentalization for stricter isolation
 - Designed to prevent cross-site storage reuse and reduce tracking surface
 
 ---
