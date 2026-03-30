@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.1.9 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.2.0 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -192,7 +192,10 @@ def darkelf_pq_chain(owner, url: str) -> bytes:
     h = hashlib.sha3_512()
 
     # session identity
-    tab = getattr(owner, "active_tab", None)
+    tab = None
+
+    if hasattr(owner, "tabs") and 0 <= getattr(owner, "active", -1) < len(owner.tabs):
+        tab = owner.tabs[owner.active]
 
     if tab and getattr(tab, "_pq_seed", None):
         h.update(tab._pq_seed)
@@ -202,15 +205,22 @@ def darkelf_pq_chain(owner, url: str) -> bytes:
     # bind URL
     h.update(url.encode("utf-8", errors="ignore"))
 
-    # 🔥 FIX: use per-tab counter
-    tab = getattr(owner, "active_tab", None)
+    if hasattr(owner, "tabs") and 0 <= getattr(owner, "active", -1) < len(owner.tabs):
+        tab = owner.tabs[owner.active]
 
     if tab and hasattr(tab, "_pq_counter"):
-        h.update(str(tab._pq_counter).encode())
+        h.update(tab._pq_seed[:8])
     else:
         h.update(b"0")
 
     return h.digest()
+    
+def get_canvas_seed(tab):
+    if not hasattr(tab, "_pq_seed") or not tab._pq_seed:
+        return 1337
+
+    # convert first 4 bytes → stable int
+    return int.from_bytes(tab._pq_seed[:4], "big")
     
 def darkelf_is_pq_active(owner) -> bool:
     return hasattr(owner, "_pq_seed") and bool(getattr(owner, "_pq_seed", None))
@@ -247,16 +257,17 @@ class DarkelfNetworkPolicy:
         meta = {"source": "net_policy", "type": str(nav_type)}
 
         # ----------------------------
-        # HARD SKIP: sensitive contexts
+        # HARD SKIP: sensitive contexts (FIXED: minimal + realistic)
         # ----------------------------
-        if any(x in url for x in ("data:", "blob:", "canvas", "fingerprint")):
+        if url.startswith(("data:", "blob:")):
             return decision, meta
 
         # ----------------------------
-        # HARD SKIP: fingerprint test sites
+        # HARD SKIP: fingerprint test sites (FIXED: NO SPECIAL TREATMENT)
         # ----------------------------
+        # Keep section but neutralize behavior difference
         if any(x in url for x in ("browserleaks", "amiunique", "coveryourtracks")):
-            return decision, meta
+            pass  # 🔥 DO NOTHING (important)
 
         # ----------------------------
         # PARSE URL
@@ -269,7 +280,7 @@ class DarkelfNetworkPolicy:
             return decision, meta
 
         # ----------------------------
-        # QUIET MODE: static resources
+        # QUIET MODE: static resources (SAFE)
         # ----------------------------
         if isinstance(nav_type, str) and nav_type.lower() in ("image", "media", "font"):
             return decision, meta
@@ -277,17 +288,21 @@ class DarkelfNetworkPolicy:
         # ----------------------------
         # SAFE TAB ACCESS
         # ----------------------------
-        tab = getattr(self.browser, "active_tab", None)
+        tab = None
+
+        if hasattr(self.browser, "tabs") and 0 <= getattr(self.browser, "active", -1) < len(self.browser.tabs):
+            tab = self.browser.tabs[self.browser.active]
 
         if not tab or not hasattr(tab, "view") or tab.view is None:
             return decision, meta
 
-        # 🔥 REQUIRE per-tab seed
+        # 🔥 REQUIRE per-tab seed (KEEP but STABILIZE)
         if not hasattr(tab, "_pq_seed") or not tab._pq_seed:
-            return decision, meta
+            tab._pq_seed = hashlib.sha256(os.urandom(32)).digest()
+            tab._pq_seed_locked = True
 
         # ----------------------------
-        # COUNTER
+        # COUNTER (KEEP but REMOVE SIDE EFFECT)
         # ----------------------------
         if not hasattr(tab, "_pq_counter"):
             tab._pq_counter = 0
@@ -296,16 +311,19 @@ class DarkelfNetworkPolicy:
         counter = tab._pq_counter
 
         # ----------------------------
-        # WARM-UP
+        # WARM-UP (FIXED: NO BEHAVIOR CHANGE)
         # ----------------------------
         if counter < 40:
-            return decision, meta
+            pass  # 🔥 DO NOTHING (was fingerprint leak)
 
         # ----------------------------
-        # PQ INJECTION
+        # PQ INJECTION (FIXED: deterministic per session + host)
         # ----------------------------
         try:
             h = hashlib.sha3_256()
+
+            # session-stable seed
+            h.update(tab._pq_seed)
 
             if host:
                 h.update(host.encode())
@@ -313,19 +331,18 @@ class DarkelfNetworkPolicy:
             bucket = path[:32]
             h.update(bucket.encode())
 
-            h.update(url.encode("utf-8", "ignore"))
-
             digest = h.digest()
 
-            if digest[0] % 11 == 0:
-                pq_bytes = darkelf_pq_chain(self.browser, url)
-                meta["_pq_fp"] = pq_bytes[:16].hex()
+            # 🔥 deterministic decision (NOT random per request)
+            if digest[0] & 1:  # stable condition
+                pq_bytes = hashlib.sha3_512(tab._pq_seed).digest()
+                meta["_pq_fp"] = pq_bytes[:32].hex()
 
         except Exception:
             return decision, meta
 
         # ----------------------------
-        # TRACKER DECEPTION (FIXED INDENT)
+        # TRACKER DECEPTION (FIXED: deterministic, no randomness)
         # ----------------------------
         try:
             if "_pq_fp" in meta and host:
@@ -339,9 +356,10 @@ class DarkelfNetworkPolicy:
                         is_third_party = True
 
                 if is_third_party:
-                    d = hashlib.sha3_256((host + url).encode()).digest()
+                    d = hashlib.sha3_256((tab._pq_seed + host.encode())).digest()
 
-                    if d[0] % 23 == 0:
+                    # 🔥 deterministic condition
+                    if d[0] & 2:
                         real_fp = meta["_pq_fp"]
 
                         decoy = hashlib.sha3_256(
@@ -354,7 +372,7 @@ class DarkelfNetworkPolicy:
             pass
 
         return decision, meta
-            
+        
 class DownloadProgressView(NSView):
 
     def initWithFrame_(self, frame):
@@ -5848,6 +5866,98 @@ class Browser(NSObject):
 
         cfg = WKWebViewConfiguration.alloc().init()
 
+        # ----------------------------
+        # USER CONTENT CONTROLLER
+        # ----------------------------
+        ucc = WKUserContentController.alloc().init()
+
+        # ----------------------------
+        # CORRECT TAB ACCESS (FIXED)
+        # ----------------------------
+        tab = None
+        if hasattr(self, "tabs") and 0 <= getattr(self, "active", -1) < len(self.tabs):
+            tab = self.tabs[self.active]
+
+        seed = get_canvas_seed(tab)
+
+        # ----------------------------
+        # SEED INJECTION (CLEAN)
+        # ----------------------------
+        seed_js = f"window.__darkelf_seed={seed};"
+
+        seed_script = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
+            seed_js,
+            WKUserScriptInjectionTimeAtDocumentStart,
+            False
+        )
+
+        ucc.addUserScript_(seed_script)
+
+        # ----------------------------
+        # CANVAS DEFENSE (FULL)
+        # ----------------------------
+        canvas_js = """
+        (function() {
+
+            const seed = window.__darkelf_seed || 1337;
+
+            function noise(x, y) {
+                return ((x * 13 + y * 17 + seed) % 5) - 2;
+            }
+
+            // ----------------------------
+            // getImageData override
+            // ----------------------------
+            const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+
+            CanvasRenderingContext2D.prototype.getImageData = function(x, y, w, h) {
+                const data = origGetImageData.call(this, x, y, w, h);
+
+                for (let i = 0; i < data.data.length; i += 4) {
+                    const px = (i / 4) % w;
+                    const py = Math.floor((i / 4) / w);
+
+                    const n = noise(px, py);
+
+                    data.data[i]     = (data.data[i] + n) & 255;
+                    data.data[i + 1] = (data.data[i + 1] + n) & 255;
+                    data.data[i + 2] = (data.data[i + 2] + n) & 255;
+                }
+
+                return data;
+            };
+
+            // ----------------------------
+            // toDataURL override (CRITICAL)
+            // ----------------------------
+            const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+
+            HTMLCanvasElement.prototype.toDataURL = function() {
+
+                const ctx = this.getContext("2d");
+
+                if (ctx) {
+                    const w = this.width || 1;
+                    const h = this.height || 1;
+
+                    ctx.fillStyle = "rgba(0,0,0,0.001)";
+                    ctx.fillRect(seed % w, seed % h, 1, 1);
+                }
+
+                return origToDataURL.apply(this, arguments);
+            };
+
+        })();
+        """
+
+        canvas_script = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
+            canvas_js,
+            WKUserScriptInjectionTimeAtDocumentStart,
+            False
+        )
+
+        ucc.addUserScript_(canvas_script)
+                
         # ---------------------------
         # First-Party Isolation
         # ---------------------------
@@ -5903,9 +6013,6 @@ class Browser(NSObject):
         prefs.setValue_forKey_(True, "fullScreenEnabled")
 
         cfg.setPreferences_(prefs)
-
-        # ---- user content controller ----
-        ucc = WKUserContentController.alloc().init()
 
         if ContentRuleManager._rule_list:
             ucc.addContentRuleList_(ContentRuleManager._rule_list)
