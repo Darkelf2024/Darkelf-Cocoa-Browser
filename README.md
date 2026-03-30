@@ -1,4 +1,4 @@
-# 🧿 Darkelf Cocoa Browser 4.1.9  [![PyPI Downloads](https://static.pepy.tech/personalized-badge/darkelf-cocoa?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/darkelf-cocoa)
+# 🧿 Darkelf Cocoa Browser 4.2.0
 ### Ephemeral, Privacy‑First macOS Browser (PyObjC + WebKit)
 
 A hardened, **memory‑only** macOS browser designed for **zero persistence**, **tracker resistance**, **real‑time threat detection**, and **post‑quantum integrity awareness** — installable via `pip` with a full native GUI.
@@ -95,47 +95,128 @@ Darkelf Cocoa uses a defense‑in‑depth approach:
 
 ---
 
-## Post‑Quantum Integrity Layer (PQ)
+## Post-Quantum Integrity Layer (PQ)
 
-Darkelf implements a **post‑quantum–aware integrity and behavioral verification system** using **SHA3-512/SHA3-256** primitives.  
-This layer is designed to provide **tamper‑evident, session‑bound consistency signals** *without modifying network traffic*.
+Darkelf implements a **post-quantum–aware integrity and behavioral verification system** using **SHA3-512 / SHA3-256** primitives.  
+This layer provides **tamper-evident, session-bound consistency signals** *without modifying network traffic* and is fully **deterministic per session/tab context**.
+
+---
 
 ### ✅ What PQ is (in Darkelf)
+
 - **Deterministic request fingerprinting** bound to:
   - URL
   - normalized metadata (where available)
-  - session seed (hidden)
-  - time bucket (anti‑replay)
-- **Per‑tab chaining**:
-  - per‑tab seed (`_pq_seed`)
-  - monotonic per‑tab counter (`_pq_counter`)
-  - request-bound chain output (`darkelf_pq_chain`)
+  - **per-tab session seed (`_pq_seed`)**
+  - **hidden salt (`_pq_salt`) for secrecy**
+  - time bucket (anti-replay, ~10s window)
 
-### 🔁 PQ Chaining
-- Session/Tab seeded chain progression
-- Stable, low‑noise integrity evolution per request
-- Counter-based continuity designed not to disrupt rendering
+- Uses:
+  - **SHA3-512** → high-entropy identity + integrity binding  
+  - **SHA3-256** → lightweight deterministic decision logic
 
-### 🕵️ Minimal Deception Layer (Third‑Party Contexts)
-- Applies only in **third‑party** situations
-- Very low frequency
-- Derived from PQ signals
-- Intended to reduce tracker confidence and correlation quality
-
-### 🧠 PQ Behavioral Intelligence
-- Sliding window tracking (`_pq_window`)
-- Unique fingerprint tracking (`_pq_seen`)
-- Entropy-based anomaly scoring for automation/replay-like patterns
-- PQ signals contribute to the overall threat score and “PQ risk” indicator
-
-### 🔐 TLS Trust Awareness (TOFU‑Style)
-- Tracks server certificate subject summaries per host
-- Flags trust changes during a session
-- Integrates with UI trust indicators:
-  - stable trust → normal PQ indicator
-  - changed trust → warning indicator
+- Designed to be:
+  - stable within session context  
+  - non-replayable across time buckets  
+  - non-correlatable across tabs  
 
 ---
+
+### 🔁 PQ Chaining
+
+- **Per-tab seeded chain progression**
+  - `_pq_seed` → root identity (secure, locked per tab)
+  - `_pq_counter` → monotonic progression (bounded, no randomness)
+  - `darkelf_pq_chain` → request-bound continuity signal
+
+- Properties:
+  - deterministic evolution (no per-request randomness)
+  - zero fallback behavior (prevents weak entropy states)
+  - low-noise progression safe for rendering environments
+
+- Purpose:
+  - detect replay patterns  
+  - detect navigation inconsistencies  
+  - enforce **session continuity integrity**
+
+---
+
+### 🎨 Canvas PQ Seed Integration (NEW)
+
+- Canvas entropy is **bound to PQ identity** via:
+  - `get_canvas_seed(tab)` → derived from `_pq_seed`
+
+- Behavior:
+  - deterministic per tab/session
+  - stable rendering output within session
+  - isolated across tabs
+
+- Security effect:
+  - prevents cross-site canvas fingerprint correlation  
+  - preserves entropy while eliminating global fingerprinting vectors  
+  - aligns rendering layer with PQ integrity model  
+
+---
+
+### 🕵️ Minimal Deception Layer (Third-Party Contexts)
+
+- Applies only in **third-party** situations
+- Triggered only when PQ fingerprint is present
+- **Fully deterministic (no randomness)**
+
+- Mechanism:
+  - derives alternate signal (`_pq_fp_alt`) from PQ state + host
+  - extremely low activation frequency (bit-gated)
+
+- Purpose:
+  - reduce tracker confidence
+  - degrade correlation accuracy
+  - avoid detectable noise patterns
+
+---
+
+### 🧠 PQ Behavioral Intelligence
+
+- Sliding window tracking (`_pq_window`)
+- Unique fingerprint tracking (`_pq_seen`)
+- Entropy-based anomaly scoring (realistic thresholds)
+
+- Detection signals:
+  - excessive uniqueness → suspicious session behavior  
+  - high short-window entropy → automation / replay patterns  
+
+- PQ contributes to:
+  - `suspicious_hits`
+  - overall threat score
+  - **PQ-specific risk indicator**
+
+---
+
+### 🔐 TLS Trust Awareness (TOFU-Style)
+
+- Tracks server certificate subject summaries per host
+- Detects trust changes within a session (TOFU model)
+
+- Integration:
+  - combined with PQ session continuity signals
+  - feeds UI trust indicators
+
+- UI behavior:
+  - stable trust → normal PQ indicator  
+  - changed trust → warning indicator  
+
+---
+
+### 🧠 PQ Summary Model (Updated)
+
+PQ operates as a unified system combining:
+
+- **Integrity Layer** → tamper-evident request binding  
+- **Continuity Layer** → per-tab chain progression  
+- **Anti-Correlation Layer** → deterministic third-party signal degradation  
+- **Behavioral Intelligence Layer** → entropy-based anomaly detection  
+- **Rendering Isolation Layer** → canvas bound to PQ seed  
+- **Trust Awareness Layer** → TLS consistency monitoring  
 
 ## MiniAI Sentinel (On‑Device IDS)
 
@@ -160,7 +241,7 @@ When critical threats exceed threshold:
 
 ## First‑Party & Tab Isolation
 - Storage is separated by an eTLD+1 approximation (with an auth whitelist for common login flows)
-- Implemented tab-level compartmentalization for stricter isolation
+- Optional tab-level compartmentalization for stricter isolation
 - Designed to prevent cross-site storage reuse and reduce tracking surface
 
 ---
