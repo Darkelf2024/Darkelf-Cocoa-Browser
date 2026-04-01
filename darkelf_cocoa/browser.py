@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.2.1 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.2.2 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -3678,17 +3678,148 @@ CANVAS_DEFENSE_JS = r'''
 
 WEBGL_DEFENSE_JS = r"""
 (function(){
-  function spoofGL(ctxProto, vendor, renderer) {
+  function spoofGL(ctxProto) {
     if (!ctxProto) return;
+
     var origGetParameter = ctxProto.getParameter;
+
     ctxProto.getParameter = function(param) {
-      if (param === 0x1F00 || param === 0x9245) return vendor;
-      if (param === 0x1F01 || param === 0x9246) return renderer;
+      // 🔥 no vendor/renderer override anymore
+
       return origGetParameter.apply(this, arguments);
     };
   }
-  spoofGL(window.WebGLRenderingContext && window.WebGLRenderingContext.prototype, "Intel Inc.", "Intel(R) Iris(TM) Graphics 6100");
-  spoofGL(window.WebGL2RenderingContext && window.WebGL2RenderingContext.prototype, "Intel Inc.", "Intel(R) Iris(TM) Graphics 6100");
+
+  spoofGL(window.WebGLRenderingContext && window.WebGLRenderingContext.prototype);
+  spoofGL(window.WebGL2RenderingContext && window.WebGL2RenderingContext.prototype);
+})();
+"""
+
+WEBGL_FULL = r"""
+(() => {
+    if (!window.__darkelf_pq_seed) return;
+
+    const seed = window.__darkelf_pq_seed >>> 0;
+
+    function hash(n) {
+        n = (n ^ 0x9E3779B1) + (n << 6);
+        n ^= n >>> 11;
+        n += n << 3;
+        n ^= n >>> 15;
+        return n >>> 0;
+    }
+
+    const h = hash(seed);
+
+    // ============================================================
+    // ⏱ GLOBAL TIMING MODEL
+    // ============================================================
+
+    const BASE_QUANTUM = 0.5;
+    const quantum = BASE_QUANTUM + ((h % 3) * 0.25);
+
+    const originalNow = performance.now.bind(performance);
+
+    function quantize(t) {
+        return Math.floor(t / quantum) * quantum;
+    }
+
+    performance.now = function() {
+        return quantize(originalNow());
+    };
+
+    const originalDateNow = Date.now;
+    Date.now = function() {
+        return Math.floor(originalDateNow() / quantum) * quantum;
+    };
+
+    const _setTimeout = window.setTimeout;
+    const _setInterval = window.setInterval;
+
+    window.setTimeout = function(fn, delay, ...args) {
+        delay = Math.ceil(delay / quantum) * quantum;
+        return _setTimeout(fn, delay, ...args);
+    };
+
+    window.setInterval = function(fn, delay, ...args) {
+        delay = Math.ceil(delay / quantum) * quantum;
+        return _setInterval(fn, delay, ...args);
+    };
+
+    const _raf = window.requestAnimationFrame;
+    window.requestAnimationFrame = function(cb) {
+        return _raf(function(t) {
+            cb(quantize(t));
+        });
+    };
+
+    // ============================================================
+    // 🧬 WEBGL CAPABILITY SHAPING (NO SPOOF)
+    // ============================================================
+
+    const textureSize = 16384 - (h % 2) * 2048;
+    const renderbufferSize = 16384 - (h % 2) * 2048;
+    const vertexUniforms = 1024 - (h % 2) * 128;
+
+    function patchGL(ctxProto) {
+        const getParameter = ctxProto.getParameter;
+        const getSupportedExtensions = ctxProto.getSupportedExtensions;
+        const getExtension = ctxProto.getExtension;
+        const finish = ctxProto.finish;
+
+        ctxProto.getParameter = function(param) {
+            try {
+                // DO NOT override vendor/renderer anymore
+
+                if (param === 0x0D33) return textureSize;       // MAX_TEXTURE_SIZE
+                if (param === 0x84E8) return renderbufferSize;  // MAX_RENDERBUFFER_SIZE
+                if (param === 0x8DFB) return vertexUniforms;    // MAX_VERTEX_UNIFORM_VECTORS
+
+            } catch (e) {}
+
+            return getParameter.call(this, param);
+        };
+
+        ctxProto.getSupportedExtensions = function() {
+            try {
+                const base = getSupportedExtensions.call(this) || [];
+                return base; // no extension spoofing for now (safe)
+            } catch (e) {
+                return getSupportedExtensions.call(this);
+            }
+        };
+
+        ctxProto.getExtension = function(name) {
+            return getExtension.call(this, name);
+        };
+
+        // WebGL timing clamp
+        ctxProto.finish = function() {
+            const start = originalNow();
+
+            const result = finish.call(this);
+
+            const end = originalNow();
+            const duration = end - start;
+
+            const min = quantum;
+            if (duration < min) {
+                const target = start + min;
+                while (originalNow() < target) {}
+            }
+
+            return result;
+        };
+    }
+
+    if (window.WebGLRenderingContext) {
+        patchGL(WebGLRenderingContext.prototype);
+    }
+
+    if (window.WebGL2RenderingContext) {
+        patchGL(WebGL2RenderingContext.prototype);
+    }
+
 })();
 """
 
@@ -6037,7 +6168,7 @@ class Browser(NSObject):
             
     @objc.python_method
     def _inject_core_scripts(self, ucc):
-    
+
         try:
             seed = getattr(self, "_current_canvas_seed", None)
             if seed is None:
@@ -6053,7 +6184,7 @@ class Browser(NSObject):
                     ucc.addUserScript_(skr)
                 except Exception as e:
                     print("[Inject] addUserScript_ failed:", e)
-                            
+
             _add(WEBRTC_DEFENSE_JS)
             _add(WEBGL_DEFENSE_JS)
             _add(canvas_script)
@@ -6065,6 +6196,17 @@ class Browser(NSObject):
             _add(PERFORMANCE_DEFENSE_JS)
             _add(CORE_JS)
             _add(NETWORK_MONITOR_JS)
+
+            # 🔥 ADD HERE (right before WEBGL_FULL)
+            tab = self.tabs[self.active] if hasattr(self, "tabs") else None
+            pq_seed = get_canvas_seed(tab) if tab else 1337
+            _add(f"window.__darkelf_pq_seed = {pq_seed};")
+
+            # 🔥 then WebGL FULL
+            _add(WEBGL_FULL)
+
+        except Exception as e:
+            print("[Inject] core scripts failed:", e)
             
             if ENABLE_LOCAL_HSTS:
                 self._install_local_hsts(ucc)
