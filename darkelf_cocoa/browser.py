@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.2.0 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.2.1 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -121,6 +121,65 @@ LOG_LEVEL = 1
 def log(level, *msg):
     if level <= LOG_LEVEL:
         print(*msg)
+                
+def inject_screen_spoof(ucc):
+    js = r"""
+    (() => {
+        const width = 1512;
+        const height = 982;
+        const dpr = 2;
+
+        const define = (obj, prop, value) => {
+            try {
+                Object.defineProperty(obj, prop, {
+                    get: () => value,
+                    configurable: true
+                });
+            } catch (e) {}
+        };
+
+        const patch = () => {
+            define(Screen.prototype, "width", width);
+            define(Screen.prototype, "height", height);
+            define(Screen.prototype, "availWidth", width);
+            define(Screen.prototype, "availHeight", height - 37);
+
+            define(Window.prototype, "innerWidth", width);
+            define(Window.prototype, "innerHeight", height);
+            define(Window.prototype, "outerWidth", width);
+            define(Window.prototype, "outerHeight", height);
+            define(Window.prototype, "devicePixelRatio", dpr);
+
+            define(window.screen, "width", width);
+            define(window.screen, "height", height);
+            define(window.screen, "availWidth", width);
+            define(window.screen, "availHeight", height - 37);
+
+            define(window, "innerWidth", width);
+            define(window, "innerHeight", height);
+            define(window, "outerWidth", width);
+            define(window, "outerHeight", height);
+            define(window, "devicePixelRatio", dpr);
+
+            if (window.visualViewport) {
+                define(window.visualViewport, "width", width);
+                define(window.visualViewport, "height", height);
+                define(window.visualViewport, "scale", 1);
+            }
+        };
+
+        patch();
+        document.addEventListener("DOMContentLoaded", patch, { once: true });
+        window.addEventListener("load", patch, { once: true });
+    })();
+    """
+
+    script = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
+        js,
+        WKUserScriptInjectionTimeAtDocumentStart,
+        False
+    )
+    ucc.addUserScript_(script)
         
 def darkelf_destroy_tab(tab):
     try:
@@ -166,54 +225,124 @@ def darkelf_destroy_tab(tab):
     except Exception as e:
         print("[DestroyTab error]", e)
         
+def _pq_normalize_url(url: str) -> str:
+    try:
+        parsed = urlparse(url)
+
+        path = re.sub(r"/+", "/", parsed.path or "/")
+
+        query_items = sorted(
+            [q for q in (parsed.query or "").split("&") if q]
+        )
+        query = "&".join(query_items)
+
+        return f"{parsed.scheme}://{parsed.netloc}{path}?{query}"
+    except Exception:
+        return url or ""
+
+
 def darkelf_pq_fingerprint(url: str, headers: dict = None, owner=None) -> str:
     h = hashlib.sha3_512()
 
-    # bind URL
-    h.update(url.encode("utf-8", errors="ignore"))
+    # 🔧 canonical URL (FIXED)
+    norm_url = _pq_normalize_url(url)
+    h.update(norm_url.encode("utf-8", errors="ignore"))
 
-    # bind headers
+    # 🔧 canonical headers (FIXED: stable + filtered)
     if headers:
         for k, v in sorted(headers.items()):
-            h.update(str(k).encode())
+            if k.lower().startswith("_pq"):
+                continue  # avoid recursion / pollution
+            h.update(str(k).lower().encode())
             h.update(str(v).encode())
 
-    # time bucket
-    h.update(str(int(time.time() // 10)).encode())
+    # ⏱ time bucket (anti-replay)
+    bucket = int(time.time() // 10)
+    h.update(bucket.to_bytes(8, "big"))
 
-    # 🔥 NEW: hidden salt (secrecy)
+    # 🔐 hidden salt (session secrecy)
     if owner and hasattr(owner, "_pq_salt"):
         h.update(owner._pq_salt)
+
+    # 🔐 OPTIONAL: TLS binding (NEW)
+    if owner and hasattr(owner, "_pq_tls_summary"):
+        h.update(owner._pq_tls_summary.encode())
 
     return h.hexdigest()
     
 def darkelf_pq_chain(owner, url: str) -> bytes:
 
-    h = hashlib.sha3_512()
-
-    # session identity
+    # ----------------------------
+    # resolve active tab
+    # ----------------------------
     tab = None
 
     if hasattr(owner, "tabs") and 0 <= getattr(owner, "active", -1) < len(owner.tabs):
         tab = owner.tabs[owner.active]
 
-    if tab and getattr(tab, "_pq_seed", None):
-        h.update(tab._pq_seed)
-    else:
+    if not tab or not getattr(tab, "_pq_seed", None):
         return b"\x00" * 32  # 🔥 NO FALLBACK
 
-    # bind URL
-    h.update(url.encode("utf-8", errors="ignore"))
+    # ----------------------------
+    # initialize state
+    # ----------------------------
+    if not hasattr(tab, "_pq_counter"):
+        tab._pq_counter = 0
 
-    if hasattr(owner, "tabs") and 0 <= getattr(owner, "active", -1) < len(owner.tabs):
-        tab = owner.tabs[owner.active]
+    if not hasattr(tab, "_pq_prev_chain"):
+        tab._pq_prev_chain = b"\x00" * 64
 
-    if tab and hasattr(tab, "_pq_counter"):
-        h.update(tab._pq_seed[:8])
-    else:
-        h.update(b"0")
+    if not hasattr(tab, "_pq_chain_seen"):
+        from collections import deque
+        tab._pq_chain_seen = deque(maxlen=200)
 
-    return h.digest()
+    # ----------------------------
+    # increment counter (monotonic)
+    # ----------------------------
+    tab._pq_counter = min(tab._pq_counter + 1, 1_000_000)
+
+    # ----------------------------
+    # build chain hash
+    # ----------------------------
+    h = hashlib.sha3_512()
+
+    # session root
+    h.update(tab._pq_seed)
+
+    # canonical URL
+    norm_url = _pq_normalize_url(url)
+    h.update(norm_url.encode("utf-8", errors="ignore"))
+
+    # 🔗 previous chain (CRITICAL FIX)
+    h.update(tab._pq_prev_chain)
+
+    # 🔢 counter (REAL progression)
+    h.update(tab._pq_counter.to_bytes(8, "big"))
+
+    # 🔐 optional salt binding
+    if hasattr(owner, "_pq_salt"):
+        h.update(owner._pq_salt)
+
+    # ----------------------------
+    # finalize
+    # ----------------------------
+    chain = h.digest()
+
+    # ----------------------------
+    # replay detection (NEW)
+    # ----------------------------
+    if chain in tab._pq_chain_seen:
+        if hasattr(owner, "miniAI"):
+            owner.miniAI.suspicious_hits += 2
+
+    tab._pq_chain_seen.append(chain)
+
+    # ----------------------------
+    # update state
+    # ----------------------------
+    tab._pq_prev_chain = chain
+
+    return chain
     
 def get_canvas_seed(tab):
     if not hasattr(tab, "_pq_seed") or not tab._pq_seed:
@@ -257,17 +386,10 @@ class DarkelfNetworkPolicy:
         meta = {"source": "net_policy", "type": str(nav_type)}
 
         # ----------------------------
-        # HARD SKIP: sensitive contexts (FIXED: minimal + realistic)
+        # HARD SKIP
         # ----------------------------
         if url.startswith(("data:", "blob:")):
             return decision, meta
-
-        # ----------------------------
-        # HARD SKIP: fingerprint test sites (FIXED: NO SPECIAL TREATMENT)
-        # ----------------------------
-        # Keep section but neutralize behavior difference
-        if any(x in url for x in ("browserleaks", "amiunique", "coveryourtracks")):
-            pass  # 🔥 DO NOTHING (important)
 
         # ----------------------------
         # PARSE URL
@@ -280,61 +402,87 @@ class DarkelfNetworkPolicy:
             return decision, meta
 
         # ----------------------------
-        # QUIET MODE: static resources (SAFE)
+        # QUIET MODE (static)
         # ----------------------------
         if isinstance(nav_type, str) and nav_type.lower() in ("image", "media", "font"):
             return decision, meta
 
         # ----------------------------
-        # SAFE TAB ACCESS
+        # TAB RESOLUTION
         # ----------------------------
         tab = None
-
         if hasattr(self.browser, "tabs") and 0 <= getattr(self.browser, "active", -1) < len(self.browser.tabs):
             tab = self.browser.tabs[self.browser.active]
 
-        if not tab or not hasattr(tab, "view") or tab.view is None:
+        if not tab or not getattr(tab, "view", None):
             return decision, meta
 
-        # 🔥 REQUIRE per-tab seed (KEEP but STABILIZE)
+        # ----------------------------
+        # INIT PQ STATE
+        # ----------------------------
         if not hasattr(tab, "_pq_seed") or not tab._pq_seed:
             tab._pq_seed = hashlib.sha256(os.urandom(32)).digest()
             tab._pq_seed_locked = True
 
-        # ----------------------------
-        # COUNTER (KEEP but REMOVE SIDE EFFECT)
-        # ----------------------------
         if not hasattr(tab, "_pq_counter"):
             tab._pq_counter = 0
 
+        if not hasattr(tab, "_pq_chain_seen"):
+            from collections import deque
+            tab._pq_chain_seen = deque(maxlen=200)
+
+        # ----------------------------
+        # CANONICAL URL (NEW)
+        # ----------------------------
+        try:
+            norm_path = re.sub(r"/+", "/", path)
+            query = "&".join(sorted(parsed.query.split("&"))) if parsed.query else ""
+            norm_url = f"{parsed.scheme}://{parsed.netloc}{norm_path}?{query}"
+        except:
+            norm_url = url
+
+        # ----------------------------
+        # COUNTER (REAL USE)
+        # ----------------------------
         tab._pq_counter = min(tab._pq_counter + 1, 1_000_000)
-        counter = tab._pq_counter
 
         # ----------------------------
-        # WARM-UP (FIXED: NO BEHAVIOR CHANGE)
+        # PQ CHAIN (NEW CORE)
         # ----------------------------
-        if counter < 40:
-            pass  # 🔥 DO NOTHING (was fingerprint leak)
+        try:
+            chain = darkelf_pq_chain(self.browser, norm_url)
+
+            # attach chain identity
+            meta["_pq_chain"] = chain[:16].hex()
+
+            # replay detection
+            if chain in tab._pq_chain_seen:
+                if hasattr(self.browser, "miniAI"):
+                    self.browser.miniAI.suspicious_hits += 2
+                    decision = "degrade"
+
+            tab._pq_chain_seen.append(chain)
+
+        except Exception:
+            return decision, meta
 
         # ----------------------------
-        # PQ INJECTION (FIXED: deterministic per session + host)
+        # PQ FINGERPRINT (UPGRADED)
         # ----------------------------
         try:
             h = hashlib.sha3_256()
 
-            # session-stable seed
             h.update(tab._pq_seed)
+            h.update(host.encode())
+            h.update(norm_path[:32].encode())
 
-            if host:
-                h.update(host.encode())
-
-            bucket = path[:32]
-            h.update(bucket.encode())
+            # 🔐 bind TLS summary if available
+            if hasattr(self.browser, "_pq_tls_summary"):
+                h.update(self.browser._pq_tls_summary.encode())
 
             digest = h.digest()
 
-            # 🔥 deterministic decision (NOT random per request)
-            if digest[0] & 1:  # stable condition
+            if digest[0] & 1:
                 pq_bytes = hashlib.sha3_512(tab._pq_seed).digest()
                 meta["_pq_fp"] = pq_bytes[:32].hex()
 
@@ -342,7 +490,27 @@ class DarkelfNetworkPolicy:
             return decision, meta
 
         # ----------------------------
-        # TRACKER DECEPTION (FIXED: deterministic, no randomness)
+        # ADAPTIVE ENFORCEMENT (NEW)
+        # ----------------------------
+        try:
+            if hasattr(self.browser, "miniAI"):
+                stats = self.browser.miniAI._pq_stats()
+
+                if stats["risk_level"] == "high":
+                    decision = "isolate"
+
+                    # strip identity signals
+                    meta.pop("_pq_fp", None)
+                    meta.pop("_pq_fp_alt", None)
+
+                elif stats["risk_level"] == "medium":
+                    decision = "degrade"
+
+        except Exception:
+            pass
+
+        # ----------------------------
+        # TRACKER DECEPTION (UPGRADED)
         # ----------------------------
         try:
             if "_pq_fp" in meta and host:
@@ -356,20 +524,37 @@ class DarkelfNetworkPolicy:
                         is_third_party = True
 
                 if is_third_party:
-                    d = hashlib.sha3_256((tab._pq_seed + host.encode())).digest()
 
-                    # 🔥 deterministic condition
-                    if d[0] & 2:
-                        real_fp = meta["_pq_fp"]
+                    d = hashlib.sha3_256(tab._pq_seed + host.encode()).digest()
 
-                        decoy = hashlib.sha3_256(
-                            (real_fp + host).encode()
-                        ).digest()
+                    mode = d[1] % 3  # 🔥 multi-mode deception
 
+                    real_fp = meta["_pq_fp"]
+
+                    if mode == 0:
+                        # slight mutation
+                        decoy = hashlib.sha3_256((real_fp + host).encode()).digest()
                         meta["_pq_fp_alt"] = decoy[:8].hex()
+
+                    elif mode == 1:
+                        # truncated identity
+                        meta["_pq_fp_alt"] = real_fp[:8]
+
+                    else:
+                        # namespace shift
+                        alt = hashlib.sha3_256((host + real_fp).encode()).digest()
+                        meta["_pq_fp_alt"] = alt[:8].hex()
 
         except Exception:
             pass
+
+        # ----------------------------
+        # SOFT ROTATION (LONG SESSION DEFENSE)
+        # ----------------------------
+        if tab._pq_counter > 5000:
+            tab._pq_seed = hashlib.sha3_256(tab._pq_seed).digest()
+            tab._pq_counter = 0
+            tab._pq_chain_seen.clear()
 
         return decision, meta
         
@@ -3261,7 +3446,113 @@ try {Object.defineProperty(Intl.DateTimeFormat.prototype, 'resolvedOptions', {va
 '''
 
 FONTS_DEFENSE_JS = r'''
-(function() {if (navigator.fonts) { navigator.fonts.query = function() { return Promise.resolve([]); }; } var style = document.createElement('style'); style.textContent = '* { font-family: "Arial", sans-serif !important; }'; document.head.appendChild(style);})();
+(function() {
+
+    const seed = window.__darkelf_seed;
+    if (typeof seed !== "number") return;
+
+    // ----------------------------
+    // deterministic mixer
+    // ----------------------------
+    function mix(x) {
+        x ^= seed;
+        x = Math.imul(x, 0x45d9f3b);
+        x ^= x >>> 16;
+        return x >>> 0;
+    }
+
+    // ----------------------------
+    // measureText (SAFE perturbation)
+    // ----------------------------
+    try {
+        const orig = CanvasRenderingContext2D.prototype.measureText;
+
+        CanvasRenderingContext2D.prototype.measureText = function(text) {
+            const res = orig.apply(this, arguments);
+
+            if (typeof text === "string" && text.length > 2) {
+                const m = mix(text.length + text.charCodeAt(0));
+                const variation = (m % 200) / 200;
+
+                // 🔥 reduced amplitude (stealth)
+                res.width += (variation - 0.5) * 0.4;
+            }
+
+            return res;
+        };
+    } catch(e) {}
+
+    // ----------------------------
+    // offsetWidth / offsetHeight (SAFE)
+    // ----------------------------
+    try {
+        const ow = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
+        const oh = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+
+        function delta(val) {
+            const m = mix(val);
+            return (m % 3) - 1; // 🔥 small: -1 to +1 px
+        }
+
+        Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+            get() {
+                const w = ow.get.call(this);
+
+                if (this.textContent && this.textContent.length > 6) {
+                    return w + delta(this.textContent.length);
+                }
+
+                return w;
+            }
+        });
+
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+            get() {
+                const h = oh.get.call(this);
+
+                if (this.textContent && this.textContent.length > 6) {
+                    return h + delta(this.textContent.length + 17);
+                }
+
+                return h;
+            }
+        });
+
+    } catch(e) {}
+
+    // ----------------------------
+    // getBoundingClientRect tweak (VERY LIGHT)
+    // ----------------------------
+    try {
+        const orig = Element.prototype.getBoundingClientRect;
+
+        Element.prototype.getBoundingClientRect = function() {
+            const rect = orig.apply(this, arguments);
+
+            if (!this.textContent || this.textContent.length < 6) {
+                return rect;
+            }
+
+            const m = mix(this.textContent.length);
+
+            const dx = ((m % 3) - 1) * 0.2;
+            const dy = (((m >> 2) % 3) - 1) * 0.2;
+
+            return {
+                x: rect.x + dx,
+                y: rect.y + dy,
+                width: rect.width,
+                height: rect.height,
+                top: rect.top + dy,
+                left: rect.left + dx,
+                right: rect.right + dx,
+                bottom: rect.bottom + dy
+            };
+        };
+
+    } catch(e) {}
+
+})();
 '''
 
 MEDIA_ENUM_DEFENSE_JS = r'''
@@ -5774,8 +6065,6 @@ class Browser(NSObject):
             _add(PERFORMANCE_DEFENSE_JS)
             _add(CORE_JS)
             _add(NETWORK_MONITOR_JS)
-            #_add(INDEXEDDB_DEFENSE_JS)
-            #_add(STORAGE_DEFENSE_JS)
             
             if ENABLE_LOCAL_HSTS:
                 self._install_local_hsts(ucc)
@@ -5877,7 +6166,7 @@ class Browser(NSObject):
         tab = None
         if hasattr(self, "tabs") and 0 <= getattr(self, "active", -1) < len(self.tabs):
             tab = self.tabs[self.active]
-
+                        
         seed = get_canvas_seed(tab)
 
         # ----------------------------
@@ -5985,8 +6274,6 @@ class Browser(NSObject):
             if cache.diskCapacity() != 0:
                 raise RuntimeError("Darkelf security failure: disk cache detected")
 
-            # apply cache to container - (None)/Cache) options
-            #NSURLCache.setSharedURLCache_()
             NSURLCache.setSharedURLCache_(NSURLCache.alloc().init())
             
             self._containers[key] = (store, pool)
@@ -5996,7 +6283,7 @@ class Browser(NSObject):
         # apply container isolation
         cfg.setWebsiteDataStore_(store)
         cfg.setProcessPool_(pool)
-        
+
         cfg.setMediaTypesRequiringUserActionForPlayback_(0)
 
         if store.isPersistent():
@@ -6008,10 +6295,7 @@ class Browser(NSObject):
         prefs = WKPreferences.alloc().init()
         prefs.setJavaScriptEnabled_(js_enabled)
         prefs.setJavaScriptCanOpenWindowsAutomatically_(True)
-
-        # ✅ enable HTML5 fullscreen
         prefs.setValue_forKey_(True, "fullScreenEnabled")
-
         cfg.setPreferences_(prefs)
 
         if ContentRuleManager._rule_list:
@@ -6022,11 +6306,33 @@ class Browser(NSObject):
         ucc.addScriptMessageHandler_name_(self._nav_delegate, "blobdownload")
         ucc.addScriptMessageHandler_name_(self._search_handler, "search")
 
+        # 🔥 ADD SCREEN SPOOF HERE (CORRECT PLACE)
+        inject_screen_spoof(ucc)
+        
+        # 🔥 per-tab font seed (CRITICAL)
+        seed = secrets.randbits(32)
+
+        seed_js = f"window.__font_seed={seed};"
+
+        ucc.addUserScript_(
+            WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
+                seed_js,
+                WKUserScriptInjectionTimeAtDocumentStart,
+                False
+            )
+        )
+        # your existing scripts
         self._inject_core_scripts(ucc)
 
+        # 🔥 attach ONE controller only (this keeps EVERYTHING)
         cfg.setUserContentController_(ucc)
 
-        web = WKWebView.alloc().initWithFrame_configuration_(NSMakeRect(0,0,800,600), cfg)
+        web = WKWebView.alloc().initWithFrame_configuration_(
+            NSMakeRect(0,0,800,600),
+            cfg
+        )
+
+        url = getattr(self, "current_url_for_fpi", "")
 
         web.setNavigationDelegate_(self._nav_delegate)
         web.setUIDelegate_(self._ui_delegate)
@@ -6211,12 +6517,12 @@ class Browser(NSObject):
             except Exception:
                 pass
                 
-            config = WKWebViewConfiguration.alloc().init()
+            #config = WKWebViewConfiguration.alloc().init()
 
             store = self.fpi.store_for(url, tab_uid=tab_index)
 
             config.setWebsiteDataStore_(store)
-
+            
             webview = WKWebView.alloc().initWithFrame_configuration_(
                 NSMakeRect(0, 0, width, height),
                 config
@@ -6232,7 +6538,7 @@ class Browser(NSObject):
             menu.setDelegate_(menu_delegate)
             
             wk = WKWebView.alloc().initWithFrame_configuration_(old.frame(), config)
-
+            
             if getattr(self, "_ui_delegate", None) is not None:
                 wk.setUIDelegate_(self._ui_delegate)
 
@@ -6250,22 +6556,47 @@ class Browser(NSObject):
                 pass
             config.setPreferences_(prefs)
 
-            # --- Fresh user content controller ---
             ucc = WKUserContentController.alloc().init()
 
-            # --- Reattach handlers ---
+            # ----------------------------
+            # 🔥 1. Inject CONSISTENT seed (MATCH _new_wk)
+            # ----------------------------
+            tab = None
+            if hasattr(self, "tabs") and 0 <= self.active < len(self.tabs):
+                tab = self.tabs[self.active]
+
+            seed = get_canvas_seed(tab)   # ✅ SAME as _new_wk
+
+            seed_js = f"window.__darkelf_seed={seed};"
+
+            ucc.addUserScript_(
+                WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
+                    seed_js,
+                    WKUserScriptInjectionTimeAtDocumentStart,
+                    False
+                )
+            )
+
+            # ----------------------------
+            # 🔥 2. Inject ALL defenses
+            # ----------------------------
+            inject_screen_spoof(ucc)
+            inject_font_defense(ucc)
+            inject_webgl_defense(ucc)
+
+            # ----------------------------
+            # 🔥 3. Core scripts
+            # ----------------------------
             try:
-                self._search_handler = getattr(self, "_search_handler", None) or SearchHandler.alloc().initWithOwner_(self)
-                ucc.addScriptMessageHandler_name_(self._search_handler, "search")
+                self._inject_core_scripts(ucc)
             except Exception:
                 pass
 
-            # --- Inject core defenses into UCC (NOT the webview) ---
-            try:
-                self._inject_core_scripts(ucc)   # IMPORTANT: pass UCC here
-            except Exception:
-                pass
-
+            # ----------------------------
+            # 🔥 4. ATTACH UCC (CRITICAL)
+            # ----------------------------
+            config.setUserContentController_(ucc)
+            
             # --- Optional: Block external script resources when JS is off ---
             try:
                 if not getattr(self, "js_enabled", True):
@@ -6309,7 +6640,7 @@ class Browser(NSObject):
                 # Mount & swap in
                 self.tabs[self.active].view = wk
                 self._mount_webview(wk)
-
+                                
             except Exception as e:
                 print("[WK] creation failed:", e)
                 return
