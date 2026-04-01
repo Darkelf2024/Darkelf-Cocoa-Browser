@@ -1,5 +1,4 @@
-# 🧿 Darkelf Cocoa Browser 4.2.0  [![PyPI Downloads](https://static.pepy.tech/personalized-badge/darkelf-cocoa?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/darkelf-cocoa)
-
+# 🧿 Darkelf Cocoa Browser 4.2.1
 ### Ephemeral, Privacy‑First macOS Browser (PyObjC + WebKit)
 
 A hardened, **memory‑only** macOS browser designed for **zero persistence**, **tracker resistance**, **real‑time threat detection**, and **post‑quantum integrity awareness** — installable via `pip` with a full native GUI.
@@ -208,6 +207,82 @@ This layer provides **tamper-evident, session-bound consistency signals** *witho
 
 ---
 
+### 🆕 PQ Canonicalization (NEW)
+
+- All PQ inputs are normalized before hashing:
+  - path normalization (`// → /`)
+  - sorted query parameters
+  - header normalization (excluding `_pq_*` fields)
+
+- Purpose:
+  - eliminate attacker-controlled entropy variance  
+  - ensure stable identity across equivalent requests  
+
+---
+
+### 🆕 PQ Replay Memory (NEW)
+
+- Maintains a bounded sliding window of recent chain values (`_pq_chain_seen`)
+- Detects:
+  - repeated chain states (replay)
+  - duplicated request flows
+
+- Effect:
+  - increases `suspicious_hits`
+  - contributes to anomaly scoring
+
+---
+
+### 🆕 Adaptive PQ Enforcement (NEW)
+
+PQ signals influence request handling indirectly:
+
+- medium PQ risk → degraded identity signals  
+- high PQ risk → PQ identity stripped (isolation behavior)
+
+- Purpose:
+  - reduce tracking reliability under suspicious conditions  
+  - prevent stable identity exposure during anomalies  
+
+---
+
+### 🆕 Multi-Mode Deception (NEW)
+
+- Third-party deception supports multiple deterministic modes:
+  - slight mutation (hash-derived)
+  - truncated identity
+  - namespace-shifted identity
+
+- Purpose:
+  - prevent tracker adaptation  
+  - avoid consistent fingerprint reconstruction  
+
+---
+
+### 🆕 Identity Rotation (NEW)
+
+- Long sessions trigger deterministic seed rotation:
+  - `_pq_seed → SHA3-256(_pq_seed)`
+  - resets `_pq_counter`
+
+- Purpose:
+  - limit long-term correlation  
+  - preserve short-term session continuity  
+
+---
+
+### 🆕 Observable Effects (User-Level)
+
+While PQ operates internally, its effects may be visible:
+
+- fingerprinting tests may produce inconsistent results  
+- cross-site tracking may fail or reset  
+- different tabs behave as isolated identities  
+- unusual activity may trigger degraded or restricted behavior  
+- TLS trust changes may surface as warnings  
+
+---
+
 ### 🧠 PQ Summary Model (Updated)
 
 PQ operates as a unified system combining:
@@ -218,11 +293,16 @@ PQ operates as a unified system combining:
 - **Behavioral Intelligence Layer** → entropy-based anomaly detection  
 - **Rendering Isolation Layer** → canvas bound to PQ seed  
 - **Trust Awareness Layer** → TLS consistency monitoring  
+- **Canonicalization Layer** → stable input normalization  
+- **Replay Protection Layer** → duplicate chain detection  
+- **Adaptive Layer** → risk-driven signal degradation  
 
-## MiniAI Sentinel (On‑Device IDS)
+---
+
+## MiniAI Sentinel (On-Device IDS)
 
 ### Detects (heuristic signals)
-- Trackers and third‑party correlation attempts
+- Trackers and third-party correlation attempts
 - Fingerprinting indicators (canvas/webgl/audio keywords & patterns)
 - Scraping/bot-like navigation patterns
 - Credential stuffing-like bursts against login endpoints
