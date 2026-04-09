@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.3.1 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.3 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -111,7 +111,6 @@ import base64
 from Security import SecTrustEvaluateWithError, SecTrustGetCertificateAtIndex, SecCertificateCopySubjectSummary
 import tempfile
 
-# 🔥 GLOBAL DARKELF USER AGENT
 DARKELF_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/605.1.15 (KHTML, like Gecko)"
@@ -127,83 +126,24 @@ LOG_LEVEL = 1
 def log(level, *msg):
     if level <= LOG_LEVEL:
         print(*msg)
-        
-DARKELF_DEVICE_PROFILES = [
-    {
-        "name": "MacBook Air M1",
-        "screen": (1440, 900),
-        "gpu_vendor": "Apple Inc.",
-        "gpu_renderer": "Apple M1"
-    },
-    {
-        "name": "MacBook Pro 14",
-        "screen": (1512, 982),
-        "gpu_vendor": "Apple Inc.",
-        "gpu_renderer": "Apple M1 Pro"
-    },
-    {
-        "name": "MacBook Pro 16",
-        "screen": (1728, 1117),
-        "gpu_vendor": "Apple Inc.",
-        "gpu_renderer": "Apple M2 Max"
-    },
-    {
-        "name": "iMac 24",
-        "screen": (1920, 1080),
-        "gpu_vendor": "Apple Inc.",
-        "gpu_renderer": "Apple M1"
-    },
-
-    {
-        "name": "MacBook Air M2",
-        "screen": (1470, 956),
-        "gpu_vendor": "Apple Inc.",
-        "gpu_renderer": "Apple M2"
-    },
-    {
-        "name": "MacBook Pro 13 M2",
-        "screen": (1440, 900),
-        "gpu_vendor": "Apple Inc.",
-        "gpu_renderer": "Apple M2"
-    },
-    {
-        "name": "Mac Studio M1 Max",
-        "screen": (2560, 1440),
-        "gpu_vendor": "Apple Inc.",
-        "gpu_renderer": "Apple M1 Max"
-    },
-    {
-        "name": "Mac Studio M2 Ultra",
-        "screen": (2560, 1440),
-        "gpu_vendor": "Apple Inc.",
-        "gpu_renderer": "Apple M2 Ultra"
-    }
-]
-
-def darkelf_get_profile(tab):
-    bucket = darkelf_get_bucket(tab)
-    return DARKELF_DEVICE_PROFILES[bucket % len(DARKELF_DEVICE_PROFILES)]
-    
-def inject_screen_spoof(ucc, tab):
-    profile = darkelf_get_profile(tab)
-    width, height = profile["screen"]
-
-    js = f"""
-    (() => {{
-        const width = {width};
-        const height = {height};
+            
+def inject_screen_spoof(ucc):
+    js = r"""
+    (() => {
+        const width = 1512;
+        const height = 982;
         const dpr = 2;
 
-        const define = (obj, prop, value) => {{
-            try {{
-                Object.defineProperty(obj, prop, {{
+        const define = (obj, prop, value) => {
+            try {
+                Object.defineProperty(obj, prop, {
                     get: () => value,
                     configurable: true
-                }});
-            }} catch (e) {{}}
-        }};
+                });
+            } catch (e) {}
+        };
 
-        const patch = () => {{
+        const patch = () => {
             define(Screen.prototype, "width", width);
             define(Screen.prototype, "height", height);
             define(Screen.prototype, "availWidth", width);
@@ -226,17 +166,17 @@ def inject_screen_spoof(ucc, tab):
             define(window, "outerHeight", height);
             define(window, "devicePixelRatio", dpr);
 
-            if (window.visualViewport) {{
+            if (window.visualViewport) {
                 define(window.visualViewport, "width", width);
                 define(window.visualViewport, "height", height);
                 define(window.visualViewport, "scale", 1);
-            }}
-        }};
+            }
+        };
 
         patch();
-        document.addEventListener("DOMContentLoaded", patch, {{ once: true }});
-        window.addEventListener("load", patch, {{ once: true }});
-    }})();
+        document.addEventListener("DOMContentLoaded", patch, { once: true });
+        window.addEventListener("load", patch, { once: true });
+    })();
     """
 
     script = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
@@ -244,56 +184,6 @@ def inject_screen_spoof(ucc, tab):
         WKUserScriptInjectionTimeAtDocumentStart,
         False
     )
-    ucc.addUserScript_(script)
-    
-def inject_webgl_identity(ucc, tab):
-    profile = darkelf_get_profile(tab)
-
-    vendor = profile["gpu_vendor"]
-    renderer = profile["gpu_renderer"]
-
-    js = f"""
-    (() => {{
-        try {{
-            const spoof = (proto) => {{
-                if (!proto) return;
-
-                const origGetParameter = proto.getParameter;
-                const origGetExtension = proto.getExtension;
-
-                proto.getParameter = function(param) {{
-                    // UNMASKED_VENDOR_WEBGL
-                    if (param === 37445) return "{vendor}";
-                    // UNMASKED_RENDERER_WEBGL
-                    if (param === 37446) return "{renderer}";
-
-                    return origGetParameter.call(this, param);
-                }};
-
-                proto.getExtension = function(name) {{
-                    if (name === "WEBGL_debug_renderer_info") {{
-                        return {{
-                            UNMASKED_VENDOR_WEBGL: 37445,
-                            UNMASKED_RENDERER_WEBGL: 37446
-                        }};
-                    }}
-                    return origGetExtension.call(this, name);
-                }};
-            }};
-
-            spoof(WebGLRenderingContext.prototype);
-            spoof(WebGL2RenderingContext?.prototype);
-
-        }} catch (e) {{}}
-    }})();
-    """
-
-    script = WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_(
-        js,
-        WKUserScriptInjectionTimeAtDocumentStart,
-        False
-    )
-
     ucc.addUserScript_(script)
     
 def darkelf_destroy_tab(tab):
@@ -465,7 +355,7 @@ def get_canvas_seed_hex(tab):
 
     # 128-bit root seed for JS
     return tab._pq_seed[:16].hex()
-
+    
 def darkelf_build_ua(tab) -> str:
     base = (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -482,38 +372,6 @@ def darkelf_build_ua(tab) -> str:
 
     # 🔒 DO NOT expose anything in UA
     return base
-    
-def darkelf_get_bucket(tab, groups=32):
-    if hasattr(tab, "_pq_bucket"):
-        return tab._pq_bucket
-
-    seed = getattr(tab, "_pq_seed", None)
-    if not seed:
-        tab._pq_bucket = 0
-        return 0
-
-    digest = hashlib.sha3_256(seed).hexdigest()
-    tab._pq_bucket = int(digest, 16) % groups
-    return tab._pq_bucket
-    
-def darkelf_init_tab_identity(tab):
-    if not tab:
-        return
-
-    if not hasattr(tab, "_pq_seed") or not tab._pq_seed:
-        tab._pq_seed = hashlib.sha256(os.urandom(32)).digest()
-        tab._pq_seed_locked = True
-
-    if not hasattr(tab, "_ua_string") or not tab._ua_string:
-        tab._ua_string = darkelf_build_ua(tab)
-        
-def darkelf_get_bucket(tab, groups=32):
-    seed = getattr(tab, "_pq_seed", None)
-    if not seed:
-        return 0
-
-    digest = hashlib.sha3_256(seed).hexdigest()
-    return int(digest, 16) % groups
     
 def darkelf_is_pq_active(owner) -> bool:
     return hasattr(owner, "_pq_seed") and bool(getattr(owner, "_pq_seed", None))
@@ -728,13 +586,6 @@ class DarkelfNetworkPolicy:
             tab._pq_seed = hashlib.sha3_256(tab._pq_seed).digest()
             tab._pq_counter = 0
             tab._pq_chain_seen.clear()
-
-            try:
-                tab._ua_string = darkelf_build_ua(tab)
-                if getattr(tab, "view", None):
-                    tab.view.setCustomUserAgent_(tab._ua_string)
-            except Exception:
-                pass
 
         return decision, meta
         
@@ -3396,14 +3247,7 @@ UNIFIED_DEFENSE_JS = r'''
     if (!window.__darkelf_pq_seed_hex) return;
 
     const ROOT_HEX = String(window.__darkelf_pq_seed_hex);
-    
-    // 🔥 DARKELF GROUP BUCKET (SYNC WITH UA)
-    let __darkelf_bucket = 0;
 
-    try {
-        __darkelf_bucket = parseInt(ROOT_HEX.slice(0, 8), 16) % 32;
-    } catch(e){}
-    
     function hex32(s){ return parseInt(s,16)>>>0; }
 
     const ROOT0 = hex32(ROOT_HEX.slice(0,8));
@@ -5971,9 +5815,8 @@ class Browser(NSObject):
         ucc.addScriptMessageHandler_name_(self._nav_delegate, "blobdownload")
         ucc.addScriptMessageHandler_name_(self._search_handler, "search")
 
-        inject_screen_spoof(ucc, tab)
-        inject_webgl_identity(ucc, tab)
-        
+        inject_screen_spoof(ucc)
+
         self._inject_core_scripts(ucc)
 
         cfg.setUserContentController_(ucc)
@@ -5982,12 +5825,7 @@ class Browser(NSObject):
             NSMakeRect(0,0,800,600),
             cfg
         )
-        
-        web.setCustomUserAgent_(DARKELF_UA)
-        
-        darkelf_init_tab_identity(tab)
-        web.setCustomUserAgent_(tab._ua_string)
-        
+
         web.setNavigationDelegate_(self._nav_delegate)
         web.setUIDelegate_(self._ui_delegate)
 
@@ -6181,11 +6019,7 @@ class Browser(NSObject):
                 NSMakeRect(0, 0, width, height),
                 config
             )
-            
-            tab = self.tabs[self.active] if hasattr(self, "tabs") and 0 <= self.active < len(self.tabs) else None
-            darkelf_init_tab_identity(tab)
-            if tab and getattr(tab, "_ua_string", None):
-                webview.setCustomUserAgent_(tab._ua_string)
+
             # ✅ ATTACH CONTEXT MENU DELEGATE HERE
             menu = webview.menu()
             if not menu:
@@ -6197,11 +6031,6 @@ class Browser(NSObject):
             
             wk = WKWebView.alloc().initWithFrame_configuration_(old.frame(), config)
             
-            tab = self.tabs[self.active] if hasattr(self, "tabs") and 0 <= self.active < len(self.tabs) else None
-            darkelf_init_tab_identity(tab)
-            if tab and getattr(tab, "_ua_string", None):
-                webview.setCustomUserAgent_(tab._ua_string)
-                
             if getattr(self, "_ui_delegate", None) is not None:
                 wk.setUIDelegate_(self._ui_delegate)
 
