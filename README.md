@@ -1,4 +1,4 @@
-# 🧿 Darkelf Cocoa Browser 4.3.1  [![PyPI Downloads](https://static.pepy.tech/personalized-badge/darkelf-cocoa?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/darkelf-cocoa)
+# 🧿 Darkelf Cocoa Browser 4.3.2  [![PyPI Downloads](https://static.pepy.tech/personalized-badge/darkelf-cocoa?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/darkelf-cocoa)
 ### Ephemeral, Privacy‑First macOS Browser (PyObjC + WebKit)
 
 A hardened, **memory‑only** macOS browser designed for **zero persistence**, **tracker resistance**, **real‑time threat detection**, and **post‑quantum integrity awareness** — installable via `pip` with a full native GUI.
@@ -347,37 +347,7 @@ When critical threats exceed threshold:
 
 ## 🎨 Fingerprint System (Enhanced)
 
-### Device Profile Expansion
-
-* Expanded realistic macOS device profiles (4 → 8)
-* Includes Apple Silicon classes:
-
-  * M1 / M2
-  * M1 Pro / Max
-  * M2 Max / Ultra
-
-### Profile-Based Identity
-
-Each tab is assigned a deterministic device profile derived from PQ seed:
-
-* Screen resolution (real Mac values)
-* WebGL vendor + renderer (Apple Silicon aligned)
 * Unified fingerprint surface per tab
-
-### WebGL Identity Fix
-
-* Corrected vendor/renderer exposure across:
-
-  * WebGLRenderingContext
-  * WebGL2RenderingContext
-  * debug extension path
-
-### Result
-
-* Eliminates default “Apple GPU” leakage
-* Ensures GPU identity matches device profile
-
----
 
 ## 🧩 Fingerprint Coherence
 
