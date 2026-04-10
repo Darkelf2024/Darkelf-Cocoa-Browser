@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.3.2 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.3.3 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -110,11 +110,6 @@ import base64
 
 from Security import SecTrustEvaluateWithError, SecTrustGetCertificateAtIndex, SecCertificateCopySubjectSummary
 import tempfile
-
-DARKELF_UA = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/605.1.15 (KHTML, like Gecko)"
-)
 
 # ---- Darkelf logging control ----
 
@@ -348,31 +343,66 @@ def darkelf_pq_chain(owner, url: str) -> bytes:
     tab._pq_prev_chain = chain
 
     return chain
+
     
 def get_canvas_seed_hex(tab):
     if not hasattr(tab, "_pq_seed") or not tab._pq_seed:
-        return "00000000000000000000000000000000"
+        return "0000000000000000"
 
-    # 128-bit root seed for JS
-    return tab._pq_seed[:16].hex()
-    
-def darkelf_build_ua(tab) -> str:
-    base = (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/605.1.15 (KHTML, like Gecko)"
-    )
-
-    # ensure seed exists (internal use only)
-    seed = getattr(tab, "_pq_seed", None)
-    if not seed:
-        return base
-
-    # 🔥 still compute bucket (used elsewhere: screen, WebGL, etc.)
     bucket = darkelf_get_bucket(tab)
 
-    # 🔒 DO NOT expose anything in UA
+    h = hashlib.sha3_256()
+
+    # identity
+    h.update(tab._pq_seed)
+
+    # grouping
+    h.update(bucket.to_bytes(2, "big"))
+
+    # 🔥 READ ONLY — NO CHAIN ADVANCE
+    chain = getattr(tab, "_pq_prev_chain", b"\x00"*32)
+    h.update(chain[:16])
+
+    return h.digest()[:16].hex()
+    
+def darkelf_get_bucket(tab, groups=32):
+    if hasattr(tab, "_pq_bucket"):
+        return tab._pq_bucket
+
+    seed = getattr(tab, "_pq_seed", None)
+    if not seed:
+        tab._pq_bucket = 0
+        return 0
+
+    digest = hashlib.sha3_256(seed).hexdigest()
+    tab._pq_bucket = int(digest, 16) % groups
+    return tab._pq_bucket
+
+def darkelf_build_ua(tab) -> str:
+    base = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)"
+
+    seed = getattr(tab, "_pq_seed", None)
+    if not seed:
+        return base  # 🔒 no Darkelf fallback
+
+    bucket = darkelf_get_bucket(tab)
+
+    # 🔒 keep grouping INTERNAL ONLY
+    tab._ua_bucket = bucket
+
     return base
     
+def darkelf_init_tab_identity(tab):
+    if not tab:
+        return
+
+    if not hasattr(tab, "_pq_seed") or not tab._pq_seed:
+        tab._pq_seed = hashlib.sha256(os.urandom(32)).digest()
+        tab._pq_seed_locked = True
+
+    if not hasattr(tab, "_ua_string") or not tab._ua_string:
+        tab._ua_string = darkelf_build_ua(tab)
+        
 def darkelf_is_pq_active(owner) -> bool:
     return hasattr(owner, "_pq_seed") and bool(getattr(owner, "_pq_seed", None))
     
@@ -3244,9 +3274,14 @@ UNIFIED_DEFENSE_JS = r'''
     // 🔐 PQ SEED REQUIRED BELOW
     // ============================================================
 
-    if (!window.__darkelf_pq_seed_hex) return;
+    let ROOT_HEX = window.__darkelf_pq_seed_hex || "deadbeefdeadbeefdeadbeefdeadbeef";
 
-    const ROOT_HEX = String(window.__darkelf_pq_seed_hex);
+    // 🔥 DARKELF GROUP BUCKET (SYNC WITH UA)
+    let __darkelf_bucket = 0;
+
+    try {
+        __darkelf_bucket = parseInt(ROOT_HEX.slice(0, 8), 16) % 32;
+    } catch(e){}
 
     function hex32(s){ return parseInt(s,16)>>>0; }
 
@@ -5825,7 +5860,10 @@ class Browser(NSObject):
             NSMakeRect(0,0,800,600),
             cfg
         )
-
+        
+        darkelf_init_tab_identity(tab)
+        web.setCustomUserAgent_(tab._ua_string)
+        
         web.setNavigationDelegate_(self._nav_delegate)
         web.setUIDelegate_(self._ui_delegate)
 
