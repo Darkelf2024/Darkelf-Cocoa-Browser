@@ -1,4 +1,4 @@
-# 🧿 Darkelf Cocoa Browser 4.3.2  [![PyPI Downloads](https://static.pepy.tech/personalized-badge/darkelf-cocoa?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/darkelf-cocoa)
+# 🧿 Darkelf Cocoa Browser 4.3.3  [![PyPI Downloads](https://static.pepy.tech/personalized-badge/darkelf-cocoa?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/darkelf-cocoa)
 ### Ephemeral, Privacy‑First macOS Browser (PyObjC + WebKit)
 
 A hardened, **memory‑only** macOS browser designed for **zero persistence**, **tracker resistance**, **real‑time threat detection**, and **post‑quantum integrity awareness** — installable via `pip` with a full native GUI.
@@ -347,34 +347,80 @@ When critical threats exceed threshold:
 
 ## 🎨 Fingerprint System (Enhanced)
 
-* Unified fingerprint surface per tab
+### PQ-Based Identity
+
+Each tab now uses a **deterministic, hidden identity** derived from an internal PQ seed:
+
+- Stable within a tab session  
+- Independent across tabs  
+- Not exposed to websites  
+
+### Rotation Model
+
+- Fingerprints remain stable on reload  
+- New tabs receive distinct identities  
+- Gradual variation over time and navigation  
+
+### Result
+
+- Prevents cross-tab tracking  
+- Avoids unstable or overly-random behavior  
+
+---
 
 ## 🧩 Fingerprint Coherence
 
-* Full alignment across:
+- Canvas, WebGL, and font signals are now aligned  
+- Eliminated inconsistent or conflicting fingerprint traits  
 
-  * User-Agent
-  * Screen dimensions
-  * WebGL identity
+### Result
 
-* Removed inconsistent fingerprint combinations
-
-* Prevents detection via cross-surface mismatch
+- Coherent, realistic device fingerprint  
+- Reduced detection via cross-surface mismatch  
 
 ---
 
 ## 🕶️ User-Agent Stealth
 
+- Removed all Darkelf identifiers from the User-Agent  
+
 ### Result
 
-* Reduced detectability
-* Appears as generic WebKit/macOS client
-* Internal identity system remains fully active
-
-## Platform Support
-- **macOS only** (Cocoa + WebKit via PyObjC)
+- Appears as a standard WebKit/macOS client  
+- Internal identity system remains fully hidden  
 
 ---
+
+## 🔐 Internal Improvements
+
+- Hidden identity grouping (not externally visible)  
+- Navigation-based entropy (no JS-driven mutation)  
+- Stable, non-reactive fingerprint behavior  
+
+## ⚙️ JavaScript Hardening (PQ Unified)
+
+* All JS privacy surfaces aligned under PQ-seeded entropy
+* Consistent spoofing across:
+
+  * Canvas
+  * WebGL
+  * Font fingerprinting
+
+---
+
+## 🔁 Fingerprint Isolation
+
+### Per-Tab Identity Model
+
+* 🔁 Deterministic per-tab identity
+* Group-based identity distribution (bucketed)
+* No cross-tab fingerprint reuse
+
+### Result
+
+* Eliminates cross-tab correlation vectors
+* Prevents long-session fingerprint linking
+* Creates overlapping identity clusters (crowd blending)
 
 ## License
 **LGPL-3.0-or-later**
