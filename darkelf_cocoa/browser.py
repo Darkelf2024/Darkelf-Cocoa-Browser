@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.3.3 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.3.4 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -62,7 +62,7 @@
 # Authored by Dr. Kevin Moore (2025).
 
 import os
-import sys, re, json, subprocess, threading
+import sys, re, json, threading
 from dataclasses import dataclass
 from typing import List
 import hashlib
@@ -118,6 +118,16 @@ LOG_LEVEL = 1
 # 1 = important only
 # 2 = verbose debug
 
+# -----------------------------------
+# 🔒 URL SAFETY CHECK
+# -----------------------------------
+def is_safe_url(url: str) -> bool:
+    try:
+        u = urlparse(url)
+        return u.scheme in ("http", "https")
+    except Exception:
+        return False
+        
 def log(level, *msg):
     if level <= LOG_LEVEL:
         print(*msg)
@@ -125,8 +135,8 @@ def log(level, *msg):
 def inject_screen_spoof(ucc):
     js = r"""
     (() => {
-        const width = 1512;
-        const height = 982;
+        const width = 1920;
+        const height = 1080;
         const dpr = 2;
 
         const define = (obj, prop, value) => {
@@ -191,34 +201,34 @@ def darkelf_destroy_tab(tab):
         # 🔥 STOP FIRST
         try:
             view.stopLoading()
-        except:
-            pass
+        except Exception as e:
+            log(2, e)
 
         # 🔥 DETACH DELEGATES
         try:
             view.setNavigationDelegate_(None)
             view.setUIDelegate_(None)
-        except:
-            pass
+        except Exception as e:
+            log(2, e)
 
         # 🔥 LOAD BLANK (VERY IMPORTANT)
         try:
             view.loadHTMLString_baseURL_("", None)
-        except:
-            pass
+        except Exception as e:
+            log(2, e)
 
         # 🔥 REMOVE FROM UI
         try:
             view.removeFromSuperview()
-        except:
-            pass
+        except Exception as e:
+            log(2, e)
 
         # 🔥 DELAY FINAL RELEASE (prevents async crash)
         def _release():
             try:
                 tab.view = None
-            except:
-                pass
+            except Exception as e:
+                log(2, e)
 
         threading.Timer(0.2, _release).start()
 
@@ -501,7 +511,6 @@ class DarkelfNetworkPolicy:
             tab._pq_counter = 0
 
         if not hasattr(tab, "_pq_chain_seen"):
-            from collections import deque
             tab._pq_chain_seen = deque(maxlen=200)
 
         # ----------------------------
@@ -574,8 +583,7 @@ class DarkelfNetworkPolicy:
                 elif stats["risk_level"] == "medium":
                     decision = "degrade"
 
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
 
         # ----------------------------
         # TRACKER DECEPTION
@@ -606,8 +614,7 @@ class DarkelfNetworkPolicy:
                         alt = hashlib.sha3_256((host + real_fp).encode()).digest()
                         meta["_pq_fp_alt"] = alt[:8].hex()
 
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
 
         # ----------------------------
         # SOFT ROTATION
@@ -742,8 +749,7 @@ class DownloadProgressView(NSView):
             try:
                 if hasattr(self, "percent"):
                     self.percent.setStringValue_(f"{int(percent)}%")
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
 
             trackWidth = self.progressTrack.bounds().size.width
             newWidth = trackWidth * (percent / 100.0)
@@ -827,8 +833,7 @@ class FirstPartyIsolation:
             if ext.domain and ext.suffix:
                 return f"{ext.domain}.{ext.suffix}"
 
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
 
         return host
 
@@ -1722,8 +1727,7 @@ class DarkelfMiniAISentinel:
         for tab in getattr(self.browser, "tabs", []):
             try:
                 tab.view.stopLoading()
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
 
         try:
             self.browser.start_lockdown_timer()
@@ -1826,8 +1830,7 @@ class DarkelfMiniAISentinel:
                 ctrl = getattr(self.browser,name,None)
                 if ctrl:
                     ctrl.setEnabled_(False)
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
 
     # --------------------------------------------------
     # UI UNLOCK
@@ -1848,8 +1851,7 @@ class DarkelfMiniAISentinel:
                 ctrl = getattr(self.browser,name,None)
                 if ctrl:
                     ctrl.setEnabled_(True)
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
                 
 HOME_URL = "darkelf://home"
         
@@ -2159,8 +2161,7 @@ class _UIDelegate(NSObject):
         try:
             print(f"[Media] 🔒 Denied media capture for: {origin}")
             decisionHandler(0)
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
             
     def webView_enterFullScreenForFrame_completionHandler_(self, webView, frame, completionHandler):
 
@@ -2339,8 +2340,7 @@ class _NavDelegate(NSObject):
                     browser.addr.setToolTip_(tooltip)
                     browser.addr.setTextColor_(color)
 
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
 
         except Exception as e:
             print("[NavDelegate] didFinish error:", e)
@@ -2497,8 +2497,7 @@ class _NavDelegate(NSObject):
                 url = response.response().URL()
                 if url:
                     filename = url.lastPathComponent() or "download"
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
 
             # --- init tracking (do this before UI updates) ---
             self.start_time = time.time()
@@ -2521,8 +2520,7 @@ class _NavDelegate(NSObject):
                     if parent:
                         try:
                             ui.removeFromSuperview()
-                        except Exception:
-                            pass
+                        except Exception as e: log(2, e)
 
                         parent.addSubview_(ui)
 
@@ -2543,8 +2541,7 @@ class _NavDelegate(NSObject):
                     try:
                         if hasattr(ui, "setIndeterminate_"):
                             ui.setIndeterminate_(True)
-                    except Exception:
-                        pass
+                    except Exception as e: log(2, e)
 
                     ui.updateProgress_(0)
                 except Exception as e:
@@ -2605,8 +2602,7 @@ class _NavDelegate(NSObject):
                         return
                     ui.setSpeed_(f"{mb:.2f} MB/s")
                     ui.updateProgress_(percent)
-                except Exception:
-                    pass
+                except Exception as e: log(2, e)
 
             NSOperationQueue.mainQueue().addOperationWithBlock_(_ui)
 
@@ -2625,16 +2621,19 @@ class _NavDelegate(NSObject):
         # --- 1. Log finish ---
         try:
             print("[Darkelf] Download finished")
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
 
         # --- 2. PQ HASH (SAFE BLOCK) ---
         try:
             if hasattr(self, "_download_path") and self._download_path:
-
+                                
                 with open(self._download_path, "rb") as f:
-                    data = f.read()
+                    while True:
+                        chunk = f.read(1024 * 1024)  # 1MB chunks
+                        if not chunk:
+                            break
 
+        # process chunk here (or just pass if not needed)
                 base_hash = darkelf_sha3_bytes(data)
                 chain = getattr(self.owner, "_pq_chain", "")
                 hash_val = hashlib.sha3_512((chain + base_hash).encode()).hexdigest()
@@ -2660,8 +2659,7 @@ class _NavDelegate(NSObject):
             def hide():
                 try:
                     ui.setHidden_(True)
-                except Exception:
-                    pass
+                except Exception as e: log(2, e)
 
             NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
                 1.5,
@@ -2706,8 +2704,7 @@ class _NavDelegate(NSObject):
     def download_didFailWithError_resumeData_(self, download, error, resumeData):
         try:
             print("[Darkelf] Download failed:", error)
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
 
     # ===============================
     # WIPE DOWNLOAD TRACES
@@ -2775,8 +2772,7 @@ class _NavDelegate(NSObject):
                                 meta.update(policy_meta)
 
                             owner.mini_ai.monitor_network(url_str, meta)
-                        except Exception:
-                            pass
+                        except Exception as e: log(2, e)
                             
                     if policy_decision == "block":
                         decisionHandler(WKNavigationActionPolicyCancel)
@@ -2788,8 +2784,7 @@ class _NavDelegate(NSObject):
                             webView.loadRequest_(
                                 NSURLRequest.requestWithURL_(NSURL.URLWithString_(new_url))
                             )
-                        except Exception:
-                            pass
+                        except Exception as e: log(2, e)
                         decisionHandler(WKNavigationActionPolicyCancel)
                         return
 
@@ -2825,8 +2820,7 @@ class _NavDelegate(NSObject):
                                 html,
                                 NSURL.URLWithString_("darkelf://report")
                             )
-                        except Exception:
-                            pass
+                        except Exception as e: log(2, e)
                     decisionHandler(WKNavigationActionPolicyCancel)
                     return
 
@@ -2850,8 +2844,7 @@ class _NavDelegate(NSObject):
                     webView.loadRequest_(
                         NSURLRequest.requestWithURL_(NSURL.URLWithString_(https_url))
                     )
-                except Exception:
-                    pass
+                except Exception as e: log(2, e)
                 decisionHandler(WKNavigationActionPolicyCancel)
                 return
 
@@ -2934,10 +2927,10 @@ class _NavDelegate(NSObject):
                                         owner._pq_trust_status = "warn"
                                     else:
                                         owner._pq_trust_status = "ok"
-
-                        except Exception:
-                            # silent fail (no spam)
-                            pass
+                            
+                        except Exception as e:
+                            log(2, e)
+                            
                         # ✅ --- END PQ BLOCK ---
 
                     if owner and hasattr(owner, "update_security_indicator"):
@@ -3497,11 +3490,11 @@ class HoverButton(NSButton):
     def mouseEntered_(self, evt):
         try:
             self.setContentTintColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(52/255.0, 199/255.0, 89/255.0, 1.0))
-        except Exception: pass
+        except Exception as e: log(2, e)
         
     def mouseExited_(self, evt):
         try: self.setContentTintColor_(NSColor.whiteColor())
-        except Exception: pass
+        except Exception as e: log(2, e)
 
 # ================= Tabs =================
 @dataclass
@@ -3737,8 +3730,7 @@ class Browser(NSObject):
                 "NSWindowDidResizeNotification",
                 self.window
             )
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
 
         return self
         
@@ -3753,16 +3745,14 @@ class Browser(NSObject):
                 try:
                     key = self.fpi._key(tab.url or HOME_URL, tab_uid=i)
                     active_keys.add(key)
-                except Exception:
-                    pass
+                except Exception as e: log(2, e)
 
             for key in list(self._containers.keys()):
 
                 if key not in active_keys:
                     del self._containers[key]
 
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
             
     def recycle_web_process(self):
         print("[Darkelf] Recycling WebKit process pool")
@@ -3783,8 +3773,7 @@ class Browser(NSObject):
                         u = old_view.URL()
                         if u:
                             url = str(u.absoluteString())
-                    except Exception:
-                        pass
+                    except Exception as e: log(2, e)
 
                     # build fresh config
                     config = WKWebViewConfiguration.alloc().init()
@@ -3810,19 +3799,16 @@ class Browser(NSObject):
                         )
                         try:
                             prefs.setValue_forKey_(True, "fullScreenEnabled")
-                        except Exception:
-                            pass
+                        except Exception as e: log(2, e)
                         config.setPreferences_(prefs)
-                    except Exception:
-                        pass
+                    except Exception as e: log(2, e)
 
                     # preserve UCC / injected scripts / handlers by rebuilding through your existing delegates
                     try:
                         old_ucc = old_view.configuration().userContentController()
                         if old_ucc is not None:
                             config.setUserContentController_(old_ucc)
-                    except Exception:
-                        pass
+                    except Exception as e: log(2, e)
 
                     frame = old_view.frame()
                     new_view = WKWebView.alloc().initWithFrame_configuration_(frame, config)
@@ -3834,25 +3820,21 @@ class Browser(NSObject):
                     if getattr(self, "_ui_delegate", None) is not None:
                         try:
                             new_view.setUIDelegate_(self._ui_delegate)
-                        except Exception:
-                            pass
+                        except Exception as e: log(2, e)
 
                     try:
                         new_view.setAutoresizingMask_(old_view.autoresizingMask())
-                    except Exception:
-                        pass
+                    except Exception as e: log(2, e)
 
                     # swap views
                     try:
                         old_view.stopLoading()
-                    except Exception:
-                        pass
+                    except Exception as e: log(2, e)
 
                     try:
                         old_view.setNavigationDelegate_(None)
                         old_view.setUIDelegate_(None)
-                    except Exception:
-                        pass
+                    except Exception as e: log(2, e)
 
                     try:
                         superview = old_view.superview()
@@ -3865,15 +3847,13 @@ class Browser(NSObject):
                     if superview is not None:
                         try:
                             superview.addSubview_(new_view)
-                        except Exception:
-                            pass
+                        except Exception as e: log(2, e)
 
                     # if this is the active tab, remount properly through your normal path
                     if i == self.active:
                         try:
                             self._mount_webview(new_view)
-                        except Exception:
-                            pass
+                        except Exception as e: log(2, e)
 
                     # reload prior page
                     if url:
@@ -3881,8 +3861,7 @@ class Browser(NSObject):
                             new_view.loadRequest_(
                                 NSURLRequest.requestWithURL_(NSURL.URLWithString_(url))
                             )
-                        except Exception:
-                            pass
+                        except Exception as e: log(2, e)
 
                 except Exception as e:
                     print("[Darkelf] Tab recycle error:", e)
@@ -3912,8 +3891,7 @@ class Browser(NSObject):
             if self.tabs and self.active >= 0:
                 if getattr(self.tabs[self.active], "url", "") != "darkelf://report":
                     self.updateMiniAIIndicator()
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
         
     def openThreatReport_(self, sender):
 
@@ -4637,8 +4615,7 @@ class Browser(NSObject):
 
         try:
             self.mini_ai._unlock_browser_ui()
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
 
         try:
             self.close_threat_report_tab()
@@ -4663,8 +4640,7 @@ class Browser(NSObject):
             if report_view and report_view.superview():
                 report_view.removeFromSuperview()
 
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
 
         del self.tabs[idx]
 
@@ -4774,16 +4750,14 @@ class Browser(NSObject):
                 strip.setTitle_("")
                 strip.setTitlePosition_(0)
                 cv.addSubview_(strip)
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
 
         try:
             win.setTitlebarAppearsTransparent_(True)
             win.setBackgroundColor_(NSColor.blackColor())
             win.contentView().setWantsLayer_(True)
             win.contentView().layer().setBackgroundColor_(NSColor.blackColor().CGColor())
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
 
         try:
             win.setCollectionBehavior_(NSWindowCollectionBehaviorFullScreenPrimary)
@@ -4821,13 +4795,11 @@ class Browser(NSObject):
         # Avoid fancy styles that sometimes misbehave across macOS versions
         try:
             btn.setBordered_(True)
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
         if tooltip:
             try:
                 btn.setToolTip_(tooltip)
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
         return btn
 
     def _build_toolbar(self):
@@ -5030,8 +5002,7 @@ class Browser(NSObject):
         if tab and getattr(tab, "view", None):
             try:
                 tab.view.goBack()
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
 
     @objc.IBAction
     def actFwd_(self, sender):
@@ -5039,8 +5010,7 @@ class Browser(NSObject):
         if tab and getattr(tab, "view", None):
             try:
                 tab.view.goForward()
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
 
     @objc.IBAction
     def actReload_(self, sender):
@@ -5048,8 +5018,7 @@ class Browser(NSObject):
         if tab and getattr(tab, "view", None):
             try:
                 tab.view.reload()
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
 
     @objc.IBAction
     def actHome_(self, sender):
@@ -5109,13 +5078,11 @@ class Browser(NSObject):
                 self._mount_webview(view)
                 try:
                     view.setHidden_(False)
-                except Exception:
-                    pass
+                except Exception as e: log(2, e)
             else:
                 try:
                     view.setHidden_(True)
-                except Exception:
-                    pass
+                except Exception as e: log(2, e)
 
         self._sync_addr()
         self._update_tab_buttons()
@@ -5127,8 +5094,7 @@ class Browser(NSObject):
 
         try:
             self.addr.setStringValue_(getattr(tab, "url", "") or "")
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
 
     def _navigate_to(self, url_str):
         tab = self._active_tab()
@@ -5155,17 +5121,14 @@ class Browser(NSObject):
             if img:
                 try:
                     img.setTemplate_(True)
-                except Exception:
-                    pass
+                except Exception as e: log(2, e)
                 b.setImage_(img)
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
         try:
             b.setBordered_(False)
             b.setBezelStyle_(1)
             b.setToolTip_(tooltip or "")
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
         if hasattr(b, "setContentTintColor_"):
             b.setContentTintColor_(NSColor.whiteColor())
         return b
@@ -5205,8 +5168,7 @@ class Browser(NSObject):
             self.toolbar_container.layer().setBorderColor_(
                 NSColor.colorWithCalibratedWhite_alpha_(1.0, 0.08).CGColor()
             )
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
 
         cv.addSubview_(self.toolbar_container)
 
@@ -5229,8 +5191,7 @@ class Browser(NSObject):
                         img = img.imageByApplyingSymbolConfiguration_(cfg)
                     try:
                         img.setTemplate_(True)
-                    except Exception:
-                        pass
+                    except Exception as e: log(2, e)
             except Exception:
                 img = None
 
@@ -5247,8 +5208,7 @@ class Browser(NSObject):
             b.setWantsLayer_(True)
             try:
                 b.layer().setCornerRadius_(10.0)
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
 
             return b
 
@@ -5390,12 +5350,10 @@ class Browser(NSObject):
     def onResize_(self, note):
         try:
             self._layout_toolbar()
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
         try:
             self._layout()
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
 
     def _bring_tabbar_to_front(self):
         try:
@@ -5407,8 +5365,7 @@ class Browser(NSObject):
                 if self.toolbar_container.superview() is not None and self.toolbar_container.superview() != cv:
                     try:
                         self.toolbar_container.removeFromSuperview()
-                    except Exception:
-                        pass
+                    except Exception as e: log(2, e)
                 # Only add if not already attached to contentView
                 if self.toolbar_container.superview() != cv:
                     cv.addSubview_(self.toolbar_container)
@@ -5418,13 +5375,11 @@ class Browser(NSObject):
                 if self.tabbar.superview() is not None and self.tabbar.superview() != cv:
                     try:
                         self.tabbar.removeFromSuperview()
-                    except Exception:
-                        pass
+                    except Exception as e: log(2, e)
                 if self.tabbar.superview() != cv:
                     cv.addSubview_(self.tabbar)
                 self.tabbar.displayIfNeeded()
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
 
     # In actToggleJS_, after toggling, also update JS button icon/tint:
     def actToggleJS_(self, _):
@@ -5443,8 +5398,7 @@ class Browser(NSObject):
             self.btn_js.setToolTip_(f"JavaScript: {'ON' if self.js_enabled else 'OFF'}")
             if hasattr(self.btn_js, "setContentTintColor_"):
                 self.btn_js.setContentTintColor_(NSColor.systemGreenColor() if self.js_enabled else NSColor.systemRedColor())
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
 
         # apply to active webview + reload
         try:
@@ -5917,8 +5871,7 @@ class Browser(NSObject):
         try:
             print(f"[Media] 🔒 Denied media capture for: {origin}")
             decisionHandler(0)  # Always deny
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
                                                     
     def _mount_webview(self, wk):
         cv = self.window.contentView()
@@ -5993,8 +5946,7 @@ class Browser(NSObject):
                 if u and u.absoluteString() == HOME_URL:
                     print("[JS] Skip rebuild: homepage")
                     return
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
 
             if self.active < 0 or self.active >= len(self.tabs):
                 return
@@ -6007,15 +5959,13 @@ class Browser(NSObject):
                 ucc_old.removeAllUserScripts()
                 for name in ["tracker", "panic", "search"]:
                     try: ucc_old.removeScriptMessageHandlerForName_(name)
-                    except Exception: pass
-            except Exception:
-                pass
+                    except Exception as e: log(2, e)
+            except Exception as e: log(2, e)
 
             try:
                 if old.superview() is not None:
                     old.removeFromSuperview()
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
             self.tabs[self.active].view = None
 
             # --- Determine which URL to reload ---
@@ -6024,8 +5974,7 @@ class Browser(NSObject):
                 u = old.URL()
                 if u is not None:
                     url = str(u.absoluteString())
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
             if not url:
                 url = self.tabs[self.active].url
 
@@ -6044,8 +5993,7 @@ class Browser(NSObject):
 
             try:
                 config.setLimitsNavigationsToAppBoundDomains_(False)
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
                 
             #config = WKWebViewConfiguration.alloc().init()
 
@@ -6082,8 +6030,7 @@ class Browser(NSObject):
                     True if url == HOME_URL else bool(getattr(self, "js_enabled", True))
                 )
                 prefs.setJavaScriptCanOpenWindowsAutomatically_(True)
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
             config.setPreferences_(prefs)
 
             ucc = WKUserContentController.alloc().init()
@@ -6117,8 +6064,7 @@ class Browser(NSObject):
             # ----------------------------
             try:
                 self._inject_core_scripts(ucc)
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
 
             # ----------------------------
             # 🔥 4. ATTACH UCC (CRITICAL)
@@ -6136,14 +6082,12 @@ class Browser(NSObject):
                     store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler_(
                         "darkelf_block_scripts", rule_text, _cb
                     )
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
 
             # --- Attach the user content controller ---
             try:
                 config.setUserContentController_(ucc)
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
 
             try:
                 frame = old.frame() if hasattr(old, "frame") else ((0, 0), (1200, 760))
@@ -6157,13 +6101,11 @@ class Browser(NSObject):
                 if getattr(self, "_ui_delegate", None) is not None:
                     try:
                         wk.setUIDelegate_(self._ui_delegate)
-                    except Exception:
-                        pass
+                    except Exception as e: log(2, e)
 
                 try:
                     wk.setAutoresizingMask_(18)
-                except Exception:
-                    pass
+                except Exception as e: log(2, e)
 
                 # Mount & swap in
                 self.tabs[self.active].view = wk
@@ -6180,18 +6122,20 @@ class Browser(NSObject):
                     u = old.URL()
                     if u:
                         old_url = str(u.absoluteString())
-                except Exception:
-                    pass
+                except Exception as e: log(2, e)
                 if not old_url:
                     try:
                         item = old.backForwardList().currentItem()
                         if item and item.URL():
                             old_url = str(item.URL().absoluteString())
-                    except Exception:
-                        pass
+                    except Exception as e: log(2, e)
 
                 # Fall back to tab's remembered URL
                 url = old_url or self.tabs[self.active].url or ""
+
+                if not is_safe_url(url):
+                    log(1, "[BLOCKED URL]", url)
+                    return
 
                 # If we're on the internal homepage or truly blank, render HOMEPAGE_HTML
                 if url in (None, "", "about:home", "about://home", "about:blank", "about:blank#blocked"):
@@ -6203,15 +6147,13 @@ class Browser(NSObject):
                         self.tabs[self.active].url  = HOME_URL
                         self.tabs[self.active].host = "home"
                         self._sync_addr()
-                    except Exception:
-                        pass
+                    except Exception as e: log(2, e)
                     return  # <-- return ONLY in the homepage path
 
                 # Otherwise load the same external URL so we remain on the current page
                 req = NSURLRequest.requestWithURL_(NSURL.URLWithString_(url))
                 wk.loadRequest_(req)
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
                 
 
     @property
@@ -6219,8 +6161,7 @@ class Browser(NSObject):
         try:
             if 0 <= self.active < len(self.tabs):
                 return self.tabs[self.active]
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
         return None
         
     def _add_tab(self, url: str = "", home: bool = False):
@@ -6282,8 +6223,7 @@ class Browser(NSObject):
                 old_view.setNavigationDelegate_(None)
                 old_view.setUIDelegate_(None)
                 old_view.removeFromSuperview()
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
 
         # ----------------------------
         # MOUNT NEW VIEW
@@ -6300,8 +6240,7 @@ class Browser(NSObject):
         if hasattr(self, "mini_ai"):
             try:
                 self.mini_ai.unique_domains.clear()
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
 
         # ----------------------------
         # LOAD CONTENT
@@ -6309,8 +6248,7 @@ class Browser(NSObject):
         if home:
             try:
                 self.urlbar.setStringValue_("")
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
 
             wk.loadHTMLString_baseURL_(
                 HOMEPAGE_HTML,
@@ -6330,8 +6268,7 @@ class Browser(NSObject):
                     )
                     wk.loadRequest_(req)
                     print(f"[AddTab] Loading URL")
-                except Exception:
-                    pass
+                except Exception as e: log(2, e)
 
                 tab.url = url
                 tab.host = "new"
@@ -6374,41 +6311,36 @@ class Browser(NSObject):
             })();
             """
             wk.evaluateJavaScript_completionHandler_(js, None)
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
 
         try: wk.stopLoading()
-        except Exception: pass
+        except Exception as e: log(2, e)
         try: wk.loadHTMLString_baseURL_("", None)
-        except Exception: pass
+        except Exception as e: log(2, e)
 
         try: wk.setNavigationDelegate_(None)
-        except Exception: pass
+        except Exception as e: log(2, e)
         try: wk.setUIDelegate_(None)
-        except Exception: pass
+        except Exception as e: log(2, e)
         try:
             ucc = wk.configuration().userContentController()
             if ucc:
                 try: ucc.removeAllUserScripts()
-                except Exception: pass
+                except Exception as e: log(2, e)
                 for name in ("netlog","search"):
                     try:
                         ucc.removeScriptMessageHandlerForName_(name)
-                    except Exception:
-                        pass
+                    except Exception as e: log(2, e)
                         
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
             
         try:
             wk.removeFromSuperview()
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
             
         try:
             tab.data_store = None
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
 
     def actNewTab_(self, _): self._add_tab(home=True)
 
@@ -6428,8 +6360,7 @@ class Browser(NSObject):
             try:
                 if isinstance(subview, WKWebView):
                     subview.removeFromSuperview()
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
 
         # 🔹 update active tab
         self.active = idx
@@ -6508,10 +6439,10 @@ class Browser(NSObject):
 
     def actBack_(self, _):
         try: self.tabs[self.active].view.goBack_(None)
-        except Exception: pass
+        except Exception as e: log(2, e)
     def actFwd_(self, _):
         try: self.tabs[self.active].view.goForward_(None)
-        except Exception: pass
+        except Exception as e: log(2, e)
 
     def actReload_(self, _):
         try:
@@ -6558,13 +6489,13 @@ class Browser(NSObject):
             print("[Home] Failed:", e)
     def actZoomIn_(self, _):
         try: s=self.tabs[self.active].view.magnification(); self.tabs[self.active].view.setMagnification_centeredAtPoint_(min(s+0.1,3.0),(0,0))
-        except Exception: pass
+        except Exception as e: log(2, e)
     def actZoomOut_(self, _):
         try: s=self.tabs[self.active].view.magnification(); self.tabs[self.active].view.setMagnification_centeredAtPoint_(max(s-0.1,0.5),(0,0))
-        except Exception: pass
+        except Exception as e: log(2, e)
     def actFull_(self, _):
         try: self.window.toggleFullScreen_(None)
-        except Exception: pass
+        except Exception as e: log(2, e)
 
     @objc.python_method
     def _tint_alert_ok_green(self, alert):
@@ -6636,8 +6567,7 @@ class Browser(NSObject):
                 for tab in list(self.tabs):
                     try:
                         self._teardown_webview(tab.view)
-                    except Exception:
-                        pass
+                    except Exception as e: log(2, e)
 
                 self.tabs.clear()
                 self.active = -1
@@ -6689,8 +6619,7 @@ class Browser(NSObject):
                     u = self.tabs[self.active].view.URL()
                     if u is not None:
                         v = str(u.absoluteString())
-                except Exception:
-                    pass
+                except Exception as e: log(2, e)
 
                 if not v:
                     v = self.tabs[self.active].url or ""
@@ -6706,8 +6635,7 @@ class Browser(NSObject):
 
             self.urlbar.setStringValue_(v)
 
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
                         
     def _install_key_monitor(self):
 
@@ -6802,8 +6730,7 @@ class Browser(NSObject):
             try:
                 nc = NSNotificationCenter.defaultCenter()
                 nc.removeObserver_(self)
-            except Exception:
-                pass
+            except Exception as e: log(2, e)
     
         if hasattr(self, "tabs"):
             for tab in self.tabs:
@@ -6814,8 +6741,7 @@ class Browser(NSObject):
                         for name in ("netlog", "search"):
                             ucc.removeScriptMessageHandlerForName_(name)
                         view.removeFromSuperview()
-                    except Exception:
-                        pass
+                    except Exception as e: log(2, e)
                         
     def _wipe_all_site_data(self):
         """
@@ -6835,8 +6761,7 @@ class Browser(NSObject):
                 try:
                     if hasattr(tab, "view") and tab.view:
                         self._teardown_webview(tab.view)
-                except Exception:
-                    pass
+                except Exception as e: log(2, e)
 
             # Clear tab state
             self.tabs = []
@@ -6858,18 +6783,15 @@ class Browser(NSObject):
             for tab in getattr(self, "tabs", []):
                 try:
                     tab.view.stopLoading()
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e: log(2, e)
+        except Exception as e: log(2, e)
 
         NSApplication.sharedApplication().terminate_(None)
 
     def applicationWillTerminate_(self, notification):
         try:
             pass
-        except Exception:
-            pass
+        except Exception as e: log(2, e)
             
     def wipe_webkit_memory():
         store = WKWebsiteDataStore.nonPersistentDataStore()
