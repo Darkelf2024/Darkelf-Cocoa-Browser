@@ -33,9 +33,9 @@ It’s built for users who want:
 - **Aggressive tracking resistance**
 - **Local-only security monitoring** (no telemetry)
 - **Integrity signaling** and session-bound consistency checks
-- **Enhanced error handling
-- **Memory chunking
-- **Safe url handling
+- **Enhanced error handling**
+- **Memory chunking**
+- **Safe url handling**
 
 ---
 
