@@ -75,8 +75,6 @@ It’s built for users who want:
 pip install darkelf-cocoa
 ```
 
-> If you are packaging for PyPI, ensure your project metadata clearly indicates **macOS-only**, and include PyObjC/WebKit prerequisites in your docs.
-
 ---
 
 ## Quick Start
