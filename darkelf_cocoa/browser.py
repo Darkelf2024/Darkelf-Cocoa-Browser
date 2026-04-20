@@ -1,4 +1,4 @@
-# Darkelf Cocoa General Browser v4.3.4 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
+# Darkelf Cocoa General Browser v4.3.5 — Ephemeral, Privacy-Focused Web Browser (macOS / Cocoa Build)
 # Copyright (C) 2025 Dr. Kevin Moore
 #
 # SPDX-License-Identifier: LGPL-3.0-or-later
@@ -3451,7 +3451,121 @@ UNIFIED_DEFENSE_JS = r'''
 
     patchGL(WebGLRenderingContext&&WebGLRenderingContext.prototype);
     patchGL(WebGL2RenderingContext&&WebGL2RenderingContext.prototype);
+    
+    // ============================================================
+    // 🚀 WEBGPU (SAFE HASH ROTATION — UNIFIED WITH PQ)
+    // ============================================================
 
+    (function(){
+
+        if (!("gpu" in navigator)) return;
+
+        // 🔒 derive WebGPU seed from existing root system
+        const WEBGPU_SEED = derive(17,18,19,20);
+
+        function mixWebGPU(x){
+            return mix4(x, ...WEBGPU_SEED);
+        }
+
+        // 🌍 bind to origin (same pattern as WebGL)
+        let origin = location.origin || "";
+        try { origin = window.top.location.origin || origin; } catch(e){}
+
+        let originHash = 0;
+        for (let i = 0; i < origin.length; i++){
+            originHash = (originHash * 31 + origin.charCodeAt(i)) >>> 0;
+        }
+
+        const WEBGPU_SITE = mixWebGPU(originHash);
+
+        // --------------------------------------------------------
+        // 🔧 PATCH navigator.gpu.requestAdapter
+        // --------------------------------------------------------
+
+        const origRequestAdapter = navigator.gpu.requestAdapter.bind(navigator.gpu);
+
+        navigator.gpu.requestAdapter = async function(options){
+
+            const adapter = await origRequestAdapter(options);
+            if (!adapter) return adapter;
+
+            return new Proxy(adapter, {
+
+                get(target, prop){
+
+                    // 🔒 Slight string perturbation (stable)
+                    if (prop === "name"){
+                        const base = target.name || "GPU";
+                        const m = mixWebGPU(base.length ^ WEBGPU_SITE);
+                        return (m % 2 === 0) ? base : base + " ";
+                    }
+
+                    // 🔒 Stable numeric perturbation
+                    if (prop === "limits"){
+                        const limits = target.limits;
+                        return new Proxy(limits, {
+                            get(lim, key){
+                                const val = lim[key];
+                                if (typeof val === "number"){
+                                    return val + ((mixWebGPU(val ^ WEBGPU_SITE) % 3) - 1);
+                                }
+                                return val;
+                            }
+                        });
+                    }
+
+                    return target[prop];
+                }
+            });
+        };
+
+        // --------------------------------------------------------
+        // 🔧 PATCH GPUDevice → buffer readback noise
+        // --------------------------------------------------------
+
+        const origRequestDevice = GPUAdapter.prototype.requestDevice;
+
+        GPUAdapter.prototype.requestDevice = async function(){
+
+            const device = await origRequestDevice.apply(this, arguments);
+            if (!device) return device;
+
+            const origCreateBuffer = device.createBuffer;
+
+            device.createBuffer = function(desc){
+
+                const buffer = origCreateBuffer.call(this, desc);
+
+                const origMapAsync = buffer.mapAsync;
+
+                buffer.mapAsync = async function(){
+
+                    await origMapAsync.apply(this, arguments);
+
+                    const origGetRange = this.getMappedRange;
+
+                    this.getMappedRange = function(){
+
+                        const raw = origGetRange.apply(this, arguments);
+                        const view = new Uint8Array(raw);
+
+                        // 🔒 deterministic low-noise injection
+                        for (let i = 0; i < view.length; i++){
+                            view[i] += ((mixWebGPU(i ^ WEBGPU_SITE) % 3) - 1);
+                        }
+
+                        return view;
+                    };
+                };
+
+                return buffer;
+            };
+
+            return device;
+        };
+
+    })();
+    
     // ============================================================
     // 🎯 AUDIO
     // ============================================================
